@@ -7,6 +7,7 @@
 #include <magic_formula/io/model_routing.hpp>
 #include <magic_formula/io/tir_reader.hpp>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -114,8 +115,9 @@ namespace mf::io {
     }
 
     // Rule 6: recognised families that are not implemented.
-    const auto *const unsupported = std::ranges::find(UNSUPPORTED_FITTYP, code, &unsupported_fittyp::code);
-    if (unsupported != UNSUPPORTED_FITTYP.end()) {
+    const std::span<const unsupported_fittyp> unsupported_codes(UNSUPPORTED_FITTYP);
+    const auto unsupported = std::ranges::find(unsupported_codes, code, &unsupported_fittyp::code);
+    if (unsupported != unsupported_codes.end()) {
       return make_error(error_code::UNSUPPORTED_MODEL, std::string(unsupported->message), reader.locate("FITTYP"));
     }
 
