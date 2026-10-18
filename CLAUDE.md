@@ -19,15 +19,21 @@ C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19) · CMake >= 4.0 · Cona
 The architect may refine this layout. If they do, update this file and the affected skills in the same PR.
 
 ```
-include/magic_formula/   public headers (core, coverage-gated)
+include/magic_formula/   public headers (core, coverage-gated); sub-directories io/ (mf::io), cli/ (mf::cli),
+                         detail/ (mf::detail, internal but under include/ so tests can include it; coverage-gated)
 src/                     library sources -> static library `mflib` (alias `mf::mflib`; core, coverage-gated;
-                         every src/**/*.cpp except src/app/)
-src/app/                 CLI entry point -> executable `mf` (inside src/: coverage-gated, covered by module tests)
+                         every src/**/*.cpp except src/app/): model/ (core formulations), io/, detail/,
+                         cli/ (CLI driver mf::cli, compiled into mflib so module tests run it in-process)
+src/app/                 only main.cpp (one call into mf::cli::run) -> executable `mf` (inside src/: coverage-gated,
+                         covered by the CTest process tests)
 tests/unit/              unit tests (CTest label: unit)
 tests/module/            module/integration tests (CTest label: module), incl. the CLI smoke test
+tests/support/           header-only test helpers (fixtures.hpp, namespace mf::test); not a test, not globbed
 tests/data/              .tir files, input tables, reference outputs (with origin notes)
 bench/                   Google Benchmark (mf_bench; not wired yet)
-docs/research/           researcher findings (cited source of truth for equations)
+docs/architecture.md     architecture: layers, class hierarchy, pipeline, error model, "Extending to MF 6.x"
+docs/research/           researcher findings (cited source of truth for equations); decisions.md = architect
+                         sign-off table (AD-xx) for the [policy] items
 cmake/                   ClangFormat, ClangTidy, Coverage (verbatim from ariel-avi/lab/cpp/cmake; change the lab first);
                          MfCompileOptions, MfTesting (project glue)
 .clang-format, .clang-tidy  verbatim copies of ariel-avi/lab/cpp/*

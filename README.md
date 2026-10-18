@@ -19,7 +19,7 @@ conan install . --build=missing -s build_type=Debug -s compiler.cppstd=26
 cmake --preset debug
 cmake --build --preset debug
 ctest --preset debug --output-on-failure
-./build/debug/mf                    # prints "mf 0.1.0"
+./build/debug/mf --version          # prints "mf 0.1.0"
 ```
 
 ## Code quality and coverage
@@ -34,15 +34,78 @@ The coverage target runs the tests and gcovr with a 100% line and branch gate on
 
 CI (`.github/workflows/ci.yml`) runs the format/tidy gates, builds and tests with GCC 14 and Clang 19, and runs the coverage gate with GCC 14.
 
-## Usage
-
-The CLI currently prints its version (`mf 0.1.0`). The two-file interface comes with the first model feature:
+## CLI
 
 ```bash
-mf <simulation-inputs-file> <tire-property-file.tir>
+mf [--uncombined] [--verbose] <inputs-table> <file.tir>
+mf --help | -h
+mf --version
 ```
 
-See `CLAUDE.md` and `docs/` for the architecture once they are in place.
+`mf` evaluates the tire model described by `<file.tir>` at every row of `<inputs-table>` and prints Fx, Fy, Mz, Mx and My for every row as CSV on stdout.
+
+| Option | Meaning |
+|--------|---------|
+| `--uncombined` | print the pure-slip outputs (Fx0, Fy0, Mz0) instead of the combined-slip ones |
+| `--verbose` | print the model information and the ignored `.tir` keys on stderr |
+| `-h`, `--help` | print the usage text on stdout and exit |
+| `--version` | print the version on stdout and exit |
+
+### Models
+
+The model is chosen from the `.tir` file:
+
+- **PAC2002**: `PROPERTY_FILE_FORMAT = 'PAC2002'`.
+- **MF 5.2**: `FITTYP = 6`, with `PROPERTY_FILE_FORMAT` absent or one of `'MF_05'`, `'USER'` (TNO MF-Tyre ADAMS user-tire form) or `'MF-TYRE'`.
+
+MF 6.x and every other model give an error (see `docs/research/model-routing.md`). The policy decisions behind the loader and the models (defaults, required keys, units, clamping, low speed, ...) are signed off in [`docs/research/decisions.md`](docs/research/decisions.md).
+
+### Input table
+
+Plain text, one operating point per row:
+
+- A line whose first non-blank character is `#` is a comment; blank lines are ignored.
+- Fields are separated by any run of commas, blanks or tabs.
+- The first content line is the header. The required columns are `FZ SA SR IA VX`; the optional column is `P` (pressure). Columns may be in any order and in any letter case.
+- A column name may carry a unit in brackets; without a unit the SI unit applies: `FZ[N]`, `SA[rad|deg]`, `SR[-]`, `IA[rad|deg]`, `VX[m/s]`, `P[Pa]`.
+- `P` is read but ignored with a warning, because PAC2002 and MF 5.2 have no pressure input.
+- Every data row has exactly as many numbers as the header has columns.
+
+Example:
+
+```
+# Fz[N]  SA[deg]  SR  IA[deg]  Vx[m/s]
+FZ[N],SA[deg],SR[-],IA[deg],VX[m/s]
+4000,0,0,0,16.7
+4000,4,0,0,16.7
+3000,2,-0.1,1,25
+```
+
+### Output
+
+CSV on stdout. The header line is
+
+```
+FZ[N],SA[rad],SR[-],IA[rad],VX[m/s],FX[N],FY[N],MZ[N*m],MX[N*m],MY[N*m]
+```
+
+followed by one line per input row, in input order. The inputs are echoed unclamped in SI units (angles in rad), followed by the five outputs in the ISO W-axis sign convention (My is negative when the wheel rolls forward). Nothing is written to stdout unless every row evaluated successfully.
+
+### Diagnostics and exit codes
+
+Diagnostics go to stderr:
+
+- `mf: error: <file>:<line>: <message>` for a failure (`<file>:<line>` is omitted when there is no location).
+- `mf: warning: ...` for everything that does not stop the run: load warnings, the ignored `P` column, and one warning per variable when inputs were clamped to the `.tir` ranges or Vx is below `VXLOW` (it names the first table line and the number of rows).
+- `mf: info: ...` lines with `--verbose`.
+
+| Exit code | Meaning |
+|-----------|---------|
+| 0 | success (also `--help` and `--version`) |
+| 1 | error: file, model, input table or evaluation problem |
+| 2 | usage error (message and usage text on stderr) |
+
+See [`docs/architecture.md`](docs/architecture.md) for the architecture (layers, class hierarchy, evaluation pipeline, error model, and how to extend to MF 6.x) and `CLAUDE.md` for the project layout.
 
 ## Development with Claude Code agents
 

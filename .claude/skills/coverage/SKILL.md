@@ -8,7 +8,9 @@ user-invocable: true
 
 # Coverage
 
-Target: **100% line AND 100% branch coverage** on core sources: the library under `src/` and the public headers under `include/`. `src/app/` is inside `src/`, so it is gated and is covered by the CLI module test. `tests/`, `bench/` and third-party code are excluded from the gate (still built and tested). The gate runs in CI and blocks merge.
+Target: **100% line AND 100% branch coverage** on core sources: the library under `src/` and the public headers under `include/`. `src/app/` is inside `src/`, so it is gated and is covered by the CLI module test.
+
+`src/cli/` is compiled into `mflib` and covered in-process by tests (`tests/unit/cli_options_test.cpp`, `tests/module/cli_test.cpp`); `src/app/main.cpp` is covered by the CTest process tests in `tests/module/CMakeLists.txt` (`mf_cli_*`), which the coverage target runs. `tests/`, `bench/` and third-party code are excluded from the gate (still built and tested). The gate runs in CI and blocks merge.
 
 ## Run the gate
 
