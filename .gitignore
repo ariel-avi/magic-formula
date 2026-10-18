@@ -1,0 +1,33 @@
+# Build outputs (anchored to the repo root so e.g. .claude/skills/coverage/ is never ignored)
+/build/
+/cmake-build-*/
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+
+# Conan outputs
+conan_toolchain.cmake
+conanbuildinfo.*
+conanbuild.*
+conanrun.*
+deactivate_conan*.sh
+
+# Tooling caches / indexes
+.cache/
+compile_commands.json
+
+# Coverage
+*.gcda
+*.gcno
+*.profraw
+*.profdata
+/coverage/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Claude Code local overrides
+.claude/settings.local.json
