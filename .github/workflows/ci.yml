@@ -120,12 +120,16 @@ jobs:
         if: runner.os != 'macOS'
         run: conan install . --build=missing -s build_type=Debug -s compiler.cppstd=${{ matrix.cppstd }}
       # Homebrew's libc++ is keg-only: link against it (not the older system libc++) and find it at run time.
+      # Homebrew builds libc++ with vendor availability annotations ON, so libc++ 21 marks std::from_chars(double)
+      # unavailable for the macOS deployment target even though we link Homebrew's newer libc++.dylib
+      # ("'from_chars' is unavailable"). _LIBCPP_DISABLE_AVAILABILITY turns those annotations off.
       - name: Conan install (Debug, Homebrew libc++)
         if: runner.os == 'macOS'
         run: |
           LINKFLAGS="['-L/opt/homebrew/opt/llvm@21/lib/c++','-L/opt/homebrew/opt/llvm@21/lib/unwind','-lunwind','-Wl,-rpath,/opt/homebrew/opt/llvm@21/lib/c++']"
           conan install . --build=missing -s build_type=Debug -s compiler.cppstd=${{ matrix.cppstd }} \
-            -c "tools.build:exelinkflags=${LINKFLAGS}" -c "tools.build:sharedlinkflags=${LINKFLAGS}"
+            -c "tools.build:exelinkflags=${LINKFLAGS}" -c "tools.build:sharedlinkflags=${LINKFLAGS}" \
+            -c "tools.build:defines=['_LIBCPP_DISABLE_AVAILABILITY']"
       - name: Configure
         run: cmake --preset debug
       - name: Build

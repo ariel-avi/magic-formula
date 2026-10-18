@@ -60,9 +60,12 @@ export SDKROOT=$(xcrun --show-sdk-path)
 LINKFLAGS="['-L/opt/homebrew/opt/llvm@21/lib/c++','-L/opt/homebrew/opt/llvm@21/lib/unwind','-lunwind','-Wl,-rpath,/opt/homebrew/opt/llvm@21/lib/c++']"
 conan profile detect --force
 conan install . --build=missing -s build_type=Debug -s compiler.cppstd=26 \
-  -c "tools.build:exelinkflags=${LINKFLAGS}" -c "tools.build:sharedlinkflags=${LINKFLAGS}"
+  -c "tools.build:exelinkflags=${LINKFLAGS}" -c "tools.build:sharedlinkflags=${LINKFLAGS}" \
+  -c "tools.build:defines=['_LIBCPP_DISABLE_AVAILABILITY']"
 cmake --preset debug && cmake --build --preset debug && ctest --preset debug --output-on-failure
 ```
+
+`_LIBCPP_DISABLE_AVAILABILITY` is needed because Homebrew builds libc++ with vendor availability annotations enabled: libc++ 21 would otherwise mark `std::from_chars(double)` unavailable for the macOS deployment target, even though the build links Homebrew's newer `libc++.dylib`.
 
 `.gitattributes` forces LF line endings so test fixtures are byte-identical on every OS.
 
