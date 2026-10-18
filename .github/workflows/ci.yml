@@ -51,8 +51,6 @@ jobs:
           git diff --exit-code
       - name: clang-tidy gate
         run: cmake --build --preset debug --target clang-tidy_all
-      - name: clang-tidy gate (public headers)
-        run: git ls-files -- 'src/*.cpp' | xargs -r clang-tidy-19 -p build/debug --quiet --warnings-as-errors='*'
 
   build-test:
     name: Build and test (${{ matrix.compiler }})

@@ -19,7 +19,8 @@ Aligned with the lab `.clang-tidy` (`readability-identifier-naming`). Class/stru
 | Functions, methods | lower_case | `evaluate_batch`, `vertical_load` |
 | Variables, parameters (also const parameters), public members | lower_case | `vertical_load`, `slip_angle_rad` |
 | Private / protected members | lower_case + trailing `_` | `coefficients_` |
-| Constants: every `constexpr` or `const`-qualified variable held by value at any scope (including function-local and range-for copies), and enumerators | UPPER_CASE | `PI`, `DEFAULT_EPSILON`, `const double DFZ = ...;`, `status::OK` |
+| Constants: global, namespace-scope, static and member `constexpr` / `const` variables, and enumerators | UPPER_CASE | `PI`, `DEFAULT_EPSILON`, `status::OK` |
+| Function-local `constexpr` / `const` variables (`LocalConstantCase`) | lower_case | `const double dfz = ...;`, `constexpr double force_tol_n = 1e-6;` |
 | Const references and pointers-to-const | lower_case | `const auto& row` |
 | Template parameters | CamelCase + `_T` suffix | `Scalar_T`, `Model_T` |
 | Namespaces | lower_case | `mf`, `mf::io`, `mf::detail` |
@@ -53,7 +54,7 @@ A per-line `// NOLINT(readability-identifier-naming): <reason>` is also allowed.
 - Recoverable errors (parse failures, missing/invalid `.tir` keys, malformed input rows, unsupported model version): return `std::expected<T, mf::error>`, where `mf::error` carries a code, a message and a source location (file, line, key). Check every result; never call `.value()` without checking first.
 - Exceptions only at the application boundary (`src/app/`): `main` converts `mf::error` into a non-zero exit code and a message on stderr. The library throws nothing on its own except for allocation failures and contract violations.
 - Contract violations (programmer errors) use `assert`. Never use `[[assume]]` on data that comes from the user or a file.
-- Numerical guards (division by near-zero, `Vx -> 0`, `Fz <= 0`) are explicit, named (`EPSILON_V`, `EPSILON_X`, ...) and tested on both branches.
+- Numerical guards (division by near-zero, `Vx -> 0`, `Fz <= 0`) are explicit, named (file-scope `EPSILON_V`, `EPSILON_X`, ...; function-local ones are lower_case, e.g. `epsilon_v`) and tested on both branches.
 
 ## Ownership, values, const
 
@@ -76,7 +77,7 @@ A per-line `// NOLINT(readability-identifier-naming): <reason>` is also allowed.
 ## Eigen
 
 - Batch evaluation uses `Eigen::ArrayXd` (element-wise math) over all input rows. Use `Eigen::Matrix` only for real linear algebra.
-- **Never** bind an Eigen expression to `auto`; that keeps dangling temporaries / lazy expressions. Assign to a concrete type (`const Eigen::ArrayXd DFZ = (fz - fz0) / fz0;`) or call `.eval()`.
+- **Never** bind an Eigen expression to `auto`; that keeps dangling temporaries / lazy expressions. Assign to a concrete type (`const Eigen::ArrayXd dfz = (fz - fz0) / fz0;`) or call `.eval()`.
 - Watch aliasing: `a = a.transpose()`-style statements need `.eval()`. Matrix products assigned to an operand need `.noalias()` only when provably safe.
 - Pass Eigen objects by `const Eigen::Ref<const Eigen::ArrayXd>&` or `const Eigen::ArrayXd&`; never by value.
 - Branch-free vector code: use `.select()`, `.min()`, `.max()`, `.cwiseMin()` instead of per-element `if`. Still test both sides of every `select` (branch coverage counts the predicate's outcomes via tests, not via gcov).
@@ -87,7 +88,7 @@ A per-line `// NOLINT(readability-identifier-naming): <reason>` is also allowed.
 
 - One test file per class/unit: `tests/unit/<unit>_test.cpp`. Module (integration) tests: `tests/module/<feature>_test.cpp`. Registration is automatic: the build skeleton globs `tests/unit/*_test.cpp` and `tests/module/*_test.cpp` and registers each through `mf_add_test` with CTest label `unit` / `module` (target name = file stem). Do not edit CMakeLists.txt to register a test while implementing a packet (`agent-workflow`, "Build-file ownership"); a file that does not follow the naming is never registered, and its packet-scoped run selects 0 tests, which is a FAIL.
 - Name tests `TEST(class_name, Behaviour_Condition_Expectation)`, e.g. `TEST(pac2002_model, LateralForce_ZeroSlipAngle_EqualsVerticalShiftOnly)`. Use fixtures (`TEST_F`) for shared setup and parameterised tests (`TEST_P`) for tables of vectors.
-- Floating-point checks: `EXPECT_NEAR(actual, expected, tol)` with a named, documented tolerance (`constexpr double FORCE_TOL_N = 1e-6; // reference values printed with 9 significant digits`). No `EXPECT_EQ` on computed doubles.
+- Floating-point checks: `EXPECT_NEAR(actual, expected, tol)` with a named, documented tolerance (function-local `constexpr double force_tol_n = 1e-6; // reference values printed with 9 significant digits`, or `FORCE_TOL_N` at file scope). No `EXPECT_EQ` on computed doubles.
 - Reference data (`.tir` files, input tables, expected outputs) lives in `tests/data/`. Every file records its origin (source, tool/version, or "hand-computed, see test X") in a header comment or a sibling `README.md`. Find data paths through a CMake-provided define (`MF_TEST_DATA_DIR`), never through relative cwd paths.
 - Test every error path of every `std::expected` function, and both sides of every numerical guard.
 - Never disable or skip tests (`DISABLED_`, `GTEST_SKIP`) to get green; that is a blocker in review.
@@ -97,5 +98,5 @@ A per-line `// NOLINT(readability-identifier-naming): <reason>` is also allowed.
 
 - `.clang-format` is authoritative (`clang-format --dry-run --Werror` must be clean). Never hand-format against it.
 - `.clang-tidy` is a verbatim copy of `ariel-avi/lab/cpp/.clang-tidy` (change the lab first) and is authoritative. Enabled families: `bugprone-*`, `performance-*`, `readability-*`, `modernize-*`, `clang-analyzer-*`, `cppcoreguidelines-*`. Key exclusions: magic numbers, identifier length, trailing return type and `modernize-use-nodiscard` are off. CI runs it with warnings as errors. A `// NOLINT(<check>)` must name the check and give a reason, and the reviewer approves it.
-- Header-check caveat: the `clang-tidy_all` target does not check headers (its `-header-filter` never matches the absolute header paths), so run `clang-tidy -p build/debug` on the `.cpp` files with the config's `HeaderFilterRegex` (see `build-and-test`, "Static checks").
+- Headers: `clang-tidy_all` checks project headers too; header selection is left to the config's `HeaderFilterRegex` (the target passes no `-header-filter`).
 - Doc comments: `///` on every public declaration. Say what the function computes, its units, its preconditions, and the literature equation it implements (`/// Implements <source>, eq. <n> (see docs/research/<topic>.md)`), when the researcher has supplied one.

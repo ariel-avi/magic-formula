@@ -70,7 +70,7 @@ git ls-files --cached --others --exclude-standard -- 'src/*.cpp' | xargs -r clan
 
 CMake targets from the lab templates (configured in the root `CMakeLists.txt`):
 
-- `clang-tidy_all` runs clang-tidy on `mflib` and `mf`. Configure with `-DCLANG_TIDY_EXE="clang-tidy;--warnings-as-errors=*"` to fail on warnings. It checks `.cpp` files only (its `-header-filter` never matches absolute header paths), so the `xargs` command above (which uses the `.clang-tidy` header filter) stays the header check.
+- `clang-tidy_all` runs clang-tidy on `mflib` and `mf`. Configure with `-DCLANG_TIDY_EXE="clang-tidy;--warnings-as-errors=*"` to fail on warnings. Project headers are checked too: the target passes no `-header-filter`, so header selection comes from `HeaderFilterRegex` in `.clang-tidy`. The `xargs` command above is the equivalent read-only check.
 - `clang-format_all` formats files IN PLACE. It is for developers only, never for test-runner; test-runner uses the `--dry-run --Werror` command above.
 
 - `xargs -r` (GNU and BSD) skips the command when the list is empty, so nothing runs on empty stdin.
