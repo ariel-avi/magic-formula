@@ -4,6 +4,13 @@ project(magic_formula VERSION 0.1.0 LANGUAGES CXX)
 
 # Set after project(): the Conan toolchain sets the standard while project() runs, and these values must win.
 set(CMAKE_CXX_STANDARD 26)
+# CMake 4.2 knows no C++26 flag for MSVC (Modules/Compiler/MSVC-CXX.cmake stops at -std:c++latest = 23) and none for
+# AppleClang (AppleClang-CXX.cmake stops at -std=c++2b). Fall back to 23 there; GCC >= 14 and Clang >= 17 define the
+# option and keep -std=c++26. The code uses no C++26-only language feature.
+if (NOT DEFINED CMAKE_CXX26_STANDARD_COMPILE_OPTION)
+    message(STATUS "CMake has no C++26 flag for ${CMAKE_CXX_COMPILER_ID}; using C++23")
+    set(CMAKE_CXX_STANDARD 23)
+endif ()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

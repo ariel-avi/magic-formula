@@ -18,6 +18,8 @@ class MagicFormulaConan(ConanFile):
 
     def generate(self):
         CMakeDeps(self).generate()
-        toolchain = CMakeToolchain(self)
+        # CMakePresets.json hard-codes Ninja for every OS. Without this Conan defaults to the Visual Studio generator
+        # for msvc and writes CMAKE_GENERATOR_PLATFORM/TOOLSET, which Ninja rejects. No effect on Linux and macOS.
+        toolchain = CMakeToolchain(self, generator="Ninja")
         toolchain.user_presets_path = False  # CMakePresets.json is maintained by hand
         toolchain.generate()

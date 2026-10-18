@@ -9,7 +9,7 @@ A C++26 library and command-line tool for **Pacejka Magic Formula tire models**.
 
 ## Requirements
 
-CMake >= 4.0, Ninja, Conan 2 (>= 2.9), and GCC >= 14 or Clang >= 19 (C++26). Conan provides GoogleTest; Eigen and Google Benchmark are added with the first code that uses them. Coverage needs gcovr 8.x; GCC needs `gcov-<N>`, Clang needs `llvm-cov` and `libclang-rt-<N>-dev`.
+CMake >= 4.0, Ninja, Conan 2 (>= 2.9), and GCC >= 14 or Clang >= 19 (C++26). Windows (MSVC 19.4x, built as C++23) and macOS (Homebrew LLVM 21) are supported too, see "Platform support" below. Conan provides GoogleTest; Eigen and Google Benchmark are added with the first code that uses them. Coverage needs gcovr 8.x; GCC needs `gcov-<N>`, Clang needs `llvm-cov` and `libclang-rt-<N>-dev`.
 
 ## Build and test
 
@@ -32,7 +32,39 @@ cmake --preset coverage && cmake --build --preset coverage && cmake --build --pr
 
 The coverage target runs the tests and gcovr with a 100% line and branch gate on `src/` and `include/`; reports are written to `coverage/`.
 
-CI (`.github/workflows/ci.yml`) runs the format/tidy gates, builds and tests with GCC 14 and Clang 19, and runs the coverage gate with GCC 14.
+CI (`.github/workflows/ci.yml`) runs the format/tidy gates, builds and tests on Linux (GCC 14, Clang 19), Windows (MSVC, `windows-2025`) and macOS (`macos-15`, Homebrew LLVM 21), and runs the coverage gate with GCC 14 on Linux.
+
+## Platform support
+
+| Platform | Compiler | C++ standard | Notes |
+|----------|----------|--------------|-------|
+| Linux | GCC >= 14, Clang >= 19 | C++26 | the reference platform; the coverage gate runs here |
+| Windows | MSVC (Visual Studio 2022, v143) | C++23 (`/std:c++latest`) | Conan's msvc settings stop at `cppstd=23` and CMake has no C++26 flag for MSVC; the root `CMakeLists.txt` falls back to 23 automatically. Configure from an MSVC developer prompt (Ninja generator). |
+| macOS | Homebrew LLVM 21 (`brew install llvm@21`) | C++26 | AppleClang is not supported: its libc++ lacks floating-point `std::from_chars` and `std::views::join_with`. Link against Homebrew's libc++ (flags below). |
+
+Windows (Developer PowerShell for VS 2022):
+
+```powershell
+conan profile detect --force
+conan install . --build=missing -s build_type=Debug -s compiler.cppstd=23
+cmake --preset debug
+cmake --build --preset debug
+ctest --preset debug --output-on-failure
+```
+
+macOS (Homebrew LLVM 21):
+
+```bash
+export CC=/opt/homebrew/opt/llvm@21/bin/clang CXX=/opt/homebrew/opt/llvm@21/bin/clang++
+export SDKROOT=$(xcrun --show-sdk-path)
+LINKFLAGS="['-L/opt/homebrew/opt/llvm@21/lib/c++','-L/opt/homebrew/opt/llvm@21/lib/unwind','-lunwind','-Wl,-rpath,/opt/homebrew/opt/llvm@21/lib/c++']"
+conan profile detect --force
+conan install . --build=missing -s build_type=Debug -s compiler.cppstd=26 \
+  -c "tools.build:exelinkflags=${LINKFLAGS}" -c "tools.build:sharedlinkflags=${LINKFLAGS}"
+cmake --preset debug && cmake --build --preset debug && ctest --preset debug --output-on-failure
+```
+
+`.gitattributes` forces LF line endings so test fixtures are byte-identical on every OS.
 
 ## CLI
 
