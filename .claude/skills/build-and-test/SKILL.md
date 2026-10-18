@@ -16,10 +16,13 @@ All commands run from the repository root. Presets are defined in `CMakePresets.
 | Tool | Minimum | Check |
 |------|---------|-------|
 | CMake | 4.0 | `cmake --version` |
-| Conan | 2.x | `conan --version` |
+| Ninja | 1.10 | `ninja --version` |
+| Conan | >= 2.9 | `conan --version` |
 | Compiler (C++26) | GCC 14 or Clang 19 | `g++ --version` / `clang++ --version` |
-| gcovr (coverage only) | 7.x | `gcovr --version` |
-| clang-format / clang-tidy | matching the repo `.clang-format` / `.clang-tidy` | `clang-format --version` |
+| gcovr (coverage only) | 8.x | `gcovr --version` |
+| clang-format / clang-tidy | 19 (as CI; 18 may differ) | `clang-format --version` |
+
+The lab templates' `find_program` lists stop at clang-format-17 / clang-tidy-18, so pass `-DCLANG_FORMAT_EXE=<exe>` / `-DCLANG_TIDY_EXE=<exe>` at configure time for versioned binaries (e.g. `clang-format-19`). Clang coverage builds also need `libclang-rt-<N>-dev`.
 
 A missing or too-old tool is reported as `BLOCKED: <tool> <found version> < <required>`; do not try to install or work around it.
 
@@ -61,9 +64,14 @@ Rules: never pass `--gtest_filter` to hide failing tests, never set `GTEST_SKIP`
 # File lists include tracked AND new untracked (not ignored) files: workflow changes are uncommitted.
 git ls-files --cached --others --exclude-standard -- '*.hpp' '*.cpp' | wc -l        # must be > 0
 git ls-files --cached --others --exclude-standard -- '*.hpp' '*.cpp' | xargs -r clang-format --dry-run --Werror
-git ls-files --cached --others --exclude-standard -- 'src/*.cpp' 'app/*.cpp' | wc -l # must be > 0
-git ls-files --cached --others --exclude-standard -- 'src/*.cpp' 'app/*.cpp' | xargs -r clang-tidy -p build/debug --quiet
+git ls-files --cached --others --exclude-standard -- 'src/*.cpp' | wc -l            # must be > 0 (the pathspec * also matches /, so src/app/main.cpp is included)
+git ls-files --cached --others --exclude-standard -- 'src/*.cpp' | xargs -r clang-tidy -p build/debug --quiet
 ```
+
+CMake targets from the lab templates (configured in the root `CMakeLists.txt`):
+
+- `clang-tidy_all` runs clang-tidy on `mflib` and `mf`. Configure with `-DCLANG_TIDY_EXE="clang-tidy;--warnings-as-errors=*"` to fail on warnings. It checks `.cpp` files only (its `-header-filter` never matches absolute header paths), so the `xargs` command above (which uses the `.clang-tidy` header filter) stays the header check.
+- `clang-format_all` formats files IN PLACE. It is for developers only, never for test-runner; test-runner uses the `--dry-run --Werror` command above.
 
 - `xargs -r` (GNU and BSD) skips the command when the list is empty, so nothing runs on empty stdin.
 - An **empty file list is never a PASS**. Report it under `### Static checks` as `- clang-format: no files matched (not run)` (or `clang-tidy: …`). A requested check that matched no files makes the status `FAIL`, unless the caller stated that no C++ sources exist yet.

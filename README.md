@@ -9,24 +9,40 @@ A C++26 library and command-line tool for **Pacejka Magic Formula tire models**.
 
 ## Requirements
 
-CMake >= 4.0, Conan 2, and GCC >= 14 or Clang >= 19 (C++26). Conan provides Eigen, GoogleTest and Google Benchmark.
+CMake >= 4.0, Ninja, Conan 2 (>= 2.9), and GCC >= 14 or Clang >= 19 (C++26). Conan provides GoogleTest; Eigen and Google Benchmark are added with the first code that uses them. Coverage needs gcovr 8.x; GCC needs `gcov-<N>`, Clang needs `llvm-cov` and `libclang-rt-<N>-dev`.
 
 ## Build and test
 
 ```bash
+conan profile detect --force        # once per machine
 conan install . --build=missing -s build_type=Debug -s compiler.cppstd=26
 cmake --preset debug
 cmake --build --preset debug
 ctest --preset debug --output-on-failure
+./build/debug/mf                    # prints "mf 0.1.0"
 ```
+
+## Code quality and coverage
+
+```bash
+cmake --build --preset debug --target clang-format_all   # formats in place
+cmake --build --preset debug --target clang-tidy_all
+cmake --preset coverage && cmake --build --preset coverage && cmake --build --preset coverage --target coverage
+```
+
+The coverage target runs the tests and gcovr with a 100% line and branch gate on `src/` and `include/`; reports are written to `coverage/`.
+
+CI (`.github/workflows/ci.yml`) runs the format/tidy gates, builds and tests with GCC 14 and Clang 19, and runs the coverage gate with GCC 14.
 
 ## Usage
 
+The CLI currently prints its version (`mf 0.1.0`). The two-file interface comes with the first model feature:
+
 ```bash
-<cli> <simulation-inputs-file> <tire-property-file.tir>
+mf <simulation-inputs-file> <tire-property-file.tir>
 ```
 
-The executable name and the input table format are defined by the architecture. See `CLAUDE.md` and `docs/` once they are in place.
+See `CLAUDE.md` and `docs/` for the architecture once they are in place.
 
 ## Development with Claude Code agents
 

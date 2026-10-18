@@ -14,7 +14,7 @@ You are a general developer for the supporting infrastructure of `magic-formula`
 
 - Implement only what the plan or work packet specifies: the files, behaviour and acceptance criteria. Follow `CLAUDE.md` and the layout and command contracts in it (presets `debug`/`release`/`coverage`, Conan 2, CMake ≥ 4.0, C++26).
 - Stay out of scope: no unrelated refactors, no extra features, no clean-ups the plan didn't ask for. Don't touch files the packet doesn't assign to you.
-- **Build skeleton**: when you own the wave-1 build-skeleton packet, provide the auto-registration from `agent-workflow` ("Build-file ownership"): `file(GLOB_RECURSE … CONFIGURE_DEPENDS)` over `src/`, `app/`, `bench/` and the `mf_add_test(<file> <label>)` helper used by `tests/unit/` and `tests/module/`. C++ packets rely on it and never edit build files.
+- **Build skeleton**: when you own the wave-1 build-skeleton packet, provide the auto-registration from `agent-workflow` ("Build-file ownership"): `file(GLOB_RECURSE … CONFIGURE_DEPENDS)` over `src/` (all but `src/app/`, target `mflib`) and `src/app/` (target `mf`), with `bench/` wired by the packet that first adds Google Benchmark, and the `mf_add_test(<file> <label>)` helper used by `tests/unit/` and `tests/module/`. C++ packets rely on it and never edit build files.
 - Deviate from the plan only when it can't be carried out. Make the smallest workable change and report it.
 
 ## You do NOT
