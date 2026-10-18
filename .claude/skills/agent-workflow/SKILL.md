@@ -55,7 +55,7 @@ argument-hint: "[feature <request> | review [scope]]"
 | Decompose request, dispatch, verify the result against the request, report to the user | `orchestrator` (main thread; never implements) |
 | System/class design, patterns, interfaces, error/perf/test strategy | `architect` |
 | Turn the architecture into ordered work packets and dispatch them | `planner` |
-| C++ in `include/`, `src/`, `app/`, `tests/`, `bench/` (never build files during Implement; new files are auto-registered, see "Build-file ownership") | `cpp-developer` |
+| C++ in `include/`, `src/` (incl. `src/app/`), `tests/`, `bench/` (never build files during Implement; new files are auto-registered, see "Build-file ownership") | `cpp-developer` |
 | CMake/Conan glue (incl. the wave-1 skeleton with auto-registration), scripts, GitHub Actions, hooks, PR template, docs, research notes, git/PR mechanics | `general-developer` (exception: minimal build-file changes inside Verify-phase / test-failure fixes belong to `cpp-developer`, see below) |
 | Build, ctest, coverage gate, benchmarks, clang-format/tidy checks | `test-runner` |
 | Find files, map classes/inheritance/patterns/call sites; all reading for the researcher (papers/PDFs/web pages, repo files, `docs/research/`) | `project-explorer` |
@@ -104,8 +104,8 @@ Packets in one wave run in parallel on **one working tree** (disjoint file sets,
 One rule, stated the same way in `cpp-developer`, `planner`, `cpp-conventions` and the `feature` planner prompt:
 
 - The **wave-1 build-skeleton packet** (owner `general-developer`; planned once, when the repo has no build skeleton yet, then reused by every later feature) sets up auto-registration, so C++ packets never edit build files:
-  - library, CLI and benchmark sources come from `file(GLOB_RECURSE … CONFIGURE_DEPENDS)` over `src/`, `app/` and `bench/`;
-  - `cmake/` provides `mf_add_test(<file> <label>)`, which builds one executable per test file (target name = file stem, e.g. `pac2002_fy_test`), links the library and `GTest::gtest_main`, defines `MF_TEST_DATA_DIR`, and calls `gtest_discover_tests(… PROPERTIES LABELS <label>)`;
+  - library sources come from `file(GLOB_RECURSE … CONFIGURE_DEPENDS)` over `src/` (all but `src/app/`, target `mflib`), the CLI from `src/app/` (target `mf`); `bench/` is wired by the packet that first adds Google Benchmark;
+  - `cmake/MfTesting.cmake` provides `mf_add_test(<file> <label>)`, which builds one executable per test file (target name = file stem, e.g. `pac2002_fy_test`), links the library and `GTest::gtest_main`, defines `MF_TEST_DATA_DIR`, and calls `gtest_discover_tests(… PROPERTIES LABELS <label>)`;
   - `tests/unit/CMakeLists.txt` and `tests/module/CMakeLists.txt` glob `*_test.cpp` (`CONFIGURE_DEPENDS`) and call `mf_add_test` with label `unit` / `module`.
 - **`cpp-developer` packets** (Implement phase) list only C++ sources, headers and tests, never a CMakeLists.txt, `cmake/` module, preset or Conan file. A new file is built and registered on the next configure because it sits at the path the packet names. So packets of one wave never share a build file.
 - A build change the skeleton cannot provide (new dependency, new target kind, compile definition) is a separate `general-developer` packet in an earlier wave than the packets that need it. A developer who finds it missing reports a blocker and does not edit the file.

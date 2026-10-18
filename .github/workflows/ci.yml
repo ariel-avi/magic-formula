@@ -1,0 +1,149 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  quality:
+    name: Quality (clang-format, clang-tidy)
+    runs-on: ubuntu-24.04
+    env:
+      CC: clang-19
+      CXX: clang++-19
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install build tools
+        run: |
+          python -m pip install "cmake>=4.0,<5" "conan>=2,<3" ninja
+          cmake --version
+      - name: Install LLVM 19
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-19 clang-tidy-19 clang-format-19
+      - name: Cache Conan packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.conan2/p
+          key: conan-${{ runner.os }}-clang-19-${{ hashFiles('conanfile.py') }}
+          restore-keys: conan-${{ runner.os }}-clang-19-
+      - name: Conan install (Debug)
+        run: |
+          conan profile detect --force
+          conan install . --build=missing -s build_type=Debug -s compiler.cppstd=26
+      - name: Configure
+        run: cmake --preset debug -DCLANG_FORMAT_EXE=clang-format-19 "-DCLANG_TIDY_EXE=clang-tidy-19;--warnings-as-errors=*"
+      - name: clang-format gate
+        run: |
+          cmake --build --preset debug --target clang-format_all
+          git diff --exit-code
+      - name: clang-tidy gate
+        run: cmake --build --preset debug --target clang-tidy_all
+      - name: clang-tidy gate (public headers)
+        run: git ls-files -- 'src/*.cpp' | xargs -r clang-tidy-19 -p build/debug --quiet --warnings-as-errors='*'
+
+  build-test:
+    name: Build and test (${{ matrix.compiler }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gcc-14
+            cc: gcc-14
+            cxx: g++-14
+          - compiler: clang-19
+            cc: clang-19
+            cxx: clang++-19
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install build tools
+        run: |
+          python -m pip install "cmake>=4.0,<5" "conan>=2,<3" ninja
+          cmake --version
+      - name: Install Clang 19
+        if: matrix.compiler == 'clang-19'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-19
+      - name: Cache Conan packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.conan2/p
+          key: conan-${{ runner.os }}-${{ matrix.compiler }}-${{ hashFiles('conanfile.py') }}
+          restore-keys: conan-${{ runner.os }}-${{ matrix.compiler }}-
+      - name: Conan install (Debug)
+        run: |
+          conan profile detect --force
+          conan install . --build=missing -s build_type=Debug -s compiler.cppstd=26
+      - name: Configure
+        run: cmake --preset debug
+      - name: Build
+        run: cmake --build --preset debug
+      - name: Test (all)
+        run: ctest --preset debug
+      - name: Test (by label)
+        run: |
+          ctest --preset debug -L unit --no-tests=error
+          ctest --preset debug -L module --no-tests=error
+
+  coverage:
+    name: Coverage (gcc-14, 100% line and branch)
+    runs-on: ubuntu-24.04
+    env:
+      CC: gcc-14
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install build tools
+        run: |
+          python -m pip install "cmake>=4.0,<5" "conan>=2,<3" "gcovr>=8,<9" ninja
+          cmake --version
+          gcovr --version
+      - name: Cache Conan packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.conan2/p
+          key: conan-${{ runner.os }}-gcc-14-${{ hashFiles('conanfile.py') }}
+          restore-keys: conan-${{ runner.os }}-gcc-14-
+      - name: Conan install (Debug)
+        run: |
+          conan profile detect --force
+          conan install . --build=missing -s build_type=Debug -s compiler.cppstd=26
+      - name: Configure
+        run: cmake --preset coverage
+      - name: Build
+        run: cmake --build --preset coverage
+      - name: Coverage gate
+        run: cmake --build --preset coverage --target coverage
+      - name: Print uncovered lines
+        if: always()
+        run: cat coverage/summary.txt || true
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-report
+          path: coverage/
+          if-no-files-found: warn

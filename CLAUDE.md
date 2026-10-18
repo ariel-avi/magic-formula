@@ -20,16 +20,20 @@ The architect may refine this layout. If they do, update this file and the affec
 
 ```
 include/magic_formula/   public headers (core, coverage-gated)
-src/                     library sources (core, coverage-gated)
-app/                     CLI executable
+src/                     library sources -> static library `mflib` (alias `mf::mflib`; core, coverage-gated;
+                         every src/**/*.cpp except src/app/)
+src/app/                 CLI entry point -> executable `mf` (inside src/: coverage-gated, covered by module tests)
 tests/unit/              unit tests (CTest label: unit)
-tests/module/            module/integration tests (CTest label: module)
+tests/module/            module/integration tests (CTest label: module), incl. the CLI smoke test
 tests/data/              .tir files, input tables, reference outputs (with origin notes)
-bench/                   Google Benchmark (mf_bench)
+bench/                   Google Benchmark (mf_bench; not wired yet)
 docs/research/           researcher findings (cited source of truth for equations)
-cmake/                   CMake helper modules
-conanfile.py             dependencies
+cmake/                   ClangFormat, ClangTidy, Coverage (verbatim from ariel-avi/lab/cpp/cmake; change the lab first);
+                         MfCompileOptions, MfTesting (project glue)
+.clang-format, .clang-tidy  verbatim copies of ariel-avi/lab/cpp/*
+conanfile.py             dependencies (gtest; generators in build/conan/<build_type>)
 CMakePresets.json        configure/build/test presets: debug, release, coverage
+.github/workflows/ci.yml CI: quality (format/tidy), build-test (gcc-14, clang-19), coverage (gcc-14, 100/100)
 .claude/                 agents, skills, workflows, hooks, settings
 ```
 
@@ -40,10 +44,11 @@ conan install . --build=missing -s build_type=Debug -s compiler.cppstd=26
 cmake --preset debug
 cmake --build --preset debug
 ctest --preset debug --output-on-failure          # -L unit | -L module | -R <regex> (add --no-tests=error; 0 tests = FAIL)
-# coverage gate (see coverage skill for the full gcovr command)
-cmake --preset coverage && cmake --build --preset coverage && ctest --preset coverage
-gcovr --filter src/ --filter include/ --fail-under-line 100 --fail-under-branch 100 ...
-# benchmarks (Release conan install + release preset)
+cmake --build --preset debug --target clang-format_all   # formats in place; CI fails on any diff
+cmake --build --preset debug --target clang-tidy_all     # CI: -DCLANG_TIDY_EXE="clang-tidy-19;--warnings-as-errors=*"
+# coverage gate (see coverage skill): runs ctest + gcovr with the 100/100 thresholds; reports in coverage/
+cmake --preset coverage && cmake --build --preset coverage && cmake --build --preset coverage --target coverage
+# benchmarks (once bench/ exists; Release conan install + release preset)
 ./build/release/bench/mf_bench
 ```
 
@@ -77,7 +82,7 @@ The main thread runs as `orchestrator` (`.claude/settings.json`: `"agent": "orch
 
 - **Main flow:** orchestrator -> architect -> planner -> developer -> test-runner -> reviewer -> orchestrator.
 - **Short loop (encouraged):** developer -> test-runner -> developer -> reviewer -> developer. Limits: dev <-> test-runner max 3 rounds (the developer runs it); dev <-> reviewer max 2 rounds (the dispatcher runs it: the workflow script, or `planner` in direct mode; developers never call `reviewer`). Parallel packets build in their own `build/pkt-<id>` dirs.
-- **Build files:** the wave-1 skeleton packet (`general-developer`) auto-registers sources and `*_test.cpp` files (glob + `mf_add_test` helper with CTest labels). C++ packets never edit build files while implementing; see `agent-workflow`, "Build-file ownership".
+- **Build files:** the build skeleton exists: the root `CMakeLists.txt` globs sources and `cmake/MfTesting.cmake` provides `mf_add_test`, which auto-registers `*_test.cpp` files with CTest labels. C++ packets never edit build files while implementing; see `agent-workflow`, "Build-file ownership".
 - **Git:** the `feature` workflow first has `general-developer` put the tree on a feature branch; the PR is opened by `general-developer` in a small ad-hoc workflow after APPROVE + PASS.
 - **Escalate to orchestrator only for:** blockers, plan-level defects, or a review verdict still open after the max rounds.
 - **Saved workflows** (`.claude/workflows/`), run with the Workflow tool by name: Workflow tool `feature` (args `{ request, branch? }`, the full design -> plan -> implement -> verify -> review pipeline) and Workflow tool `review` (args `{ scope? }`, parallel tests + review with a fix loop). Do not use the slash form `/review`: it is Claude Code's built-in review command. Ad-hoc workflow scripts are written when neither fits.

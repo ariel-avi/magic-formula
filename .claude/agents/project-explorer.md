@@ -1,6 +1,6 @@
 ---
 name: project-explorer
-description: 'Use this agent to explore the repository and return only the important facts, which keeps the caller''s context lean. It finds files and works out class and implementation structure, inheritance, patterns and call sites. It is also the designated READER for `researcher`: it reads papers, PDFs and web pages it is pointed to and extracts only the specific information asked for (equations, coefficient definitions, tables) with exact source locations. Read-only. Examples: "Which classes derive from mf::TireModel and which virtuals do they override?" or "From the PAC2002 doc at <url>, extract the Fy0 pure-slip equations and the definition of PKY1-PKY5, with page/eq numbers."'
+description: 'Use this agent to explore the repository and return only the important facts, which keeps the caller''s context lean. It finds files and works out class and implementation structure, inheritance, patterns and call sites. It is also the designated READER for `researcher`: it reads papers, PDFs and web pages it is pointed to and extracts only the specific information asked for (equations, coefficient definitions, tables) with exact source locations. Read-only. Examples: "Which classes derive from mf::tire_model and which virtuals do they override?" or "From the PAC2002 doc at <url>, extract the Fy0 pure-slip equations and the definition of PKY1-PKY5, with page/eq numbers."'
 model: haiku
 tools: Read, Glob, Grep, Bash, WebFetch, WebSearch
 color: yellow

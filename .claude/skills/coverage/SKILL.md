@@ -8,7 +8,7 @@ user-invocable: true
 
 # Coverage
 
-Target: **100% line AND 100% branch coverage** on core sources: the library under `src/` and the public headers under `include/`. `app/`, `tests/`, `bench/` and third-party code are excluded from the gate (still built and tested). The gate runs in CI and blocks merge.
+Target: **100% line AND 100% branch coverage** on core sources: the library under `src/` and the public headers under `include/`. `src/app/` is inside `src/`, so it is gated and is covered by the CLI module test. `tests/`, `bench/` and third-party code are excluded from the gate (still built and tested). The gate runs in CI and blocks merge.
 
 ## Run the gate
 
@@ -16,27 +16,32 @@ Target: **100% line AND 100% branch coverage** on core sources: the library unde
 conan install . --build=missing -s build_type=Debug -s compiler.cppstd=26
 cmake --preset coverage
 cmake --build --preset coverage
-ctest --preset coverage --output-on-failure
-mkdir -p coverage
-gcovr --root . --object-directory build/coverage \
-      --filter 'src/' --filter 'include/' \
-      --exclude-unreachable-branches --exclude-throw-branches \
-      --fail-under-line 100 --fail-under-branch 100 \
-      --txt coverage/summary.txt --txt-metric branch \
-      --html-details coverage/index.html \
-      --xml coverage/coverage.xml --print-summary
+cmake --build --preset coverage --target coverage
 ```
 
-- Exit code non-zero = gate FAIL (either threshold missed or tests failed).
-- GCC: if the default `gcov` does not match the compiler, add `--gcov-executable gcov-14` (match the GCC major version).
-- Clang: add `--gcov-executable "llvm-cov gcov"`. The `coverage` preset defines the instrumentation flags (`--coverage` / `-O0 -g`); do not add flags on the command line.
+The `coverage` target (from `cmake/Coverage.cmake`, configured in the root `CMakeLists.txt`) deletes stale `.gcda` files, runs ctest, then runs gcovr from the repository root on `build/coverage` with the `src/` and `include/` filters, `--exclude-unreachable-branches --exclude-throw-branches` and `--fail-under-line 100 --fail-under-branch 100`. It writes `coverage/summary.txt` (line metric), `coverage/index.html` and `coverage/coverage.xml`.
+
+- Exit code non-zero = gate FAIL (a test failed or a threshold was missed).
+- The gcov tool is matched to the compiler automatically (`gcov-<major>` for GCC, `llvm-cov-<major> gcov` for Clang). Override with `-DGCOV_EXE=...`, `-DLLVM_COV_EXE=...` or `-DGCOVR_EXE=...` at configure time. The `coverage` preset defines the instrumentation flags (`--coverage` / `-O0 -g`); do not add flags on the command line. Clang coverage builds also need the profile runtime (`libclang-rt-<N>-dev` on Ubuntu); without it the coverage preset fails at link.
+- Filters and thresholds live in the root `CMakeLists.txt` `add_coverage_target` call.
 - `--exclude-unreachable-branches` drops compiler-generated branches on lines that contain no source code (e.g. closing braces); it does no reachability analysis. Exception-unwinding edges are dropped by `--exclude-throw-branches`. Neither exempts any source branch you wrote; every `if`, `?:`, `&&`, `||`, `switch` case and `std::expected` error path in core must be exercised by a test.
+
+To list uncovered branches without re-running the tests (from the repository root, after a coverage run):
+
+```bash
+gcovr --root . --object-directory build/coverage --gcov-executable gcov-14 \
+      --filter 'src/' --filter 'include/' \
+      --exclude-unreachable-branches --exclude-throw-branches \
+      --txt-metric branch --txt build/coverage/branches.txt build/coverage
+```
+
+For Clang use `--gcov-executable "llvm-cov-19 gcov"`.
 
 Use the gcovr version listed in the build-and-test prerequisites. Do not edit thresholds or filters to make a gate pass.
 
 ## Reporting uncovered code
 
-Read the `Missing` column of the text report (`coverage/summary.txt`, plus a line-metric run if needed: rerun with `--txt-metric line`). Report ONLY uncovered locations, grouped per file, as compact ranges:
+Read the `Missing` column of the text reports: `coverage/summary.txt` (lines) and the branch listing above (`build/coverage/branches.txt`). Report ONLY uncovered locations, grouped per file, as compact ranges:
 
 ```markdown
 ### Coverage
