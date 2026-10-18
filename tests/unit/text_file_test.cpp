@@ -53,6 +53,17 @@ TEST_F(read_text_file, ReadTextFile_Directory_ReturnsIoErrorWithFile) {
   EXPECT_EQ(result.error().where.file, directory_.string());
 }
 
+// On Linux /proc/self/mem opens, but reading offset 0 (never mapped) fails with EIO, so libstdc++ sets badbit and the
+// read-error branch reports it. Where /proc does not exist (macOS, Windows) the open fails; either way the result
+// is an IO error naming the path.
+TEST_F(read_text_file, ReadTextFile_ReadErrorAfterOpen_ReturnsIoErrorWithFile) {
+  const std::filesystem::path unreadable{"/proc/self/mem"};
+  const auto result = mf::io::read_text_file(unreadable);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code, mf::error_code::IO);
+  EXPECT_EQ(result.error().where.file, unreadable.string());
+}
+
 TEST_F(read_text_file, ReadTextFile_ExistingFile_ReturnsBytesExactly) {
   const std::string content("a\r\nb\0c", 6);
   write_binary(content);
