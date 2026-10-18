@@ -60,21 +60,19 @@ The file has no comment lines (it is a pure data CSV).
   only (QSY2-4 = 0); the fixture has zero curvature and shift coefficients, and all scale factors are 1.
   A stronger MFeval check on the MFeval example `.tir` (4496 CORE rows, all five channels within 1e-6) was run
   during validation but its inputs are third-party and its outputs are not committed.
-- **Licence (UNRESOLVED, provisional data):** the values are outputs of MFeval 4.0.0. Two licence texts
-  apply to the MFeval distribution, and they differ:
+- **Licence (decided, kept):** the values are outputs of MFeval 4.0.0. Two licence texts apply to the MFeval
+  distribution, and they differ:
   1. `mfeval_license.rights` in the MFeval folder: a BSD-3-Clause style notice, Copyright (c) 2020, Marco Furlan
      Tassara. All rights reserved. (reproduced below; the holder name in condition 3 is blank).
   2. `LICENSE.md` of the wrapper repository (mathworks/Simscape-Vehicle-Templates, commit `2c303195`), which
      adds that the content is "licensed to you solely for use in conjunction with MathWorks products".
-     This restriction is **not** covered by the BSD-3 notice below and may not permit redistributing MFeval
-     output in an unrelated open project.
 
-  **No licence interpretation has been chosen.** Which one applies to these computed numbers is the user's
-  decision, Q-07 in `docs/research/open-questions.md` (MFeval outputs are tracked there as an open item that
-  gates this file). Until the user decides and the decision is recorded (open-questions.md and an AD entry in
-  `docs/research/decisions.md`), `mf52_mfeval.csv` and `tests/module/mfeval_reference_test.cpp` are provisional:
-  they must be removed from the PR if the decision is not made or is negative. Nothing else in the tree depends
-  on them.
+  **Decision (user, 2026-10-18; Q-07a closed, AD-29):** keep `mf52_mfeval.csv` and
+  `tests/module/mfeval_reference_test.cpp` in the repository. Only numbers that MFeval computed on our own
+  synthetic fixture are committed; no MFeval code, `.tir` file or adapter is in the tree. The BSD-3 notice of
+  `mfeval_license.rights` is retained below as the attribution for those numbers and must stay with the data.
+  The decision is recorded in `docs/research/open-questions.md` (Q-07a) and `docs/research/decisions.md` (AD-29).
+  The other Q-07 items (MSC example values, Chrono data, MF52-EQM) are unaffected and remain out of the tree.
 
 ```
 Copyright (c) 2020, Marco Furlan Tassara

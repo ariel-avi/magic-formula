@@ -34,6 +34,7 @@ The user delegated the [policy] items that have no primary MSC/TNO source to the
 | AD-26 | The [impl] evidence tier for MF 5.2 is accepted (user decision). | Q-01 closed | - |
 | AD-27 | CLI: table and CSV formats as documented in the README "CLI" section and the `mf::cli` header; exit codes 0/1/2; stdout is all-or-nothing. | new | cli |
 | AD-28 | Fixture range values are synthetic (KPU +/-1.0, ALP +/-1.5, CAM +/-0.2, FZ 200..10000), not the MSC example values. | licence constraint | V19 |
+| AD-29 | The MFeval 4.0.0 outputs computed on our synthetic fixture (`tests/data/reference/mf52_mfeval.csv`, 190 rows) are kept in the repository, with the BSD-3 notice retained. User decision 2026-10-18. | Q-07a closed | `tests/module/mfeval_reference_test.cpp` |
 
 ## AD-20 lexical refinements
 
@@ -51,5 +52,5 @@ The user delegated the [policy] items that have no primary MSC/TNO source to the
 These items are implemented per the AD-xx above. A primary MSC/TNO source would trigger a change.
 
 - Q-02 (AD-04), Q-03 (AD-05), Q-05 (AD-06), Q-06 (AD-07), Q-10 (AD-17), Q-11, Q-12, Q-13 (AD-11), Q-15 (AD-08), Q-16 (AD-13): see open-questions.md.
-- Q-07 (licences) is a user decision and gates the later validation against reference implementations and vendor data.
+- Q-07 (licences) is a user decision. Q-07a (MFeval outputs on our synthetic fixture) is resolved by AD-29; the other items (MSC example values, Chrono data, MF52-EQM) stay open and out of the tree.
 - The architect's direct MFeval reads (Q-18: `readTIR.m:200`; Q-19: `Solver.m:648-682` and `:1142-1146`) should be confirmed by a later researcher pass.
