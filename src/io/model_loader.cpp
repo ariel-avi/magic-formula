@@ -1,0 +1,430 @@
+#include <array>
+#include <cstddef>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <magic_formula/detail/text.hpp>
+#include <magic_formula/error.hpp>
+#include <magic_formula/evaluation_types.hpp>
+#include <magic_formula/io/mf5x_bindings.hpp>
+#include <magic_formula/io/model_loader.hpp>
+#include <magic_formula/io/model_routing.hpp>
+#include <magic_formula/io/tir_document.hpp>
+#include <magic_formula/io/tir_reader.hpp>
+#include <magic_formula/io/units.hpp>
+#include <magic_formula/mf52_model.hpp>
+#include <magic_formula/mf5x_coefficients.hpp>
+#include <magic_formula/pac2002_model.hpp>
+#include <magic_formula/tire_model.hpp>
+#include <memory>
+#include <optional>
+#include <ranges>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+namespace mf::io {
+  namespace {
+    /// Result of a loading step that produces no value.
+    using status = std::expected<void, error>;
+
+    /// A PAC2002 file has either all 20 combined-slip R* keys or none (AD-07).
+    constexpr std::size_t COMBINED_KEY_COUNT = 20;
+
+    /// USE_MODE values from 0 up to (excluding) this limit are the documented ones; others only warn (AD-16).
+    constexpr int USE_MODE_LIMIT = 10;
+
+    /// The two keys of a validity range and the interval of `operating_limits` they fill (AD-15).
+    struct range_spec {
+      std::string_view min_key;
+      std::string_view max_key;
+      std::optional<interval> operating_limits::*member;
+    };
+
+    // clang-format off
+    /// The four validity ranges of the .tir file.
+    constexpr std::array<range_spec, 4> RANGES{
+        range_spec{.min_key = "FZMIN", .max_key = "FZMAX", .member = &operating_limits::fz_n},
+        range_spec{.min_key = "KPUMIN", .max_key = "KPUMAX", .member = &operating_limits::kappa},
+        range_spec{.min_key = "ALPMIN", .max_key = "ALPMAX", .member = &operating_limits::alpha_rad},
+        range_spec{.min_key = "CAMMIN", .max_key = "CAMMAX", .member = &operating_limits::gamma_rad},
+    };
+    // clang-format on
+
+    /// Keys that MF 5.2 files must carry although the model does not use their values (AD-12).
+    constexpr std::array<std::string_view, 2> MF52_DIMENSION_KEYS{"WIDTH", "RIM_RADIUS"};
+
+    // clang-format off
+    /// Format strings of the diagnostics that take arguments.
+    constexpr std::string_view ONLY_ONE_BOUND_MESSAGE = "only one of {}/{} given; the range is not applied (AD-15)";
+    constexpr std::string_view USE_MODE_MESSAGE =
+        "USE_MODE {} is echoed only; combined/uncombined is selected by the caller (AD-16)";
+    constexpr std::string_view DEFAULTED_MESSAGE = "{} coefficient(s) absent, defaulted to 0: {} (AD-14)";
+    // clang-format on
+
+    /// Everything the loading steps read and write.
+    struct load_state {
+      explicit load_state(const tir_document &document)
+          : reader(document), warnings(document.warnings().begin(), document.warnings().end()) {}
+
+      /// Typed, consumption-tracking access to the document.
+      tir_reader reader;
+      /// Warnings found so far; starts with the parse warnings of the document.
+      std::vector<warning> warnings;
+      /// Model chosen by `identify_model`.
+      model_kind kind = model_kind::PAC2002;
+      /// Parameters under construction.
+      mf5x_parameters parameters;
+      /// P/Q/S coefficient keys (and, for MF 5.2, R* keys) that were absent and keep the default 0 (AD-14).
+      std::vector<std::string> defaulted;
+      /// R* keys that were absent.
+      std::vector<std::string> missing_r;
+      /// PAC2002 combined-slip method (AD-07); always COSINE for MF 5.2.
+      combined_method method = combined_method::COSINE;
+    };
+
+    /// A model together with the facts that the final warnings need.
+    struct built_model {
+      std::unique_ptr<const tire_model> model;
+      bool eq88 = false;
+    };
+
+    /// Location that names only the file of the document.
+    location file_location(const tir_reader &reader) {
+      return location{.file = reader.document().file_name(), .line = 0, .key = std::string{}};
+    }
+
+    /// Appends a warning to the state.
+    void add_warning(load_state &state, std::string message, location where) {
+      // Built member by member: an aggregate initialiser adds cleanup branches that no test can take.
+      warning item;
+      item.message = std::move(message);
+      item.where = std::move(where);
+      state.warnings.push_back(std::move(item));
+    }
+
+    /// Reads one bound key into its member, or records that it is absent according to its role (AD-12, AD-14).
+    status bind_coefficient(load_state &state, const coefficient_binding &binding) {
+      const std::expected<std::optional<double>, error> result = state.reader.number(binding.key);
+      if (!result.has_value()) {
+        return std::unexpected<error>(result.error());
+      }
+      const std::optional<double> value = *result;
+      if (value.has_value()) {
+        mf5x_coefficients &coefficients = state.parameters.coefficients;
+        coefficients.*binding.member = *value;
+        return {};
+      }
+      if (binding.role == binding_role::REQUIRED) {
+        std::string message = std::format("required key {} is missing (AD-12)", binding.key);
+        return make_error(error_code::MISSING_KEY, std::move(message), state.reader.locate(binding.key));
+      }
+      if (binding.role == binding_role::COEFFICIENT) {
+        state.defaulted.emplace_back(binding.key);
+      } else if (binding.role == binding_role::COMBINED) {
+        state.missing_r.emplace_back(binding.key);
+      }
+      return {};
+    }
+
+    /// Binds every key of `bindings`; stops at the first error.
+    status bind_span(load_state &state, std::span<const coefficient_binding> bindings) {
+      for (const coefficient_binding &binding : bindings) {
+        if (const status result = bind_coefficient(state, binding); !result.has_value()) {
+          return result;
+        }
+      }
+      return {};
+    }
+
+    /// MF 5.2: one warning for the present keys that are not MF 5.2 parameters: the listed keys, in table order, then
+    /// every key of the foreign sections, in file order. The keys count as used (AD-19). The warning is located at the
+    /// first of them.
+    void warn_foreign_keys(load_state &state) {
+      std::vector<location> found;
+      for (const std::string_view key : mf52_foreign_keys()) {
+        if (state.reader.contains(key)) {
+          found.push_back(state.reader.locate(key));
+        }
+      }
+      for (const std::string_view section : mf52_foreign_sections()) {
+        const std::vector<location> section_keys = state.reader.take_section(section);
+        found.insert(found.end(), section_keys.begin(), section_keys.end());
+      }
+      if (!found.empty()) {
+        const std::vector<std::string> present =
+            found | std::views::transform(&location::key) | std::ranges::to<std::vector<std::string>>();
+        const std::string names = detail::join(present, ", ");
+        std::string message = std::format("MF 5.2 ignores parameters that are not part of MF 5.2: {} (AD-19)", names);
+        add_warning(state, std::move(message), found.front());
+      }
+    }
+
+    /// Step: the coefficient keys of the chosen model.
+    status bind_coefficients(load_state &state) {
+      if (const status common = bind_span(state, mf5x_common_bindings()); !common.has_value()) {
+        return common;
+      }
+      if (state.kind == model_kind::PAC2002) {
+        return bind_span(state, pac2002_camber_bindings());
+      }
+      warn_foreign_keys(state);
+      return {};
+    }
+
+    /// Step: the R* rule (AD-07 for PAC2002, AD-08 for MF 5.2).
+    status select_combined_method(load_state &state) {
+      if (state.kind == model_kind::MF52) {
+        state.defaulted.insert(state.defaulted.end(), state.missing_r.begin(), state.missing_r.end());
+        return {};
+      }
+      if (state.missing_r.empty()) {
+        return {};
+      }
+      if (state.missing_r.size() == COMBINED_KEY_COUNT) {
+        state.method = combined_method::FRICTION_ELLIPSE;
+        return {};
+      }
+      const std::string names = detail::join(state.missing_r, ", ");
+      std::string message = std::format("incomplete combined-slip coefficient set; missing: {} (AD-07)", names);
+      return make_error(error_code::MISSING_KEY, std::move(message), state.reader.locate(state.missing_r.front()));
+    }
+
+    /// Step: LONGVL is required only when the speed terms QSY3 or QSY4 use it (AD-13).
+    status read_longvl(load_state &state) {
+      const std::expected<std::optional<double>, error> result = state.reader.number("LONGVL");
+      if (!result.has_value()) {
+        return std::unexpected<error>(result.error());
+      }
+      const std::optional<double> value = *result;
+      mf5x_coefficients &coefficients = state.parameters.coefficients;
+      if (value.has_value()) {
+        coefficients.LONGVL = *value;
+        return {};
+      }
+      if (coefficients.QSY3 != 0.0 || coefficients.QSY4 != 0.0) {
+        std::string message = "LONGVL is required when QSY3 or QSY4 is non-zero (AD-13)";
+        return make_error(error_code::MISSING_KEY, std::move(message), state.reader.locate("LONGVL"));
+      }
+      return {};
+    }
+
+    /// Step: VXLOW, default 1 m/s (AD-05).
+    status read_vxlow(load_state &state) {
+      const std::expected<std::optional<double>, error> result = state.reader.number("VXLOW");
+      if (!result.has_value()) {
+        return std::unexpected<error>(result.error());
+      }
+      double &vxlow = state.parameters.limits.vxlow_mps;
+      vxlow = result->value_or(vxlow);
+      return {};
+    }
+
+    /// Reads the two keys of one validity range (AD-15): both give an interval, one gives a warning.
+    status read_range(load_state &state, const range_spec &spec) {
+      const std::expected<std::optional<double>, error> lower_result = state.reader.number(spec.min_key);
+      if (!lower_result.has_value()) {
+        return std::unexpected<error>(lower_result.error());
+      }
+      const std::expected<std::optional<double>, error> upper_result = state.reader.number(spec.max_key);
+      if (!upper_result.has_value()) {
+        return std::unexpected<error>(upper_result.error());
+      }
+      const std::optional<double> lower = *lower_result;
+      const std::optional<double> upper = *upper_result;
+      if (lower.has_value() && upper.has_value()) {
+        operating_limits &limits = state.parameters.limits;
+        limits.*spec.member = interval{.lower = *lower, .upper = *upper};
+      } else if (lower.has_value() != upper.has_value()) {
+        const std::string_view given = lower.has_value() ? spec.min_key : spec.max_key;
+        std::string message = std::format(ONLY_ONE_BOUND_MESSAGE, spec.min_key, spec.max_key);
+        add_warning(state, std::move(message), state.reader.locate(given));
+      }
+      return {};
+    }
+
+    /// Step: the four validity ranges.
+    status read_ranges(load_state &state) {
+      for (const range_spec &spec : RANGES) {
+        if (const status result = read_range(state, spec); !result.has_value()) {
+          return result;
+        }
+      }
+      return {};
+    }
+
+    /// Step: FITTYP and USE_MODE (echoed only, AD-16).
+    status read_metadata(load_state &state) {
+      model_metadata &metadata = state.parameters.metadata;
+      // identify_model has already rejected a FITTYP that is not an integer, so no error can occur here.
+      const std::expected<std::optional<int>, error> fittyp = state.reader.integer("FITTYP");
+      metadata.fittyp = fittyp.value_or(std::optional<int>{});
+
+      const std::expected<std::optional<int>, error> use_mode_result = state.reader.integer("USE_MODE");
+      if (!use_mode_result.has_value()) {
+        return std::unexpected<error>(use_mode_result.error());
+      }
+      const std::optional<int> use_mode = *use_mode_result;
+      metadata.use_mode = use_mode;
+      if (use_mode.has_value() && (*use_mode < 0 || *use_mode >= USE_MODE_LIMIT)) {
+        std::string message = std::format(USE_MODE_MESSAGE, *use_mode);
+        add_warning(state, std::move(message), state.reader.locate("USE_MODE"));
+      }
+      return {};
+    }
+
+    /// Step: TYRESIDE; LEFT is the default, RIGHT warns because nothing is mirrored (AD-06).
+    status read_tyreside(load_state &state) {
+      const std::optional<std::string_view> text = state.reader.text("TYRESIDE");
+      if (!text.has_value()) {
+        return {};
+      }
+      const std::string_view side = detail::trim(*text);
+      if (detail::iequals_ascii(side, "LEFT")) {
+        return {};
+      }
+      if (detail::iequals_ascii(side, "RIGHT")) {
+        state.parameters.metadata.side = tyre_side::RIGHT;
+        std::string message = "TYRESIDE 'RIGHT': no mirroring is applied (AD-06)";
+        add_warning(state, std::move(message), state.reader.locate("TYRESIDE"));
+        return {};
+      }
+      std::string message = std::format("TYRESIDE '{}' is not implemented; only LEFT or RIGHT (AD-06)", side);
+      return make_error(error_code::NOT_IMPLEMENTED, std::move(message), state.reader.locate("TYRESIDE"));
+    }
+
+    /// Step: FE_METHOD is not an MSC key and is ignored (AD-07).
+    status warn_fe_method(load_state &state) {
+      if (state.reader.contains("FE_METHOD")) {
+        std::string message = "FE_METHOD is not an MSC key and is ignored (AD-07)";
+        add_warning(state, std::move(message), state.reader.locate("FE_METHOD"));
+      }
+      return {};
+    }
+
+    /// Step: MF 5.2 files must carry WIDTH and RIM_RADIUS (AD-12); the values are not used.
+    status require_mf52_dimensions(load_state &state) {
+      if (state.kind != model_kind::MF52) {
+        return {};
+      }
+      for (const std::string_view key : MF52_DIMENSION_KEYS) {
+        const std::expected<std::optional<double>, error> result = state.reader.number(key);
+        if (!result.has_value()) {
+          return std::unexpected<error>(result.error());
+        }
+        if (!result->has_value()) {
+          std::string message = std::format("required key {} is missing for MF 5.2 (AD-12)", key);
+          return make_error(error_code::MISSING_KEY, std::move(message), state.reader.locate(key));
+        }
+      }
+      return {};
+    }
+
+    /// A loading step: reads keys, fills the state and may fail.
+    using load_step = status (*)(load_state &state);
+
+    // clang-format off
+    /// The steps after model identification, in the order of `load_tire_model`.
+    constexpr std::array<load_step, 9> STEPS{
+        bind_coefficients,
+        select_combined_method,
+        read_longvl,
+        read_vxlow,
+        read_ranges,
+        read_metadata,
+        read_tyreside,
+        warn_fe_method,
+        require_mf52_dimensions,
+    };
+    // clang-format on
+
+    /// A core error gets the file and the line of the .tir key it names; the key is kept.
+    error with_source_location(const tir_reader &reader, error value) {
+      value.where = reader.locate(value.where.key);
+      return value;
+    }
+
+    /// Builds the PAC2002 model.
+    std::expected<built_model, error> create_pac2002(const load_state &state) {
+      std::expected<pac2002_model, error> created = pac2002_model::create(state.parameters, state.method);
+      if (!created.has_value()) {
+        return std::unexpected<error>(with_source_location(state.reader, created.error()));
+      }
+      const bool eq88 = created->uses_eq88_rolling_resistance();
+      return built_model{.model = std::make_unique<pac2002_model>(std::move(*created)), .eq88 = eq88};
+    }
+
+    /// Builds the MF 5.2 model.
+    std::expected<built_model, error> create_mf52(const load_state &state) {
+      std::expected<mf52_model, error> created = mf52_model::create(state.parameters);
+      if (!created.has_value()) {
+        return std::unexpected<error>(with_source_location(state.reader, created.error()));
+      }
+      return built_model{.model = std::make_unique<mf52_model>(std::move(*created)), .eq88 = false};
+    }
+
+    /// Builds the model that `identify_model` chose.
+    std::expected<built_model, error> create_model(const load_state &state) {
+      if (state.kind == model_kind::PAC2002) {
+        return create_pac2002(state);
+      }
+      return create_mf52(state);
+    }
+
+    /// Warnings that depend on the created model: defaulted coefficients, ellipse method and eq (88).
+    void add_final_warnings(load_state &state, bool eq88) {
+      if (!state.defaulted.empty()) {
+        const std::string names = detail::join(state.defaulted, ", ");
+        std::string message = std::format(DEFAULTED_MESSAGE, state.defaulted.size(), names);
+        add_warning(state, std::move(message), file_location(state.reader));
+      }
+      if (state.method == combined_method::FRICTION_ELLIPSE) {
+        std::string message =
+            "no combined-slip R* coefficients: using the MSC friction-ellipse method (MSC p.33, AD-07)";
+        add_warning(state, std::move(message), file_location(state.reader));
+      }
+      if (eq88) {
+        std::string message = "FITTYP 5 with QSY1 = QSY2 = 0: My uses MSC eq (88) (MSC p.33)";
+        add_warning(state, std::move(message), state.reader.locate("FITTYP"));
+      }
+    }
+  } // namespace
+
+  std::expected<loaded_model, error> load_tire_model(const tir_document &document) {
+    load_state state(document);
+    if (const status units = check_units(state.reader); !units.has_value()) {
+      return std::unexpected<error>(units.error());
+    }
+    const std::expected<model_kind, error> kind = identify_model(state.reader, state.warnings);
+    if (!kind.has_value()) {
+      return std::unexpected<error>(kind.error());
+    }
+    state.kind = *kind;
+    for (const load_step apply : STEPS) {
+      if (const status result = apply(state); !result.has_value()) {
+        return std::unexpected<error>(result.error());
+      }
+    }
+    std::expected<built_model, error> built = create_model(state);
+    if (!built.has_value()) {
+      return std::unexpected<error>(built.error());
+    }
+    add_final_warnings(state, built->eq88);
+    // Built member by member: an aggregate initialiser adds cleanup branches that no test can take.
+    loaded_model result;
+    result.model = std::move(built->model);
+    result.warnings = std::move(state.warnings);
+    result.ignored_keys = state.reader.unconsumed_keys();
+    return result;
+  }
+
+  std::expected<loaded_model, error> load_tire_model_file(const std::filesystem::path &path) {
+    const std::expected<tir_document, error> document = read_tir_file(path);
+    if (!document.has_value()) {
+      return std::unexpected<error>(document.error());
+    }
+    return load_tire_model(*document);
+  }
+} // namespace mf::io

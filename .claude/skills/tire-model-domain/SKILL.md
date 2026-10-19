@@ -1,13 +1,13 @@
 ---
 name: tire-model-domain
-description: Domain primer on Pacejka Magic Formula tire models for magic-formula. Covers inputs/outputs, the Magic Formula equation, pure vs combined slip, the .tir property-file structure, coefficient families, version identification, sign conventions and units. Version-specific details are marked "to be confirmed by researcher".
+description: Domain primer on Pacejka Magic Formula tire models for magic-formula. Covers inputs/outputs, the Magic Formula equation, pure vs combined slip, the .tir property-file structure, coefficient families, version identification, sign conventions and units. Version-specific details are resolved in the cited `docs/research/` notes, which this primer points to.
 when_to_use: Designing, implementing, reviewing or researching anything that touches tire-model equations, coefficients, .tir parsing, input tables, sign conventions or units.
 user-invocable: true
 ---
 
 # Tire model domain primer
 
-**Ground rule:** this primer states only well-established facts. Anything tagged **[TBC]** ("to be confirmed by researcher") is version-specific or convention-dependent and MUST NOT be implemented from this file. Get a cited finding from `researcher` first. Confirmed findings go in `docs/research/<topic>.md` (with citations). That folder, not this primer, is the source of truth for equations and coefficient sets. When a finding is confirmed, update this primer's [TBC] item to point at the research note.
+**Ground rule:** this primer states only well-established facts. The version-specific and convention-dependent items that used to be marked "to be confirmed" are now resolved in `docs/research/` (start at `README.md`: source register, evidence tags, decision list), and each one below points at its note. Do not implement from this file: `docs/research/`, not this primer, is the source of truth for equations, coefficient sets and conventions. Policy items that have no primary source are signed off in `docs/research/decisions.md` (AD-xx). Items still open for primary evidence are in `docs/research/open-questions.md`. If a point is not covered there, ask `researcher` for a cited finding and record it in `docs/research/<topic>.md`.
 
 ## What the Magic Formula is
 
@@ -35,7 +35,7 @@ The **normalised vertical load increment** `dfz = (Fz − Fz0') / Fz0'` with `Fz
 | Symbol | Meaning | Library unit |
 |--------|---------|--------------|
 | Fz | vertical load (positive in compression in the usual tire-model convention) | N |
-| κ (kappa, SR) | longitudinal slip ratio, dimensionless; the exact definition / sign depends on the convention [TBC] | – |
+| κ (kappa, SR) | longitudinal slip ratio, dimensionless; the exact definition and sign are fixed in `docs/research/conventions.md` section 2 | – |
 | α (alpha, SA) | slip angle | rad |
 | γ (gamma, IA) | inclination (camber) angle | rad |
 | Vx | longitudinal speed of the wheel centre | m/s |
@@ -53,14 +53,14 @@ Input files often give angles in degrees. Conversion to radians happens once, at
 - **Pure slip:** one slip only. `Fx0(κ)` with α = 0; `Fy0(α)` and `Mz0(α)` with κ = 0. Each is a magic-formula curve.
 - **Combined slip:** κ and α act together. The forces are reduced from their pure-slip values by weighting functions (`G_xα`, `G_yκ`), which have their own coefficient families (`RBX…`, `RCX…`, `RBY…`, …). The lateral force also gets a κ-induced side force `S_VyK`.
 - **Aligning moment:** `Mz = −t · Fy + Mzr`. Here `t` is the pneumatic trail (a cosine-type magic formula) and `Mzr` the residual moment. In combined slip a further term depends on Fx (coefficients `SSZ…`).
-- **Turn slip:** the Pacejka formulations include turn-slip factors (ζ0…ζ8). When turn slip is neglected they are set to 1. Whether this repo models turn slip is an architect decision [TBC for each version's exact factor set].
-- **Low speed:** expressions divide by Vx (slip definitions) and by B·C·D-type products. Formulations add small ε terms to avoid singularities. The exact ε values and where they go are [TBC].
+- **Turn slip:** the Pacejka formulations include turn-slip factors (ζ0…ζ8). When turn slip is neglected they are set to 1. This repo neglects turn slip (all ζ = 1, steady state only); see `docs/research/pac2002.md` section 1.
+- **Low speed:** expressions divide by Vx (slip definitions) and by B·C·D-type products. Formulations add small ε terms to avoid singularities. The ε value and where it is applied are in `docs/research/conventions.md` sections 5 and 7.
 
 ## The .tir property file
 
-The file is plain ASCII. Section headers are written `[SECTION_NAME]` and entries `KEY = value`. Strings are single-quoted (`'PAC2002'`). A `$` starts a comment (full-line or trailing). Lines starting with `!` are commonly comment/metadata lines in some tools' files [TBC: whether `!` is a comment marker in PAC2002/MF5.2 reference files; the parser rule for `!` lines waits for a researcher note in `docs/research/`]. Keys are matched case-insensitively in practice [TBC: confirm the parser rules against reference files].
+The file is plain ASCII. Section headers are written `[SECTION_NAME]` and entries `KEY = value`. Strings are single-quoted (`'PAC2002'`). A `$` starts a comment (full-line or trailing). Lines starting with `!` are comment/metadata lines. Whether `!` is a trailing-comment marker, and the key and section case rules, are fixed in `docs/research/tir-format.md` section 2 (lexical rules, refined by AD-20 in `docs/research/decisions.md`).
 
-Common sections (which ones appear, and their contents, vary by version [TBC]):
+Common sections (which ones appear, and their contents, vary by version; required keys and defaults per model: `docs/research/tir-format.md` section 3):
 
 | Section | Contents (typical) |
 |---------|-------------------|
@@ -69,8 +69,8 @@ Common sections (which ones appear, and their contents, vary by version [TBC]):
 | `[MODEL]` | `PROPERTY_FILE_FORMAT`, `FITTYP`, `TYRESIDE`, `LONGVL` (reference speed), `VXLOW`, `USE_MODE` |
 | `[DIMENSION]` | `UNLOADED_RADIUS`, `WIDTH`, `ASPECT_RATIO`, `RIM_RADIUS`, `RIM_WIDTH` |
 | `[VERTICAL]` | `FNOMIN` (nominal load), `VERTICAL_STIFFNESS`, `VERTICAL_DAMPING`, … |
-| `[SHAPE]` | tire cross-section contour (radial/width point pairs) used for contact geometry, not an input-validity range. Usage per version [TBC] |
-| `[LONG_SLIP_RANGE]`, `[SLIP_ANGLE_RANGE]`, `[INCLINATION_ANGLE_RANGE]`, `[VERTICAL_FORCE_RANGE]` | validity ranges (`KPUMIN`/`KPUMAX`, `ALPMIN`/`ALPMAX`, `CAMMIN`/`CAMMAX`, `FZMIN`/`FZMAX`). Whether to clamp inputs to them is [TBC] |
+| `[SHAPE]` | tire cross-section contour (radial/width point pairs) used for contact geometry, not an input-validity range. The `[SHAPE]` table syntax is `docs/research/tir-format.md` section 2, rule 12 |
+| `[LONG_SLIP_RANGE]`, `[SLIP_ANGLE_RANGE]`, `[INCLINATION_ANGLE_RANGE]`, `[VERTICAL_FORCE_RANGE]` | validity ranges (`KPUMIN`/`KPUMAX`, `ALPMIN`/`ALPMAX`, `CAMMIN`/`CAMMAX`, `FZMIN`/`FZMAX`). Clamping to them: `docs/research/conventions.md` section 8 |
 | `[SCALING_COEFFICIENTS]` | user scaling factors `L…` |
 | `[LONGITUDINAL_COEFFICIENTS]` | `P?X…`, `R?X…` |
 | `[OVERTURNING_COEFFICIENTS]` | `QSX…` |
@@ -78,11 +78,11 @@ Common sections (which ones appear, and their contents, vary by version [TBC]):
 | `[ROLLING_COEFFICIENTS]` | `QSY…` |
 | `[ALIGNING_COEFFICIENTS]` | `Q?Z…`, `SSZ…` |
 
-The values in `[UNITS]` define the units of every dimensional key in the file. The parser must honour them (or reject units it does not support) instead of assuming SI.
+The values in `[UNITS]` define the units of every dimensional key in the file. The parser must honour them (or reject units it does not support) instead of assuming SI; the policy (SI only, anything else rejected) is `docs/research/tir-format.md` section 4 and AD-10.
 
 ## Coefficient families (naming scheme)
 
-The letters commonly follow this pattern. Letter 1: `P` = force coefficient, `Q` = moment coefficient, `R` = combined-slip coefficient, `S` = combined-slip Mz term (as in `SSZ`). Letter 2: which factor (B, C, D, E, K = stiffness, H = horizontal shift, V = vertical shift; `S` as in `QSX`/`QSY`/`SSZ`). Letter 3: the axis (X, Y, Z). Then an index. [TBC: the meaning of `S` as letter 1 and letter 2 (described as "moment arm" in some sources) is not confirmed across PAC2002/MF5.2; take semantics per coefficient from cited `docs/research/` notes, not from this scheme.]
+The letters commonly follow this pattern. Letter 1: `P` = force coefficient, `Q` = moment coefficient, `R` = combined-slip coefficient, `S` = combined-slip Mz term (as in `SSZ`). Letter 2: which factor (B, C, D, E, K = stiffness, H = horizontal shift, V = vertical shift; `S` as in `QSX`/`QSY`/`SSZ`). Letter 3: the axis (X, Y, Z). Then an index. The meaning of `S` as letter 1 and letter 2 ("moment arm" in some sources) and the semantics of each coefficient come from `docs/research/mf52.md` section 3 and `docs/research/pac2002.md` section 3, not from this scheme.
 
 | Family | Purpose |
 |--------|---------|
@@ -96,21 +96,21 @@ The letters commonly follow this pattern. Letter 1: `P` = force coefficient, `Q`
 | `QSY` | rolling-resistance moment My |
 | `LFZO`, `LCX`, `LMUX`, `LEX`, `LKX`, `LHX`, `LVX`, `LCY`, `LMUY`, `LEY`, `LKY`, `LHY`, `LVY`, `LTR`, `LRES`, `LXAL`, `LYKA`, `LVYKA`, `LS`, `LMX`, `LMY`, … | scaling factors (default 1) |
 
-**[TBC]** The exact index ranges (e.g. how many `PKY`, `QSX`, `QDZ` coefficients exist), the presence of camber scaling factors (`LGAX`, `LGAY`, `LGAZ`) and pressure coefficients (`PPX…`, `PPY…`, `PPZ…`), and the per-version formula of every factor all differ between PAC2002, MF 5.2 and MF 6.x. Take them only from a cited `docs/research/` note.
+The exact index ranges (e.g. how many `PKY`, `QSX`, `QDZ` coefficients exist), the presence of camber scaling factors (`LGAX`, `LGAY`, `LGAZ`) and pressure coefficients (`PPX…`, `PPY…`, `PPZ…`), and the per-version formula of every factor all differ between PAC2002, MF 5.2 and MF 6.x. They are resolved in `docs/research/mf52.md` section 3 and `docs/research/pac2002-vs-mf52.md`; take them only from there.
 
 ## Versions and identification
 
-- **PAC2002**: the Magic Formula implementation used in MSC ADAMS, close to the MF 5.x formulation. [TBC: its exact equations and coefficient set relative to MF 5.2.]
-- **MF 5.2**: an MF-Tyre (TNO) release of the formulation described in Pacejka's book. [TBC: exact equation set and coefficient list.]
-- **MF 6.1 / 6.2**: later releases that add inflation-pressure dependence (Besselink, Schmeitz, Pacejka, 2010) and other changes. Out of scope at first, but the architecture must allow adding them.
-- Identification: `[MODEL]` holds `FITTYP` (integer) and, in many files, `PROPERTY_FILE_FORMAT` (string). **[TBC]** The mapping from `FITTYP` / `PROPERTY_FILE_FORMAT` values to formulations (which numbers mean PAC2002, MF 5.2, MF 6.1, …) must be confirmed by researcher before the model factory relies on it. An unknown value must give an explicit error, never a silent fallback.
+- **PAC2002**: the Magic Formula implementation used in MSC ADAMS, close to the MF 5.x formulation. Equations: `docs/research/pac2002.md`; differences from MF 5.2: `docs/research/pac2002-vs-mf52.md`.
+- **MF 5.2**: an MF-Tyre (TNO) release of the formulation described in Pacejka's book. Equations (evidence tier [impl]) and coefficient list: `docs/research/mf52.md`; differences from PAC2002: `docs/research/pac2002-vs-mf52.md`.
+- **MF 6.1 / 6.2**: later releases that add inflation-pressure dependence (Besselink, Schmeitz, Pacejka, 2010) and other changes. Out of scope at first, but the architecture must allow adding them (see `docs/research/pac2002-vs-mf52.md` for the version differences).
+- Identification: `[MODEL]` holds `FITTYP` (integer) and, in many files, `PROPERTY_FILE_FORMAT` (string). The mapping from `FITTYP` / `PROPERTY_FILE_FORMAT` values to formulations (which numbers mean PAC2002, MF 5.2, MF 6.1, …) and its precedence are in `docs/research/model-routing.md` (AD-11). An unknown value must give an explicit error, never a silent fallback.
 
 ## Sign conventions and units
 
 - Several axis systems are in use: ISO 8855 / ISO-W (z up, y to the left), SAE J670 (z down, y to the right), and the "adapted" conventions in Pacejka's book and in ADAMS/TYDEX. The signs of Fy, Mz, Mx, α, γ and sometimes κ differ between them.
-- **[TBC]** Which convention each formulation's coefficients assume, and which convention this repo uses for inputs and outputs. The researcher confirms it, the architect fixes it in the design, and it is documented in `docs/research/sign-conventions.md`. Until then, do not "fix" signs ad hoc. Every conversion lives in one tested place.
+- Which convention each formulation's coefficients assume, and which convention this repo uses for inputs and outputs (TYDEX W-axis, ISO orientation), is fixed in `docs/research/conventions.md` sections 1-4. Do not "fix" signs ad hoc. Every conversion lives in one tested place.
 - Library-internal units are SI with angles in radians. `.tir` units come from `[UNITS]`.
-- `TYRESIDE` (left/right) can mirror lateral quantities. [TBC: exact effect per version.]
+- `TYRESIDE` (left/right) can mirror lateral quantities. Mirroring is not implemented; the policy is in `docs/research/conventions.md` section 9 (AD-06).
 
 ## Literature (locate via researcher; do not quote from memory)
 
@@ -122,4 +122,4 @@ The letters commonly follow this pattern. Letter 1: `P` = force coefficient, `Q`
 ## Testing implications
 
 - Reference outputs come from cited sources or independent tools, recorded in `tests/data/` with their origin. Hand-derived values must show their derivation.
-- Every model gets: a pure-slip curve check (zero crossing, peak, slope `BCD` at the origin), a combined-slip reduction check, scaling-factor checks (setting `LMUX = 0.5` halves the peak, as far as the formulation is linear in it [TBC per factor]), and guard tests (Fz <= 0, Vx -> 0, out-of-range inputs).
+- Every model gets: a pure-slip curve check (zero crossing, peak, slope `BCD` at the origin), a combined-slip reduction check, scaling-factor checks (setting `LMUX = 0.5` halves the peak, as far as the formulation is linear in it; see `docs/research/test-data.md` section 4), and guard tests (Fz <= 0, Vx -> 0, out-of-range inputs).

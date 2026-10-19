@@ -18,7 +18,7 @@ All commands run from the repository root. Presets are defined in `CMakePresets.
 | CMake | 4.0 | `cmake --version` |
 | Ninja | 1.10 | `ninja --version` |
 | Conan | >= 2.9 | `conan --version` |
-| Compiler (C++26) | GCC 14 or Clang 19 | `g++ --version` / `clang++ --version` |
+| Compiler (C++26) | GCC 14 or Clang 19 (Linux); MSVC (C++23 fallback) on Windows; Homebrew LLVM 21 on macOS | `g++ --version` / `clang++ --version` |
 | gcovr (coverage only) | 8.x | `gcovr --version` |
 | clang-format / clang-tidy | 19 (as CI; 18 may differ) | `clang-format --version` |
 
@@ -36,6 +36,14 @@ conan install . --build=missing -s build_type=Debug -s compiler.cppstd=26
 # Release (used by the release preset and benchmarks)
 conan install . --build=missing -s build_type=Release -s compiler.cppstd=26
 ```
+
+## Windows and macOS
+
+The commands above are the Linux contract; the CI `build-test` matrix (`.github/workflows/ci.yml`) uses these variants. test-runner uses them only when a caller asks for a non-Linux run (the sandbox is Linux only).
+
+- **Windows (MSVC, Developer PowerShell or `ilammy/msvc-dev-cmd`):** `conan install . --build=missing -s build_type=Debug -s compiler.cppstd=23`. Conan's msvc settings know cppstd up to 23 only; CMake has no C++26 flag for MSVC, so `CMakeLists.txt` falls back to 23. `conanfile.py` pins the Ninja generator (needs the MSVC environment on PATH). Then `cmake --preset debug`, `cmake --build --preset debug`, `ctest --preset debug` as usual. Multi-command PowerShell steps only report the last exit code: run each `ctest` as its own step.
+- **macOS (Homebrew LLVM 21, not AppleClang):** `CC=/opt/homebrew/opt/llvm@21/bin/clang`, `CXX=.../clang++`, `SDKROOT=$(xcrun --show-sdk-path)`, and pass `-c "tools.build:exelinkflags=<L>" -c "tools.build:sharedlinkflags=<L>"` to `conan install`, with `<L>` = `['-L/opt/homebrew/opt/llvm@21/lib/c++','-L/opt/homebrew/opt/llvm@21/lib/unwind','-lunwind','-Wl,-rpath,/opt/homebrew/opt/llvm@21/lib/c++']`, with `-s compiler.cppstd=26`. Also pass `-c "tools.build:defines=['_LIBCPP_DISABLE_AVAILABILITY']"`: Homebrew's libc++ is built with vendor availability annotations, so libc++ 21 otherwise flags `std::from_chars(double)` as unavailable for the macOS deployment target even though the newer Homebrew `libc++.dylib` is linked.
+- The coverage preset and the format/tidy gates are Linux-only. Presets need no per-OS variants.
 
 ## Configure and build
 
@@ -70,7 +78,7 @@ git ls-files --cached --others --exclude-standard -- 'src/*.cpp' | xargs -r clan
 
 CMake targets from the lab templates (configured in the root `CMakeLists.txt`):
 
-- `clang-tidy_all` runs clang-tidy on `mflib` and `mf`. Configure with `-DCLANG_TIDY_EXE="clang-tidy;--warnings-as-errors=*"` to fail on warnings. It checks `.cpp` files only (its `-header-filter` never matches absolute header paths), so the `xargs` command above (which uses the `.clang-tidy` header filter) stays the header check.
+- `clang-tidy_all` runs clang-tidy on `mflib` and `mf`. Configure with `-DCLANG_TIDY_EXE="clang-tidy;--warnings-as-errors=*"` to fail on warnings. Project headers are checked too: the target passes no `-header-filter`, so header selection comes from `HeaderFilterRegex` in `.clang-tidy`. The `xargs` command above is the equivalent read-only check.
 - `clang-format_all` formats files IN PLACE. It is for developers only, never for test-runner; test-runner uses the `--dry-run --Werror` command above.
 
 - `xargs -r` (GNU and BSD) skips the command when the list is empty, so nothing runs on empty stdin.

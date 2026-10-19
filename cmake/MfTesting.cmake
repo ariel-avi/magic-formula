@@ -14,6 +14,8 @@ function(mf_add_test TEST_SOURCE LABEL)
             "MF_TEST_DATA_DIR=\"${PROJECT_SOURCE_DIR}/tests/data\""
             "MF_VERSION_STRING=\"${PROJECT_VERSION}\"")
     mf_configure_target(${_name})
-    gtest_discover_tests(${_name} PROPERTIES LABELS "${LABEL}")
+    # DISCOVERY_TIMEOUT: the default 5 s is too short on Windows, where real-time AV scanning delays the first launch of
+    # every freshly linked test executable (POST_BUILD discovery runs it).
+    gtest_discover_tests(${_name} DISCOVERY_TIMEOUT 60 PROPERTIES LABELS "${LABEL}")
     set_property(GLOBAL APPEND PROPERTY MF_TEST_TARGETS ${_name})
 endfunction()

@@ -51,22 +51,36 @@ jobs:
           git diff --exit-code
       - name: clang-tidy gate
         run: cmake --build --preset debug --target clang-tidy_all
-      - name: clang-tidy gate (public headers)
-        run: git ls-files -- 'src/*.cpp' | xargs -r clang-tidy-19 -p build/debug --quiet --warnings-as-errors='*'
 
   build-test:
-    name: Build and test (${{ matrix.compiler }})
-    runs-on: ubuntu-24.04
+    name: Build and test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - compiler: gcc-14
+          - name: linux-gcc-14
+            os: ubuntu-24.04
             cc: gcc-14
             cxx: g++-14
-          - compiler: clang-19
+            cppstd: '26'
+          - name: linux-clang-19
+            os: ubuntu-24.04
             cc: clang-19
             cxx: clang++-19
+            cppstd: '26'
+          # Conan's msvc settings know cppstd up to 23 (mapped to /std:c++latest); CMakeLists.txt falls back to 23 too.
+          - name: windows-msvc
+            os: windows-2025
+            cc: cl
+            cxx: cl
+            cppstd: '23'
+          # Homebrew LLVM, not AppleClang: Apple's libc++ lacks floating-point from_chars and views::join_with.
+          - name: macos-llvm-21
+            os: macos-15
+            cc: /opt/homebrew/opt/llvm@21/bin/clang
+            cxx: /opt/homebrew/opt/llvm@21/bin/clang++
+            cppstd: '26'
     env:
       CC: ${{ matrix.cc }}
       CXX: ${{ matrix.cxx }}
@@ -80,30 +94,53 @@ jobs:
           python -m pip install "cmake>=4.0,<5" "conan>=2,<3" ninja
           cmake --version
       - name: Install Clang 19
-        if: matrix.compiler == 'clang-19'
+        if: matrix.name == 'linux-clang-19'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang-19
+      - name: MSVC developer environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Install LLVM 21 (Homebrew)
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm@21
+          echo "SDKROOT=$(xcrun --show-sdk-path)" >> "$GITHUB_ENV"
       - name: Cache Conan packages
         uses: actions/cache@v5
         with:
           path: ~/.conan2/p
-          key: conan-${{ runner.os }}-${{ matrix.compiler }}-${{ hashFiles('conanfile.py') }}
-          restore-keys: conan-${{ runner.os }}-${{ matrix.compiler }}-
+          key: conan-${{ matrix.os }}-${{ matrix.name }}-${{ hashFiles('conanfile.py') }}
+          restore-keys: conan-${{ matrix.os }}-${{ matrix.name }}-
+      - name: Conan profile
+        run: conan profile detect --force
       - name: Conan install (Debug)
+        if: runner.os != 'macOS'
+        run: conan install . --build=missing -s build_type=Debug -s compiler.cppstd=${{ matrix.cppstd }}
+      # Homebrew's libc++ is keg-only: link against it (not the older system libc++) and find it at run time.
+      # Homebrew builds libc++ with vendor availability annotations ON, so libc++ 21 marks std::from_chars(double)
+      # unavailable for the macOS deployment target even though we link Homebrew's newer libc++.dylib
+      # ("'from_chars' is unavailable"). _LIBCPP_DISABLE_AVAILABILITY turns those annotations off.
+      - name: Conan install (Debug, Homebrew libc++)
+        if: runner.os == 'macOS'
         run: |
-          conan profile detect --force
-          conan install . --build=missing -s build_type=Debug -s compiler.cppstd=26
+          LINKFLAGS="['-L/opt/homebrew/opt/llvm@21/lib/c++','-L/opt/homebrew/opt/llvm@21/lib/unwind','-lunwind','-Wl,-rpath,/opt/homebrew/opt/llvm@21/lib/c++']"
+          conan install . --build=missing -s build_type=Debug -s compiler.cppstd=${{ matrix.cppstd }} \
+            -c "tools.build:exelinkflags=${LINKFLAGS}" -c "tools.build:sharedlinkflags=${LINKFLAGS}" \
+            -c "tools.build:defines=['_LIBCPP_DISABLE_AVAILABILITY']"
       - name: Configure
         run: cmake --preset debug
       - name: Build
         run: cmake --build --preset debug
       - name: Test (all)
         run: ctest --preset debug
-      - name: Test (by label)
-        run: |
-          ctest --preset debug -L unit --no-tests=error
-          ctest --preset debug -L module --no-tests=error
+      # Separate steps: PowerShell (Windows) only reports the exit code of the last command of a step.
+      - name: Test (unit)
+        run: ctest --preset debug -L unit --no-tests=error
+      - name: Test (module)
+        run: ctest --preset debug -L module --no-tests=error
 
   coverage:
     name: Coverage (gcc-14, 100% line and branch)

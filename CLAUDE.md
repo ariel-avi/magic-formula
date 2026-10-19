@@ -12,28 +12,35 @@ A C++ library and CLI that implement Pacejka Magic Formula tire models.
 
 ## Tech stack
 
-C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19) · CMake >= 4.0 · Conan 2 · Eigen (vectorised batch evaluation) · GoogleTest · Google Benchmark · CTest · gcovr (coverage) · clang-format / clang-tidy.
+C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19; CI also builds with MSVC on Windows and Homebrew LLVM 21 on macOS) · CMake >= 4.0 · Conan 2 · Eigen (vectorised batch evaluation) · GoogleTest · Google Benchmark · CTest · gcovr (coverage) · clang-format / clang-tidy.
 
 ## Layout (contract)
 
 The architect may refine this layout. If they do, update this file and the affected skills in the same PR.
 
 ```
-include/magic_formula/   public headers (core, coverage-gated)
+include/magic_formula/   public headers (core, coverage-gated); sub-directories io/ (mf::io), cli/ (mf::cli),
+                         detail/ (mf::detail, internal but under include/ so tests can include it; coverage-gated)
 src/                     library sources -> static library `mflib` (alias `mf::mflib`; core, coverage-gated;
-                         every src/**/*.cpp except src/app/)
-src/app/                 CLI entry point -> executable `mf` (inside src/: coverage-gated, covered by module tests)
+                         every src/**/*.cpp except src/app/): model/ (core formulations), io/, detail/,
+                         cli/ (CLI driver mf::cli, compiled into mflib so module tests run it in-process)
+src/app/                 only main.cpp (one call into mf::cli::run) -> executable `mf` (inside src/: coverage-gated,
+                         covered by the CTest process tests)
 tests/unit/              unit tests (CTest label: unit)
 tests/module/            module/integration tests (CTest label: module), incl. the CLI smoke test
+tests/support/           header-only test helpers (fixtures.hpp, namespace mf::test); not a test, not globbed
 tests/data/              .tir files, input tables, reference outputs (with origin notes)
 bench/                   Google Benchmark (mf_bench; not wired yet)
-docs/research/           researcher findings (cited source of truth for equations)
+docs/architecture.md     architecture: layers, class hierarchy, pipeline, error model, "Extending to MF 6.x"
+docs/research/           researcher findings (cited source of truth for equations); decisions.md = architect
+                         sign-off table (AD-xx) for the [policy] items
 cmake/                   ClangFormat, ClangTidy, Coverage (verbatim from ariel-avi/lab/cpp/cmake; change the lab first);
                          MfCompileOptions, MfTesting (project glue)
 .clang-format, .clang-tidy  verbatim copies of ariel-avi/lab/cpp/*
 conanfile.py             dependencies (gtest; generators in build/conan/<build_type>)
 CMakePresets.json        configure/build/test presets: debug, release, coverage
-.github/workflows/ci.yml CI: quality (format/tidy), build-test (gcc-14, clang-19), coverage (gcc-14, 100/100)
+.github/workflows/ci.yml CI: quality (format/tidy), build-test matrix (linux gcc-14 + clang-19,
+                         windows-2025 MSVC, macos-15 Homebrew LLVM 21), coverage (gcc-14, 100/100)
 .claude/                 agents, skills, workflows, hooks, settings
 ```
 
@@ -51,6 +58,8 @@ cmake --preset coverage && cmake --build --preset coverage && cmake --build --pr
 # benchmarks (once bench/ exists; Release conan install + release preset)
 ./build/release/bench/mf_bench
 ```
+
+Platform notes: the commands above are the Linux contract. On Windows (MSVC) use `-s compiler.cppstd=23`: Conan's msvc settings stop at 23 and CMake has no C++26 flag for MSVC, so the root `CMakeLists.txt` falls back to C++23 wherever `CMAKE_CXX26_STANDARD_COMPILE_OPTION` is undefined (MSVC, AppleClang). `conanfile.py` pins the Ninja generator (the presets use Ninja on every OS), so run from an MSVC developer prompt. macOS uses Homebrew LLVM 21 because AppleClang's libc++ lacks floating-point `from_chars` and `views::join_with`. `.gitattributes` forces LF so fixtures are byte-identical on Windows. Details: `build-and-test` skill, "Windows and macOS".
 
 Details: `build-and-test` and `coverage` skills.
 
