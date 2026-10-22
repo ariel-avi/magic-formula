@@ -1,4 +1,4 @@
-$ synthetic, authored for magic-formula from docs/research/test-data.md section 2/3; not derived from any vendor file
+$ synthetic, authored for magic-formula from docs/research/test-data.md; not derived from any vendor file
 $ purpose: fixture S, PAC2002 hand-derivable coefficient set (cosine combined slip, no ranges)
 [MDI_HEADER]
 FILE_TYPE = 'tir'

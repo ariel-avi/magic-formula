@@ -17,7 +17,8 @@ Aligned with the lab `.clang-tidy` (`readability-identifier-naming`). Class/stru
 |--------|-------|---------|
 | Types (class, struct, union, enum, type alias; concepts by convention) | lower_case | `tire_model`, `pac2002_model`, `tir_file`, `slip_inputs` |
 | Functions, methods | lower_case | `evaluate_batch`, `vertical_load` |
-| Variables, parameters (also const parameters), public members | lower_case | `vertical_load`, `slip_angle_rad` |
+| Functions that compute one Magic Formula quantity | its symbol in lower_case | `mu_y`, `fx0`, `fy0`, `gxa`, `gyk`, `svyk`, `mzr`, `alpha_eq`, `fy_prime`, `mx`, `my`, `t`, `s` |
+| Variables, parameters (also const parameters), public members | lower_case | `fz_n`, `slip_angle_rad` |
 | Private / protected members | lower_case + trailing `_` | `coefficients_` |
 | Constants: global, namespace-scope, static and member `constexpr` / `const` variables, and enumerators | UPPER_CASE | `PI`, `DEFAULT_EPSILON`, `status::OK` |
 | Function-local `constexpr` / `const` variables (`LocalConstantCase`) | lower_case | `const double dfz = ...;`, `constexpr double force_tol_n = 1e-6;` |
@@ -28,6 +29,10 @@ Aligned with the lab `.clang-tidy` (`readability-identifier-naming`). Class/stru
 | Macros (avoid) | `MF_UPPER_CASE` | `MF_EXPORT` |
 
 Small enums need an explicit underlying type (`enum class status : std::uint8_t`) because of `performance-enum-size`.
+
+A qualifier is added only to tell variants apart (`my_from_shifts`). A single-letter symbol is used as is (`t` for the pneumatic trail, `s` for the moment arm of Fx); locals and parameters in the same namespace then take descriptive names (`terms`, `state`). Functions that return several quantities or are generic helpers keep descriptive names (`vertical_load`, `aligning`, `trail_cosine`, `evaluate_slip_state`, `friction_ellipse_ratios`, `sgn_plus`).
+
+No local variable or parameter reuses the name of a function visible in the same namespace or class (for example a parameter `mu_y` inside `mf::detail`). It reads ambiguously, and MSVC /W4 name-hiding warnings (C4456-C4459) may fire.
 
 Magic Formula coefficients keep their literature names as struct members (`PCX1`, `PDY2`, `QBZ1`, `LMUX`) so they match the `.tir` keys one-to-one. This is the only allowed naming exception. Wrap the member block in a targeted suppression with a reason, and document each member with its meaning and units:
 
@@ -120,4 +125,4 @@ The 100% line + branch gate (`coverage` skill) runs with `--exclude-unreachable-
   - `cppcoreguidelines-avoid-const-or-ref-data-members`: hold observers as pointers.
   - `performance-enum-size`: enums use `: std::uint8_t`.
 - Headers: `clang-tidy_all` checks project headers too; header selection is left to the config's `HeaderFilterRegex` (the target passes no `-header-filter`).
-- Doc comments: `///` on every public declaration. Say what the function computes, its units, its preconditions, and the literature equation it implements (`/// Implements <source>, eq. <n> (see docs/research/<topic>.md)`), when the researcher has supplied one.
+- Doc comments: `///` on every public function and type; on a data member only when it adds a unit, range or meaning beyond its name and type. Say what the function computes (formulas in Magic Formula symbols are welcome), its units and its preconditions. Code, tests and test data carry no source citations, page or equation numbers, evidence tags or decision/question IDs; the derivation lives in `docs/research/`. At most one plain pointer to a research note per file (file name only).

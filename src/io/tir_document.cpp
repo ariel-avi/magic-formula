@@ -46,7 +46,7 @@ namespace mf::io {
       bool quoted = false;
     };
 
-    /// Characters allowed in a key (AD-20).
+    /// Characters allowed in a key.
     constexpr std::string_view KEY_CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_";
 
     /// SYNTAX error at the current file and the given line.

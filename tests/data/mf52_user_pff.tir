@@ -1,6 +1,6 @@
 $ synthetic, hand-written for magic-formula; no vendor, MFeval or other third-party content
 $ purpose: MF 5.2 (FITTYP 6) fixture written in the TNO MF-Tyre ADAMS user-tire form
-$ (PROPERTY_FILE_FORMAT = 'USER', USER_SUB_ID = 815), see docs/research/model-routing.md (AD-11 amendment, Q-13)
+$ (PROPERTY_FILE_FORMAT = 'USER', USER_SUB_ID = 815), see docs/research/model-routing.md
 $ derivation: tests/data/mf52_S52.tir without LGAX/LGAY/LGAZ, plus the two lines PROPERTY_FILE_FORMAT and USER_SUB_ID
 $ expected: loads as MF 5.2 with no warnings; every output equals the mf52_S52.tir output
 [MDI_HEADER]

@@ -11,11 +11,11 @@
 #include <vector>
 
 namespace mf::io {
-  /// One operating point of the CLI input table, in SI units (docs/research/decisions.md, AD-27).
+  /// One operating point of the CLI input table, in SI units.
   struct input_row {
     /// Fz [N], SR [-], SA [rad], IA [rad], Vx [m/s]; unclamped, exactly as read (after unit conversion).
     operating_point point;
-    /// Inflation pressure [Pa] when the table has a P column. The models have no pressure input (AD-09).
+    /// Inflation pressure [Pa] when the table has a P column. The models have no pressure input.
     std::optional<double> pressure_pa;
     /// 1-based line of this row in the input text.
     std::size_t line = 0;
@@ -29,7 +29,7 @@ namespace mf::io {
     bool has_pressure = false;
   };
 
-  /// Parses the CLI input table (AD-27). Units are converted to SI once, here.
+  /// Parses the CLI input table. Units are converted to SI once, here.
   ///
   /// Format:
   /// - Text, one row per line. A leading UTF-8 byte order mark is skipped, CR is stripped, blank lines are ignored, and

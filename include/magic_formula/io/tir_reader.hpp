@@ -10,7 +10,7 @@
 
 namespace mf::io {
   /// Typed access to the entries of a `tir_document` that remembers which entries were read, so the caller can list
-  /// the keys nobody asked for (the "ignored keys"). Lookups are case-insensitive (AD-20). Every accessor marks the
+  /// the keys nobody asked for (the "ignored keys"). Lookups are case-insensitive. Every accessor marks the
   /// entry it finds as consumed, also when the value then fails to convert.
   /// The reader keeps a pointer to the document: the document must outlive the reader.
   class tir_reader {
@@ -31,7 +31,7 @@ namespace mf::io {
     /// Like `text(key)` but only looks into `section` (for MASS in [UNITS] versus [INERTIA]).
     [[nodiscard]] std::optional<std::string_view> text(std::string_view section, std::string_view key);
 
-    /// Numeric value of `key` (`parse_number`, AD-20).
+    /// Numeric value of `key` (`parse_number`).
     /// @return no value when the key is absent; INVALID_VALUE when the value is quoted; INVALID_NUMBER when the text
     ///         is not a finite number (both with file, line and key)
     [[nodiscard]] std::expected<std::optional<double>, error> number(std::string_view key);

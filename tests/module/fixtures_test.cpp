@@ -49,7 +49,7 @@ namespace {
       expected_file{.name = "lexical_mix.tir", .failure = std::nullopt},
   };
 
-  /// Keys of fixture S that no code reads: the header keys and the MSC scaling factors that PAC2002 does not use.
+  /// Keys of fixture S that no code reads: the header keys and the scaling factors that PAC2002 does not use.
   const std::vector<std::string> S_IGNORED_KEYS{"FILE_TYPE", "FILE_VERSION", "FILE_FORMAT", "LCZ", "LSGKP", "LSGAL", "LGYR"};
 
   /// The keys of mf52_user_pff.tir that no code reads: S_IGNORED_KEYS plus USER_SUB_ID (after FILE_FORMAT, file order).
@@ -190,10 +190,9 @@ TEST(data_fixtures, Mf52S52_LoadsAsFixtureS52) {
   EXPECT_EQ(loaded->model->metadata().fittyp, std::optional<int>{6});
   expect_same_limits(loaded->model->limits(), expected.limits);
 
-  // AD-19: the PAC2002-only camber factors of the file give one warning at the first of them (line 34).
+  // The PAC2002-only camber factors of the file give one warning at the first of them (line 34).
   ASSERT_EQ(loaded->warnings.size(), 1U);
-  EXPECT_EQ(loaded->warnings[0].message,
-            "MF 5.2 ignores parameters that are not part of MF 5.2: LGAX, LGAY, LGAZ (AD-19)");
+  EXPECT_EQ(loaded->warnings[0].message, "MF 5.2 ignores parameters that are not part of MF 5.2: LGAX, LGAY, LGAZ");
   EXPECT_EQ(loaded->warnings[0].where.file, data_file("mf52_S52.tir").string());
   EXPECT_EQ(loaded->warnings[0].where.key, "LGAX");
   EXPECT_EQ(loaded->warnings[0].where.line, 34U);
@@ -201,7 +200,7 @@ TEST(data_fixtures, Mf52S52_LoadsAsFixtureS52) {
 }
 
 TEST(data_fixtures, Mf52UserPff_LoadsAsMf52WithoutWarnings) {
-  // PROPERTY_FILE_FORMAT = 'USER' (TNO MF-Tyre ADAMS form) routes by FITTYP 6 (AD-11 amendment, Q-13).
+  // PROPERTY_FILE_FORMAT = 'USER' (TNO MF-Tyre ADAMS form) routes by FITTYP 6.
   const load_result loaded = load_fixture("mf52_user_pff.tir");
   ASSERT_TRUE(loaded.has_value()) << describe(loaded);
   const mf::mf5x_parameters expected = mf::test::fixture_s52();
@@ -237,8 +236,7 @@ TEST(data_fixtures, PacSEll_SelectsEllipseWithWarning) {
   expect_fixture_s_without_combined(coefficients_of(*loaded));
 
   ASSERT_EQ(loaded->warnings.size(), 1U);
-  EXPECT_TRUE(loaded->warnings[0].message.contains("friction-ellipse")) << loaded->warnings[0].message;
-  EXPECT_TRUE(loaded->warnings[0].message.contains("AD-07")) << loaded->warnings[0].message;
+  EXPECT_EQ(loaded->warnings[0].message, "no combined-slip R* coefficients: using the friction-ellipse method");
 }
 
 TEST(data_fixtures, PacSPart_FailsNamingRhx1) {

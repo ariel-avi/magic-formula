@@ -40,12 +40,12 @@ namespace {
     return mf::operating_point{.fz_n = fz, .kappa = kappa, .alpha_rad = alpha, .gamma_rad = gamma, .vx_mps = SPEED_MPS};
   }
 
-  kernels::longitudinal_terms longitudinal(const coeffs &c, double fz, double kappa, double gamma = 0.0) {
-    return kernels::pure_longitudinal(c, kernels::vertical_load(c, fz), fz, kappa, gamma);
+  kernels::longitudinal_terms fx0_at(const coeffs &c, double fz, double kappa, double gamma = 0.0) {
+    return kernels::fx0(c, kernels::vertical_load(c, fz), fz, kappa, gamma);
   }
 
-  kernels::lateral_terms lateral(const coeffs &c, double fz, double alpha, double gamma = 0.0) {
-    return kernels::pure_lateral(c, kernels::vertical_load(c, fz), fz, alpha, gamma);
+  kernels::lateral_terms fy0_at(const coeffs &c, double fz, double alpha, double gamma = 0.0) {
+    return kernels::fy0(c, kernels::vertical_load(c, fz), fz, alpha, gamma);
   }
 
   kernels::slip_state state_at(const coeffs &c, double fz, double kappa, double alpha, double gamma = 0.0) {
@@ -80,7 +80,7 @@ namespace {
     return std::bit_cast<std::array<std::uint64_t, sizeof(Terms_T) / sizeof(std::uint64_t)>>(terms);
   }
 
-  // The printed MSC friction-ellipse form (pac2002.md section 5.4) with |mu_act| and the 1/Fz factors. beta is
+  // The friction-ellipse form with |mu_act| and the 1/Fz factors (an independent reference). beta is
   // computed as atan2(|alpha*|, |kappa_c|), which equals acos(|kappa_c|/sqrt(kappa_c^2 + alpha*^2)) without the
   // precision loss of acos near 1.
   kernels::ellipse_ratios printed_form_ratios(const kernels::slip_state &s, double fz, double kappa, double alpha) {
@@ -178,8 +178,8 @@ TEST(mf5x_kernels, VerticalLoad_Lfzo12_DfzMinusOneSixth) {
   EXPECT_TRUE(rel_near_result(load.fz0_prime_n, 4800.0, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, PureLongitudinal_Kappa01_MatchesV2) {
-  const kernels::longitudinal_terms t = longitudinal(s_with({}), FZ_NOMINAL, 0.1);
+TEST(mf5x_kernels, Fx0_Kappa01_MatchesV2) {
+  const kernels::longitudinal_terms t = fx0_at(s_with({}), FZ_NOMINAL, 0.1);
   EXPECT_NEAR(t.fx0_n, 3935.48, printed_tol(2));
   EXPECT_TRUE(rel_near_result(t.fx0_n, 4000.0 * std::sin(1.5 * std::atan(4.0 / 3.0)), 1e-9));
   EXPECT_TRUE(rel_near_result(t.cx, 1.5, REL_TOL_CLOSED_FORM));
@@ -187,40 +187,40 @@ TEST(mf5x_kernels, PureLongitudinal_Kappa01_MatchesV2) {
   EXPECT_TRUE(rel_near_result(t.kx_n, 80000.0, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, PureLongitudinal_Pvx1_SvxOutsideSine_MatchesV4) {
-  const kernels::longitudinal_terms t = longitudinal(s_with({{&coeffs::PVX1, 0.01}}), FZ_NOMINAL, 0.0);
+TEST(mf5x_kernels, Fx0_Pvx1_SvxOutsideSine_MatchesV4) {
+  const kernels::longitudinal_terms t = fx0_at(s_with({{&coeffs::PVX1, 0.01}}), FZ_NOMINAL, 0.0);
   EXPECT_TRUE(rel_near_result(t.fx0_n, 40.0, REL_TOL_CLOSED_FORM));
   EXPECT_TRUE(rel_near_result(t.svx_n, 40.0, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, PureLongitudinal_SlopeAtOrigin_MatchesV7) {
+TEST(mf5x_kernels, Fx0_SlopeAtOrigin_MatchesV7) {
   const coeffs c = s_with({});
   constexpr double h = 1e-7;
-  const double plus = longitudinal(c, FZ_NOMINAL, h).fx0_n;
-  const double minus = longitudinal(c, FZ_NOMINAL, -h).fx0_n;
+  const double plus = fx0_at(c, FZ_NOMINAL, h).fx0_n;
+  const double minus = fx0_at(c, FZ_NOMINAL, -h).fx0_n;
   EXPECT_TRUE(rel_near_result((plus - minus) / (2.0 * h), 80000.0, 1e-6));
 }
 
-TEST(mf5x_kernels, PureLongitudinal_Lmux05_MatchesV8) {
-  const kernels::longitudinal_terms t = longitudinal(s_with({{&coeffs::LMUX, 0.5}}), FZ_NOMINAL, 0.1);
+TEST(mf5x_kernels, Fx0_Lmux05_MatchesV8) {
+  const kernels::longitudinal_terms t = fx0_at(s_with({{&coeffs::LMUX, 0.5}}), FZ_NOMINAL, 0.1);
   EXPECT_TRUE(rel_near_result(t.dx_n, 2000.0, REL_TOL_CLOSED_FORM));
   EXPECT_TRUE(rel_near_result(t.bx, 80.0 / 3.0, 1e-9));
 }
 
-TEST(mf5x_kernels, PureLongitudinal_Pdx3Lgax05_MatchesV16) {
+TEST(mf5x_kernels, Fx0_Pdx3Lgax05_MatchesV16) {
   const coeffs c = s_with({{&coeffs::PDX3, 10.0}, {&coeffs::LGAX, 0.5}});
-  const kernels::longitudinal_terms t = longitudinal(c, FZ_NOMINAL, 0.1, 0.1);
+  const kernels::longitudinal_terms t = fx0_at(c, FZ_NOMINAL, 0.1, 0.1);
   EXPECT_TRUE(rel_near_result(t.gamma_x, 0.1 * 0.5, REL_TOL_CLOSED_FORM));
   EXPECT_TRUE(rel_near_result(t.dx_n, 3900.0, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, PureLongitudinal_KxAtFnomin_EqualsPkx1FnominLkx) {
+TEST(mf5x_kernels, Fx0_KxAtFnomin_EqualsPkx1FnominLkx) {
   const coeffs c = s_with({{&coeffs::PKX2, 3.0}, {&coeffs::PKX3, 0.5}, {&coeffs::LKX, 1.1}});
-  const kernels::longitudinal_terms t = longitudinal(c, FZ_NOMINAL, 0.0);
+  const kernels::longitudinal_terms t = fx0_at(c, FZ_NOMINAL, 0.0);
   EXPECT_TRUE(rel_near_result(t.kx_n, 20.0 * 4000.0 * 1.1, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, PureLongitudinal_LoadDependence_ClosedForm) {
+TEST(mf5x_kernels, Fx0_LoadDependence_ClosedForm) {
   // Fz = 5000 gives dfz = 0.25.
   const coeffs c = s_with({{&coeffs::PDX2, 0.1},
                            {&coeffs::PKX2, 4.0},
@@ -229,7 +229,7 @@ TEST(mf5x_kernels, PureLongitudinal_LoadDependence_ClosedForm) {
                            {&coeffs::PHX2, 0.004},
                            {&coeffs::PVX1, 0.01},
                            {&coeffs::PVX2, 0.04}});
-  const kernels::longitudinal_terms t = longitudinal(c, 5000.0, 0.0);
+  const kernels::longitudinal_terms t = fx0_at(c, 5000.0, 0.0);
   EXPECT_TRUE(rel_near_result(t.mu_x, 1.025, REL_TOL_CLOSED_FORM));
   EXPECT_TRUE(rel_near_result(t.dx_n, 5125.0, REL_TOL_CLOSED_FORM));
   EXPECT_TRUE(rel_near_result(t.kx_n, 5000.0 * 21.0 * std::exp(0.1), REL_TOL_CLOSED_FORM));
@@ -238,14 +238,14 @@ TEST(mf5x_kernels, PureLongitudinal_LoadDependence_ClosedForm) {
   EXPECT_TRUE(rel_near_result(t.kappa_x, 0.002, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, PureLongitudinal_PeakMagnitude_EqualsDx) {
+TEST(mf5x_kernels, Fx0_PeakMagnitude_EqualsDx) {
   // P10: max |Fx0 - SVx| over kappa equals mu_x*Fz when Cx > 1.
   const coeffs c = s_with({{&coeffs::PVX1, 0.01}});
   constexpr double step_count = 20000.0;
   double peak = 0.0;
   double dx = 0.0;
   for (int i = -20000; i <= 20000; ++i) {
-    const kernels::longitudinal_terms t = longitudinal(c, FZ_NOMINAL, static_cast<double>(i) / step_count);
+    const kernels::longitudinal_terms t = fx0_at(c, FZ_NOMINAL, static_cast<double>(i) / step_count);
     peak = std::max(peak, std::abs(t.fx0_n - t.svx_n));
     dx = t.dx_n;
   }
@@ -253,10 +253,10 @@ TEST(mf5x_kernels, PureLongitudinal_PeakMagnitude_EqualsDx) {
   EXPECT_LE(peak, dx * (1.0 + 1e-12));
 }
 
-TEST(mf5x_kernels, PureLongitudinal_ExClamp_V15) {
-  const kernels::longitudinal_terms clamped = longitudinal(s_with({{&coeffs::PEX1, 1.5}}), FZ_NOMINAL, 0.1);
-  const kernels::longitudinal_terms at_one = longitudinal(s_with({{&coeffs::PEX1, 1.0}}), FZ_NOMINAL, 0.1);
-  const kernels::longitudinal_terms below = longitudinal(s_with({{&coeffs::PEX1, 0.999}}), FZ_NOMINAL, 0.1);
+TEST(mf5x_kernels, Fx0_ExClamp_V15) {
+  const kernels::longitudinal_terms clamped = fx0_at(s_with({{&coeffs::PEX1, 1.5}}), FZ_NOMINAL, 0.1);
+  const kernels::longitudinal_terms at_one = fx0_at(s_with({{&coeffs::PEX1, 1.0}}), FZ_NOMINAL, 0.1);
+  const kernels::longitudinal_terms below = fx0_at(s_with({{&coeffs::PEX1, 0.999}}), FZ_NOMINAL, 0.1);
   // V15: bit-equal to PEX1 = 1.0.
   EXPECT_EQ(bits(clamped.ex), bits(at_one.ex));
   EXPECT_EQ(bits(clamped.fx0_n), bits(at_one.fx0_n));
@@ -265,17 +265,17 @@ TEST(mf5x_kernels, PureLongitudinal_ExClamp_V15) {
   EXPECT_NE(bits(below.fx0_n), bits(at_one.fx0_n));
 }
 
-TEST(mf5x_kernels, PureLongitudinal_Pex4_CurvatureDependsOnSlipSign) {
+TEST(mf5x_kernels, Fx0_Pex4_CurvatureDependsOnSlipSign) {
   const coeffs c = s_with({{&coeffs::PEX1, 0.5}, {&coeffs::PEX4, 0.5}});
-  EXPECT_TRUE(rel_near_result(longitudinal(c, FZ_NOMINAL, 0.1).ex, 0.25, REL_TOL_CLOSED_FORM));
-  EXPECT_TRUE(rel_near_result(longitudinal(c, FZ_NOMINAL, -0.1).ex, 0.75, REL_TOL_CLOSED_FORM));
+  EXPECT_TRUE(rel_near_result(fx0_at(c, FZ_NOMINAL, 0.1).ex, 0.25, REL_TOL_CLOSED_FORM));
+  EXPECT_TRUE(rel_near_result(fx0_at(c, FZ_NOMINAL, -0.1).ex, 0.75, REL_TOL_CLOSED_FORM));
   // sgn+(-0.0) = +1.
-  EXPECT_TRUE(rel_near_result(longitudinal(c, FZ_NOMINAL, -0.0).ex, 0.25, REL_TOL_CLOSED_FORM));
+  EXPECT_TRUE(rel_near_result(fx0_at(c, FZ_NOMINAL, -0.0).ex, 0.25, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, PureLongitudinal_ZeroCxDx_GuardedFinite) {
+TEST(mf5x_kernels, Fx0_ZeroCxDx_GuardedFinite) {
   const coeffs c = s_with({{&coeffs::PCX1, 0.0}, {&coeffs::PVX1, 0.01}});
-  const kernels::longitudinal_terms t = longitudinal(c, FZ_NOMINAL, 0.1);
+  const kernels::longitudinal_terms t = fx0_at(c, FZ_NOMINAL, 0.1);
   EXPECT_TRUE(std::isfinite(t.bx));
   EXPECT_TRUE(rel_near_result(t.bx, 80000.0 / 1e-6, REL_TOL_CLOSED_FORM));
   EXPECT_TRUE(std::isfinite(t.fx0_n));
@@ -283,74 +283,74 @@ TEST(mf5x_kernels, PureLongitudinal_ZeroCxDx_GuardedFinite) {
   EXPECT_TRUE(rel_near_result(t.fx0_n, t.svx_n, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, PureLateral_Alpha005_MatchesV3) {
-  const kernels::lateral_terms t = lateral(s_with({}), FZ_NOMINAL, 0.05);
+TEST(mf5x_kernels, Fy0_Alpha005_MatchesV3) {
+  const kernels::lateral_terms t = fy0_at(s_with({}), FZ_NOMINAL, 0.05);
   EXPECT_NEAR(t.ky0_n, -55384.615, 0.0005);
   EXPECT_NEAR(t.by, -10.650888, 5e-7);
   EXPECT_NEAR(t.fy0_n, -2376.40, printed_tol(2));
 }
 
-TEST(mf5x_kernels, PureLateral_Lfzo12_MatchesV18) {
-  const kernels::lateral_terms t = lateral(s_with({{&coeffs::LFZO, 1.2}}), FZ_NOMINAL, 0.05);
+TEST(mf5x_kernels, Fy0_Lfzo12_MatchesV18) {
+  const kernels::lateral_terms t = fy0_at(s_with({{&coeffs::LFZO, 1.2}}), FZ_NOMINAL, 0.05);
   EXPECT_NEAR(t.ky0_n, -61132.08, printed_tol(2));
 }
 
-TEST(mf5x_kernels, PureLateral_KyMaximum_AtPky2Fnomin) {
+TEST(mf5x_kernels, Fy0_KyMaximum_AtPky2Fnomin) {
   // P9: |Ky| reaches |PKY1*FNOMIN*LKY| at Fz = PKY2*FNOMIN.
   const coeffs c = s_with({{&coeffs::LKY, 1.1}});
   const double fz_peak = 1.5 * 4000.0;
-  const double ky_peak = std::abs(lateral(c, fz_peak, 0.0).ky0_n);
+  const double ky_peak = std::abs(fy0_at(c, fz_peak, 0.0).ky0_n);
   EXPECT_TRUE(rel_near_result(ky_peak, std::abs(-15.0 * 4000.0 * 1.1), REL_TOL_CLOSED_FORM));
-  EXPECT_GT(ky_peak, std::abs(lateral(c, fz_peak * 0.99, 0.0).ky0_n));
-  EXPECT_GT(ky_peak, std::abs(lateral(c, fz_peak * 1.01, 0.0).ky0_n));
+  EXPECT_GT(ky_peak, std::abs(fy0_at(c, fz_peak * 0.99, 0.0).ky0_n));
+  EXPECT_GT(ky_peak, std::abs(fy0_at(c, fz_peak * 1.01, 0.0).ky0_n));
 }
 
-TEST(mf5x_kernels, PureLateral_Phy3_MatchesV17) {
-  const kernels::lateral_terms t = lateral(s_with({{&coeffs::PHY3, 0.1}}), FZ_NOMINAL, 0.0, 0.1);
+TEST(mf5x_kernels, Fy0_Phy3_MatchesV17) {
+  const kernels::lateral_terms t = fy0_at(s_with({{&coeffs::PHY3, 0.1}}), FZ_NOMINAL, 0.0, 0.1);
   EXPECT_TRUE(rel_near_result(t.gamma_y, 0.1, REL_TOL_CLOSED_FORM));
   EXPECT_TRUE(rel_near_result(t.shy, 0.01, REL_TOL_CLOSED_FORM));
   EXPECT_NEAR(t.fy0_n, -550.02, printed_tol(2));
 }
 
-TEST(mf5x_kernels, PureLateral_EyClamp) {
-  const kernels::lateral_terms clamped = lateral(s_with({{&coeffs::PEY1, 1.5}}), FZ_NOMINAL, 0.05);
-  const kernels::lateral_terms at_one = lateral(s_with({{&coeffs::PEY1, 1.0}}), FZ_NOMINAL, 0.05);
-  const kernels::lateral_terms below = lateral(s_with({{&coeffs::PEY1, 0.999}}), FZ_NOMINAL, 0.05);
+TEST(mf5x_kernels, Fy0_EyClamp) {
+  const kernels::lateral_terms clamped = fy0_at(s_with({{&coeffs::PEY1, 1.5}}), FZ_NOMINAL, 0.05);
+  const kernels::lateral_terms at_one = fy0_at(s_with({{&coeffs::PEY1, 1.0}}), FZ_NOMINAL, 0.05);
+  const kernels::lateral_terms below = fy0_at(s_with({{&coeffs::PEY1, 0.999}}), FZ_NOMINAL, 0.05);
   EXPECT_EQ(bits(clamped.ey), bits(at_one.ey));
   EXPECT_EQ(bits(clamped.fy0_n), bits(at_one.fy0_n));
   EXPECT_NE(bits(below.ey), bits(at_one.ey));
   EXPECT_NE(bits(below.fy0_n), bits(at_one.fy0_n));
 }
 
-TEST(mf5x_kernels, PureLateral_Pey3_CurvatureDependsOnSlipAngleSign) {
+TEST(mf5x_kernels, Fy0_Pey3_CurvatureDependsOnSlipAngleSign) {
   const coeffs c = s_with({{&coeffs::PEY1, 0.5}, {&coeffs::PEY3, 0.5}});
-  EXPECT_TRUE(rel_near_result(lateral(c, FZ_NOMINAL, 0.05).ey, 0.25, REL_TOL_CLOSED_FORM));
-  EXPECT_TRUE(rel_near_result(lateral(c, FZ_NOMINAL, -0.05).ey, 0.75, REL_TOL_CLOSED_FORM));
+  EXPECT_TRUE(rel_near_result(fy0_at(c, FZ_NOMINAL, 0.05).ey, 0.25, REL_TOL_CLOSED_FORM));
+  EXPECT_TRUE(rel_near_result(fy0_at(c, FZ_NOMINAL, -0.05).ey, 0.75, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, PureLateral_Camber_Pdy3Lgay) {
+TEST(mf5x_kernels, Fy0_Camber_Pdy3Lgay) {
   const coeffs c = s_with({{&coeffs::PDY3, 10.0}, {&coeffs::LGAY, 0.5}});
-  const kernels::lateral_terms t = lateral(c, FZ_NOMINAL, 0.0, 0.1);
+  const kernels::lateral_terms t = fy0_at(c, FZ_NOMINAL, 0.0, 0.1);
   EXPECT_TRUE(rel_near_result(t.gamma_y, 0.1 * 0.5, REL_TOL_CLOSED_FORM));
   EXPECT_TRUE(rel_near_result(t.dy_n, 3900.0, REL_TOL_CLOSED_FORM));
-  EXPECT_TRUE(rel_near_result(t.mu_y, kernels::lateral_friction(c, kernels::vertical_load(c, FZ_NOMINAL), 0.05),
-                              REL_TOL_CLOSED_FORM));
+  EXPECT_TRUE(
+      rel_near_result(t.mu_y, kernels::mu_y(c, kernels::vertical_load(c, FZ_NOMINAL), 0.05), REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, PureLateral_Pvy3_VerticalShiftFollowsCamber) {
+TEST(mf5x_kernels, Fy0_Pvy3_VerticalShiftFollowsCamber) {
   const coeffs c = s_with({{&coeffs::PVY3, 0.1}});
-  const kernels::lateral_terms t = lateral(c, FZ_NOMINAL, 0.0, 0.1);
+  const kernels::lateral_terms t = fy0_at(c, FZ_NOMINAL, 0.0, 0.1);
   EXPECT_TRUE(rel_near_result(t.svy_n, 4000.0 * 0.1 * 0.1, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, PureLateral_LoadDependence_ClosedForm) {
+TEST(mf5x_kernels, Fy0_LoadDependence_ClosedForm) {
   // Fz = 5000 gives dfz = 0.25.
   const coeffs c = s_with({{&coeffs::PDY2, -0.1},
                            {&coeffs::PHY1, 0.002},
                            {&coeffs::PHY2, 0.004},
                            {&coeffs::PVY1, 0.01},
                            {&coeffs::PVY2, 0.04}});
-  const kernels::lateral_terms t = lateral(c, 5000.0, 0.0);
+  const kernels::lateral_terms t = fy0_at(c, 5000.0, 0.0);
   EXPECT_TRUE(rel_near_result(t.mu_y, 0.975, REL_TOL_CLOSED_FORM));
   EXPECT_TRUE(rel_near_result(t.dy_n, 4875.0, REL_TOL_CLOSED_FORM));
   EXPECT_TRUE(rel_near_result(t.shy, 0.003, REL_TOL_CLOSED_FORM));
@@ -358,15 +358,15 @@ TEST(mf5x_kernels, PureLateral_LoadDependence_ClosedForm) {
   EXPECT_TRUE(rel_near_result(t.alpha_y, 0.003, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, PureLateral_Lky_ScalesKyLinearly) {
-  const double base = lateral(s_with({}), FZ_NOMINAL, 0.05).ky0_n;
-  const double scaled = lateral(s_with({{&coeffs::LKY, 0.7}}), FZ_NOMINAL, 0.05).ky0_n;
+TEST(mf5x_kernels, Fy0_Lky_ScalesKyLinearly) {
+  const double base = fy0_at(s_with({}), FZ_NOMINAL, 0.05).ky0_n;
+  const double scaled = fy0_at(s_with({{&coeffs::LKY, 0.7}}), FZ_NOMINAL, 0.05).ky0_n;
   EXPECT_TRUE(rel_near_result(scaled, 0.7 * base, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, PureLateral_KyZeroViaPky3_ByZero) {
+TEST(mf5x_kernels, Fy0_KyZeroViaPky3_ByZero) {
   const coeffs c = s_with({{&coeffs::PKY3, 1.0}, {&coeffs::PVY1, 0.01}});
-  const kernels::lateral_terms t = lateral(c, FZ_NOMINAL, 0.05, 1.0);
+  const kernels::lateral_terms t = fy0_at(c, FZ_NOMINAL, 0.05, 1.0);
   // Ky = Ky0*(1 - 1*1) is a product with an exact zero, so it is zero; sin(0) = 0 leaves Fy0 = SVy.
   constexpr double zero_tol = 1e-12;
   EXPECT_NEAR(t.ky_n, 0.0, zero_tol);
@@ -374,8 +374,8 @@ TEST(mf5x_kernels, PureLateral_KyZeroViaPky3_ByZero) {
   EXPECT_TRUE(rel_near_result(t.fy0_n, t.svy_n, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, PureLateral_NegativeCyDy_EpsilonSubtracted) {
-  const kernels::lateral_terms t = lateral(s_with({{&coeffs::PDY1, -1.0}}), FZ_NOMINAL, 0.05);
+TEST(mf5x_kernels, Fy0_NegativeCyDy_EpsilonSubtracted) {
+  const kernels::lateral_terms t = fy0_at(s_with({{&coeffs::PDY1, -1.0}}), FZ_NOMINAL, 0.05);
   EXPECT_LT(t.cy * t.dy_n, 0.0);
   // Equal to Ky/(Cy*Dy - 1e-6); a relative tolerance covers fused multiply-add targets.
   EXPECT_TRUE(rel_near_result(t.by, t.ky_n / ((t.cy * t.dy_n) - 1e-6), 1e-15));
@@ -386,8 +386,8 @@ TEST(mf5x_kernels, EvaluateSlipState_ComposesStages) {
   const mf::operating_point p = make_point(3500.0, 0.07, 0.04, 0.03);
   const kernels::slip_state s = kernels::evaluate_slip_state(c, p);
   const kernels::load_terms load = kernels::vertical_load(c, p.fz_n);
-  const kernels::longitudinal_terms lon = kernels::pure_longitudinal(c, load, p.fz_n, p.kappa, p.gamma_rad);
-  const kernels::lateral_terms lat = kernels::pure_lateral(c, load, p.fz_n, p.alpha_rad, p.gamma_rad);
+  const kernels::longitudinal_terms lon = kernels::fx0(c, load, p.fz_n, p.kappa, p.gamma_rad);
+  const kernels::lateral_terms lat = kernels::fy0(c, load, p.fz_n, p.alpha_rad, p.gamma_rad);
   const kernels::aligning_terms aln = kernels::aligning(c, load, lat, p.fz_n, p.alpha_rad, p.gamma_rad);
   EXPECT_EQ(raw_bits(s.load), raw_bits(load));
   EXPECT_EQ(raw_bits(s.lon), raw_bits(lon));
@@ -401,8 +401,8 @@ TEST(mf5x_kernels, Aligning_Alpha005_MatchesV11) {
   const coeffs c = s_with({});
   const double cos_alpha = std::cos(0.05);
   const kernels::slip_state s = state_at(c, FZ_NOMINAL, 0.0, 0.05);
-  const double t = kernels::trail(s.aln, s.aln.alpha_t, cos_alpha);
-  const double mz0 = -(t * s.lat.fy0_n) + kernels::residual_moment(s.aln, s.aln.alpha_r, cos_alpha);
+  const double t = kernels::t(s.aln, s.aln.alpha_t, cos_alpha);
+  const double mz0 = -(t * s.lat.fy0_n) + kernels::mzr(s.aln, s.aln.alpha_r, cos_alpha);
   EXPECT_NEAR(t, 0.0254434, 5e-8);
   EXPECT_NEAR(mz0, 60.46, printed_tol(2));
 }
@@ -464,80 +464,79 @@ TEST(mf5x_kernels, Aligning_CamberAndLoad_ClosedForm) {
   EXPECT_DOUBLE_EQ(s.aln.ct, 1.2);
 }
 
-TEST(mf5x_kernels, Trail_EvenInSlip) {
+TEST(mf5x_kernels, T_EvenInSlip) {
   // P5.
   const coeffs c = s_with({{&coeffs::QEZ1, 0.5}, {&coeffs::QEZ4, 0.2}});
   const kernels::slip_state s = state_at(c, FZ_NOMINAL, 0.0, 0.05);
   for (const double x : {0.01, 0.05, 0.3, 1.0}) {
-    EXPECT_TRUE(rel_near_result(kernels::trail(s.aln, -x, 0.9), kernels::trail(s.aln, x, 0.9), REL_TOL_CLOSED_FORM));
+    EXPECT_TRUE(rel_near_result(kernels::t(s.aln, -x, 0.9), kernels::t(s.aln, x, 0.9), REL_TOL_CLOSED_FORM));
   }
 }
 
-TEST(mf5x_kernels, ResidualMoment_EvenInSlip) {
+TEST(mf5x_kernels, Mzr_EvenInSlip) {
   // P5.
   const coeffs c = s_with({{&coeffs::QBZ10, 1.0}, {&coeffs::QDZ6, 0.01}});
   const kernels::slip_state s = state_at(c, FZ_NOMINAL, 0.0, 0.05);
   EXPECT_GT(std::abs(s.aln.dr_nm), 0.0);
   for (const double x : {0.01, 0.05, 0.3, 1.0}) {
-    EXPECT_TRUE(rel_near_result(kernels::residual_moment(s.aln, -x, 0.9), kernels::residual_moment(s.aln, x, 0.9),
-                                REL_TOL_CLOSED_FORM));
+    EXPECT_TRUE(rel_near_result(kernels::mzr(s.aln, -x, 0.9), kernels::mzr(s.aln, x, 0.9), REL_TOL_CLOSED_FORM));
   }
 }
 
-TEST(mf5x_kernels, EquivalentSlipAngle_ZeroKappa_ReturnsInput) {
+TEST(mf5x_kernels, AlphaEq_ZeroKappa_ReturnsInput) {
   // The tolerance covers the tan/atan round trip (a few ulp).
   for (const double a : {0.05, -0.05}) {
-    EXPECT_TRUE(rel_near_result(kernels::equivalent_slip_angle(a, 0.0, 8e4, -5.5e4), a, 1e-14));
+    EXPECT_TRUE(rel_near_result(kernels::alpha_eq(a, 0.0, 8e4, -5.5e4), a, 1e-14));
   }
 }
 
-TEST(mf5x_kernels, EquivalentSlipAngle_SignAtZero_UsesSgnPlus) {
+TEST(mf5x_kernels, AlphaEq_SignAtZero_UsesSgnPlus) {
   // sgn+(+0.0) = sgn+(-0.0) = +1; the sign flips only for a < 0.
-  EXPECT_GT(kernels::equivalent_slip_angle(0.0, 0.1, 8e4, -5.5e4), 0.0);
-  EXPECT_GT(kernels::equivalent_slip_angle(-0.0, 0.1, 8e4, -5.5e4), 0.0);
-  EXPECT_LT(kernels::equivalent_slip_angle(-1e-9, 0.1, 8e4, -5.5e4), 0.0);
-  EXPECT_GT(kernels::equivalent_slip_angle(1e-9, 0.1, 8e4, -5.5e4), 0.0);
+  EXPECT_GT(kernels::alpha_eq(0.0, 0.1, 8e4, -5.5e4), 0.0);
+  EXPECT_GT(kernels::alpha_eq(-0.0, 0.1, 8e4, -5.5e4), 0.0);
+  EXPECT_LT(kernels::alpha_eq(-1e-9, 0.1, 8e4, -5.5e4), 0.0);
+  EXPECT_GT(kernels::alpha_eq(1e-9, 0.1, 8e4, -5.5e4), 0.0);
 }
 
-TEST(mf5x_kernels, EquivalentSlipAngle_ClosedForm) {
+TEST(mf5x_kernels, AlphaEq_ClosedForm) {
   const double tan_a = std::tan(0.1);
   const double ratio = 8e4 / -5.5e4;
   const double expected = std::atan(std::sqrt((tan_a * tan_a) + (ratio * ratio * 0.05 * 0.05)));
-  EXPECT_TRUE(rel_near_result(kernels::equivalent_slip_angle(0.1, 0.05, 8e4, -5.5e4), expected, REL_TOL_CLOSED_FORM));
+  EXPECT_TRUE(rel_near_result(kernels::alpha_eq(0.1, 0.05, 8e4, -5.5e4), expected, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, LongitudinalWeighting_ZeroB_ReturnsOne) {
+TEST(mf5x_kernels, Gxa_ZeroB_ReturnsOne) {
   const coeffs c = s_with({{&coeffs::RBX1, 0.0}});
-  const double gxa = kernels::longitudinal_weighting(c, kernels::vertical_load(c, FZ_NOMINAL), 0.1, 0.1);
+  const double gxa = kernels::gxa(c, kernels::vertical_load(c, FZ_NOMINAL), 0.1, 0.1);
   EXPECT_TRUE(rel_near_result(gxa, 1.0, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, LongitudinalWeighting_MatchesV12Factor) {
+TEST(mf5x_kernels, Gxa_MatchesV12Factor) {
   const coeffs c = s_with({});
-  const double gxa = kernels::longitudinal_weighting(c, kernels::vertical_load(c, FZ_NOMINAL), 0.1, 0.1);
+  const double gxa = kernels::gxa(c, kernels::vertical_load(c, FZ_NOMINAL), 0.1, 0.1);
   EXPECT_TRUE(rel_near_result(gxa, std::cos(std::numbers::pi / 4.0), REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, LateralWeighting_ZeroB_ReturnsOne) {
+TEST(mf5x_kernels, Gyk_ZeroB_ReturnsOne) {
   const coeffs c = s_with({{&coeffs::RBY1, 0.0}});
-  const double gyk = kernels::lateral_weighting(c, kernels::vertical_load(c, FZ_NOMINAL), 0.1, 0.05);
+  const double gyk = kernels::gyk(c, kernels::vertical_load(c, FZ_NOMINAL), 0.1, 0.05);
   EXPECT_TRUE(rel_near_result(gyk, 1.0, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, LateralWeighting_MatchesV13Factor) {
+TEST(mf5x_kernels, Gyk_MatchesV13Factor) {
   const coeffs c = s_with({});
-  const double gyk = kernels::lateral_weighting(c, kernels::vertical_load(c, FZ_NOMINAL), 0.1, 0.05);
+  const double gyk = kernels::gyk(c, kernels::vertical_load(c, FZ_NOMINAL), 0.1, 0.05);
   EXPECT_TRUE(rel_near_result(gyk, std::cos(std::numbers::pi / 4.0), REL_TOL_CLOSED_FORM));
 }
 
 TEST(mf5x_kernels, Weighting_ExaEykClamp) {
   const auto gxa = [](double rex1) {
     const coeffs c = s_with({{&coeffs::REX1, rex1}});
-    return kernels::longitudinal_weighting(c, kernels::vertical_load(c, FZ_NOMINAL), 0.1, 0.1);
+    return kernels::gxa(c, kernels::vertical_load(c, FZ_NOMINAL), 0.1, 0.1);
   };
   const auto gyk = [](double rey1) {
     const coeffs c = s_with({{&coeffs::REY1, rey1}});
-    return kernels::lateral_weighting(c, kernels::vertical_load(c, FZ_NOMINAL), 0.1, 0.05);
+    return kernels::gyk(c, kernels::vertical_load(c, FZ_NOMINAL), 0.1, 0.05);
   };
   EXPECT_EQ(bits(gxa(1.5)), bits(gxa(1.0)));
   EXPECT_NE(bits(gxa(0.999)), bits(gxa(1.0)));
@@ -548,25 +547,25 @@ TEST(mf5x_kernels, Weighting_ExaEykClamp) {
 TEST(mf5x_kernels, Weighting_NotBoundedByOne) {
   // No G <= 1 assumption: a horizontal shift makes the numerator exceed the denominator.
   const coeffs c = s_with({{&coeffs::RHX1, 0.1}});
-  const double gxa = kernels::longitudinal_weighting(c, kernels::vertical_load(c, FZ_NOMINAL), 0.1, -0.1);
+  const double gxa = kernels::gxa(c, kernels::vertical_load(c, FZ_NOMINAL), 0.1, -0.1);
   EXPECT_GT(gxa, 1.0);
   EXPECT_TRUE(rel_near_result(gxa, 1.0 / std::cos(std::numbers::pi / 4.0), REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, KappaInducedSideForce_MatchesV14) {
+TEST(mf5x_kernels, Svyk_MatchesV14) {
   const coeffs c = s_with({{&coeffs::RBY1, 0.0}, {&coeffs::RVY1, 0.1}, {&coeffs::RVY5, 1.0}, {&coeffs::RVY6, 10.0}});
   const kernels::load_terms load = kernels::vertical_load(c, FZ_NOMINAL);
-  const double mu_y = kernels::lateral_friction(c, load, 0.0);
-  EXPECT_NEAR(kernels::kappa_induced_side_force(c, load, mu_y, FZ_NOMINAL, 0.1, 0.05, 0.0), 282.843, 0.0005);
+  const double mu_y = kernels::mu_y(c, load, 0.0);
+  EXPECT_NEAR(kernels::svyk(c, load, mu_y, FZ_NOMINAL, 0.1, 0.05, 0.0), 282.843, 0.0005);
 }
 
-TEST(mf5x_kernels, KappaInducedSideForce_ZeroCoefficients_ReturnsZero) {
+TEST(mf5x_kernels, Svyk_ZeroCoefficients_ReturnsZero) {
   const coeffs c = s_with({});
   const kernels::load_terms load = kernels::vertical_load(c, FZ_NOMINAL);
-  EXPECT_NEAR(kernels::kappa_induced_side_force(c, load, 1.0, FZ_NOMINAL, 0.1, 0.05, 0.1), 0.0, 1e-12);
+  EXPECT_NEAR(kernels::svyk(c, load, 1.0, FZ_NOMINAL, 0.1, 0.05, 0.1), 0.0, 1e-12);
 }
 
-TEST(mf5x_kernels, KappaInducedSideForce_CamberAndLoad_ClosedForm) {
+TEST(mf5x_kernels, Svyk_CamberAndLoad_ClosedForm) {
   // Fz = 5000 gives dfz = 0.25; DVyk = mu_y*Fz*(RVY1 + RVY2*dfz + RVY3*gamma)*cos(atan(RVY4*alpha)).
   const coeffs c = s_with({{&coeffs::RVY1, 0.1},
                            {&coeffs::RVY2, 0.2},
@@ -578,8 +577,7 @@ TEST(mf5x_kernels, KappaInducedSideForce_CamberAndLoad_ClosedForm) {
   const kernels::load_terms load = kernels::vertical_load(c, 5000.0);
   const double dvyk = 1.0 * 5000.0 * (0.1 + (0.2 * 0.25) + (0.5 * 0.1)) * std::cos(std::atan(2.0 * 0.05));
   const double expected = dvyk * std::sin(std::atan(10.0 * 0.1)) * 0.8;
-  EXPECT_TRUE(rel_near_result(kernels::kappa_induced_side_force(c, load, 1.0, 5000.0, 0.1, 0.05, 0.1), expected,
-                              REL_TOL_CLOSED_FORM));
+  EXPECT_TRUE(rel_near_result(kernels::svyk(c, load, 1.0, 5000.0, 0.1, 0.05, 0.1), expected, REL_TOL_CLOSED_FORM));
 }
 
 TEST(mf5x_kernels, CosineCombinedForces_MatchesV12V13) {
@@ -676,74 +674,74 @@ TEST(mf5x_kernels, FrictionEllipse_ZeroKx_GuardedFinite) {
 
 // ---- moment arm, Mx, My -----------------------------------------------------------------------------------------
 
-TEST(mf5x_kernels, MomentArm_ClosedForm) {
+TEST(mf5x_kernels, S_ClosedForm) {
   const coeffs c = s_with(
       {{&coeffs::SSZ1, 0.1}, {&coeffs::SSZ2, 0.2}, {&coeffs::SSZ3, 0.3}, {&coeffs::SSZ4, 0.4}, {&coeffs::LS, 0.9}});
   const kernels::load_terms load = kernels::vertical_load(c, FZ_NOMINAL);
   // R0*(SSZ1 + SSZ2*Fy/FNOMIN + (SSZ3 + SSZ4*dfz)*gamma)*LS with dfz = 0.
   const double expected = 0.3 * (0.1 + (0.2 * -1000.0 / 4000.0) + (0.3 * 0.05)) * 0.9;
-  EXPECT_TRUE(rel_near_result(kernels::moment_arm(c, load, -1000.0, 0.05), expected, REL_TOL_CLOSED_FORM));
-  EXPECT_TRUE(rel_near_result(kernels::moment_arm(c, load, -1000.0, 0.05), 0.01755, REL_TOL_CLOSED_FORM));
+  EXPECT_TRUE(rel_near_result(kernels::s(c, load, -1000.0, 0.05), expected, REL_TOL_CLOSED_FORM));
+  EXPECT_TRUE(rel_near_result(kernels::s(c, load, -1000.0, 0.05), 0.01755, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, MomentArm_Lfzo12_NormalisedByFnomin) {
+TEST(mf5x_kernels, S_Lfzo12_NormalisedByFnomin) {
   const coeffs c = s_with(
       {{&coeffs::LFZO, 1.2}, {&coeffs::SSZ1, 0.1}, {&coeffs::SSZ2, 0.2}, {&coeffs::SSZ3, 0.3}, {&coeffs::SSZ4, 0.4}});
   const kernels::load_terms load = kernels::vertical_load(c, FZ_NOMINAL);
   const double dfz = -1.0 / 6.0;
   const double expected = 0.3 * (0.1 + (0.2 * -1000.0 / 4000.0) + ((0.3 + (0.4 * dfz)) * 0.05));
   const double with_f0_prime = 0.3 * (0.1 + (0.2 * -1000.0 / 4800.0) + ((0.3 + (0.4 * dfz)) * 0.05));
-  const double actual = kernels::moment_arm(c, load, -1000.0, 0.05);
+  const double actual = kernels::s(c, load, -1000.0, 0.05);
   EXPECT_TRUE(rel_near_result(actual, expected, REL_TOL_CLOSED_FORM));
   EXPECT_FALSE(rel_near_result(actual, with_f0_prime, 1e-6));
 }
 
-TEST(mf5x_kernels, OverturningMoment_MatchesV9) {
+TEST(mf5x_kernels, Mx_MatchesV9) {
   const coeffs c = s_with({{&coeffs::QSX1, 0.01}, {&coeffs::QSX2, 0.5}, {&coeffs::QSX3, 0.1}});
-  EXPECT_TRUE(rel_near_result(kernels::overturning_moment(c, FZ_NOMINAL, 0.0, 0.05), -18.0, REL_TOL_CLOSED_FORM));
+  EXPECT_TRUE(rel_near_result(kernels::mx(c, FZ_NOMINAL, 0.0, 0.05), -18.0, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, OverturningMoment_ClosedForm) {
+TEST(mf5x_kernels, Mx_ClosedForm) {
   // P11 with LVMX = 0.8, LMX = 1.1 and Fy = 500.
   const coeffs c = s_with(
       {{&coeffs::QSX1, 0.01}, {&coeffs::QSX2, 0.5}, {&coeffs::QSX3, 0.1}, {&coeffs::LVMX, 0.8}, {&coeffs::LMX, 1.1}});
   const double expected = 0.3 * 4000.0 * ((0.01 * 0.8) - (0.5 * 0.05) + (0.1 * 500.0 / 4000.0)) * 1.1;
-  EXPECT_TRUE(rel_near_result(kernels::overturning_moment(c, FZ_NOMINAL, 500.0, 0.05), expected, REL_TOL_CLOSED_FORM));
+  EXPECT_TRUE(rel_near_result(kernels::mx(c, FZ_NOMINAL, 500.0, 0.05), expected, REL_TOL_CLOSED_FORM));
   EXPECT_TRUE(rel_near_result(expected, -5.94, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, RollingResistance_MatchesV5) {
-  const double my = kernels::rolling_resistance_moment(s_with({}), FZ_NOMINAL, 0.0, SPEED_MPS);
+TEST(mf5x_kernels, My_MatchesV5) {
+  const double my = kernels::my(s_with({}), FZ_NOMINAL, 0.0, SPEED_MPS);
   EXPECT_TRUE(rel_near_result(my, -12.0, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, RollingResistance_SpeedTerms_MatchesV21) {
+TEST(mf5x_kernels, My_SpeedTerms_MatchesV21) {
   const coeffs c = s_with({{&coeffs::QSY3, 0.1}, {&coeffs::QSY4, 0.01}});
-  const double my = kernels::rolling_resistance_moment(c, FZ_NOMINAL, 0.0, SPEED_MPS);
+  const double my = kernels::my(c, FZ_NOMINAL, 0.0, SPEED_MPS);
   const double ratio = 10.0 / 16.6;
   const double expected = -1200.0 * (0.01 + (0.1 * ratio) + (0.01 * std::pow(ratio, 4.0)));
   EXPECT_TRUE(rel_near_result(my, expected, REL_TOL_CLOSED_FORM));
   EXPECT_NEAR(my, -85.87, printed_tol(2));
 }
 
-TEST(mf5x_kernels, RollingResistance_NegativeSpeed_UsesAbsoluteValueForLinearTerm) {
+TEST(mf5x_kernels, My_NegativeSpeed_UsesAbsoluteValueForLinearTerm) {
   const coeffs c = s_with({{&coeffs::QSY3, 0.1}});
-  const double forward = kernels::rolling_resistance_moment(c, FZ_NOMINAL, 0.0, SPEED_MPS);
-  const double backward = kernels::rolling_resistance_moment(c, FZ_NOMINAL, 0.0, -SPEED_MPS);
+  const double forward = kernels::my(c, FZ_NOMINAL, 0.0, SPEED_MPS);
+  const double backward = kernels::my(c, FZ_NOMINAL, 0.0, -SPEED_MPS);
   EXPECT_TRUE(rel_near_result(backward, forward, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, RollingResistance_LinearInFx) {
+TEST(mf5x_kernels, My_LinearInFx) {
   // P12: the slope of My_out versus Fx is -R0*Fz*QSY2*LMY/FNOMIN.
   const coeffs c = s_with({{&coeffs::QSY2, 0.1}, {&coeffs::LMY, 0.9}});
-  const double at_zero = kernels::rolling_resistance_moment(c, FZ_NOMINAL, 0.0, SPEED_MPS);
-  const double at_1000 = kernels::rolling_resistance_moment(c, FZ_NOMINAL, 1000.0, SPEED_MPS);
+  const double at_zero = kernels::my(c, FZ_NOMINAL, 0.0, SPEED_MPS);
+  const double at_1000 = kernels::my(c, FZ_NOMINAL, 1000.0, SPEED_MPS);
   const double expected_slope = -0.3 * 4000.0 * 0.1 * 0.9 / 4000.0;
   EXPECT_TRUE(rel_near_result((at_1000 - at_zero) / 1000.0, expected_slope, REL_TOL_CLOSED_FORM));
 }
 
-TEST(mf5x_kernels, RollingResistanceEq88_MatchesV10) {
+TEST(mf5x_kernels, MyFromShifts_MatchesV10) {
   const coeffs c = s_with({{&coeffs::PHX1, 0.001}, {&coeffs::PVX1, 0.01}});
-  const kernels::longitudinal_terms lon = longitudinal(c, FZ_NOMINAL, 0.0);
-  EXPECT_TRUE(rel_near_result(kernels::rolling_resistance_moment_eq88(c, lon), -36.0, REL_TOL_CLOSED_FORM));
+  const kernels::longitudinal_terms lon = fx0_at(c, FZ_NOMINAL, 0.0);
+  EXPECT_TRUE(rel_near_result(kernels::my_from_shifts(c, lon), -36.0, REL_TOL_CLOSED_FORM));
 }

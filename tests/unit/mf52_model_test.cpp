@@ -72,7 +72,7 @@ namespace {
     return unwrap(run(parameters, point, mode));
   }
 
-  // [impl] cos'(alpha) = Vx/(Vc + eps) with Vc = hypot(Vx, tan(alpha)*Vx) (conventions.md section 6).
+  // cos'(alpha) = Vx/(Vc + eps) with Vc = hypot(Vx, tan(alpha)*Vx).
   double cos_prime(double alpha, double vx) {
     return vx / (std::hypot(vx, std::tan(alpha) * vx) + kernels::EPSILON);
   }
@@ -165,7 +165,7 @@ TEST(mf52_model, Evaluate_M2_PureLateral) {
 }
 
 TEST(mf52_model, Evaluate_M3_RawGamma) {
-  // LGAX is ignored by MF 5.2 (D-14): gamma enters raw, mu_x = 1 - PDX3*gamma^2 = 0.9 and Dx = 3600.
+  // LGAX is ignored by MF 5.2: gamma enters raw, mu_x = 1 - PDX3*gamma^2 = 0.9 and Dx = 3600.
   const parameters_t parameters = s52_with({{&coeffs::PDX3, 10.0}, {&coeffs::LGAX, 0.5}});
   const mf::tire_outputs out = eval(parameters, make_point(FZ_NOMINAL, 0.1, 0.0, 0.1));
   constexpr double dx = 3600.0;
@@ -192,12 +192,12 @@ TEST(mf52_model, Evaluate_M6_Lfzo12) {
   ASSERT_TRUE(model.has_value());
   const kernels::slip_state state = kernels::evaluate_slip_state(model->coefficients(), point);
   EXPECT_NEAR(state.lat.ky_n, -61132.08, printed_tol(2));
-  // The effective trail amplitude Dt*LFZO of the MF 5.2 form equals the shared R0/FNOMIN form: 0.03 m (AD-18).
+  // The effective trail amplitude Dt*LFZO of the MF 5.2 form equals the shared R0/FNOMIN form: 0.03 m.
   EXPECT_TRUE(rel_near_result(state.aln.dt_m, 0.03, REL_TOL_CLOSED_FORM));
   const result_t out = model->evaluate(point);
   ASSERT_TRUE(out.has_value());
   EXPECT_TRUE(rel_near_result(out->fy_n, state.lat.fy0_n, REL_TOL_CLOSED_FORM));
-  const double trail_m = kernels::trail(state.aln, state.aln.alpha_t, cos_prime(point.alpha_rad, point.vx_mps));
+  const double trail_m = kernels::t(state.aln, state.aln.alpha_t, cos_prime(point.alpha_rad, point.vx_mps));
   EXPECT_TRUE(rel_near_result(-out->mz_nm / out->fy_n, trail_m, 1e-9));
 }
 
@@ -243,7 +243,7 @@ TEST(mf52_model, Evaluate_NanVx_RejectedByBase) {
 }
 
 TEST(mf52_model, Evaluate_M9_ZeroRbx1_NoFxReduction) {
-  // Gxa = 1 when RBX1 = 0 (missing R* keys default to 0 in MF 5.2, AD-08).
+  // Gxa = 1 when RBX1 = 0 (missing R* keys default to 0 in MF 5.2).
   const parameters_t parameters = s52_with({{&coeffs::RBX1, 0.0}});
   const point_t point = make_point(FZ_NOMINAL, 0.1, 0.1);
   const std::expected<mf::mf52_model, mf::error> model = mf::mf52_model::create(parameters);
@@ -299,7 +299,7 @@ TEST(mf52_model, Evaluate_P3_ZeroKappaIdentity) {
   const mf::tire_outputs combined = eval(parameters, point, slip_mode::COMBINED);
   const mf::tire_outputs pure = eval(parameters, point, slip_mode::UNCOMBINED);
   const kernels::slip_state state = kernels::evaluate_slip_state(parameters.coefficients, point);
-  const double arm_m = kernels::moment_arm(parameters.coefficients, state.load, combined.fy_n, point.gamma_rad);
+  const double arm_m = kernels::s(parameters.coefficients, state.load, combined.fy_n, point.gamma_rad);
   // The Fx term is not trivially zero.
   EXPECT_GT(std::abs(arm_m * combined.fx_n), 0.1);
   EXPECT_TRUE(rel_near_result(combined.mz_nm - (arm_m * combined.fx_n), pure.mz_nm, REL_TOL_CLOSED_FORM));
@@ -314,9 +314,9 @@ TEST(mf52_model, Evaluate_Uncombined_PureForcesAndCosPrimeTrail) {
   const kernels::slip_state state = kernels::evaluate_slip_state(parameters.coefficients, point);
   EXPECT_EQ(bits(out.fx_n), bits(state.lon.fx0_n));
   EXPECT_EQ(bits(out.fy_n), bits(state.lat.fy0_n));
-  // Mz0 = -t(alpha_t, cos')*Fy0 + Mzr(alpha_r, cos); the residual moment uses cos(alpha) (mf52.md section 4).
-  const double trail_m = kernels::trail(state.aln, state.aln.alpha_t, cos_prime(point.alpha_rad, point.vx_mps));
-  const double residual_nm = kernels::residual_moment(state.aln, state.aln.alpha_r, std::cos(point.alpha_rad));
+  // Mz0 = -t(alpha_t, cos')*Fy0 + Mzr(alpha_r, cos); the residual moment uses cos(alpha).
+  const double trail_m = kernels::t(state.aln, state.aln.alpha_t, cos_prime(point.alpha_rad, point.vx_mps));
+  const double residual_nm = kernels::mzr(state.aln, state.aln.alpha_r, std::cos(point.alpha_rad));
   EXPECT_GT(std::abs(residual_nm), 0.0);
   EXPECT_TRUE(rel_near_result(out.mz_nm, -(trail_m * state.lat.fy0_n) + residual_nm, REL_TOL_CLOSED_FORM));
 }

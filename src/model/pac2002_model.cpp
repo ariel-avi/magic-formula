@@ -10,8 +10,8 @@
 
 namespace mf {
   namespace {
-    /// MSC p.33: eq (88) replaces eq (87) for FITTYP 5 with QSY1 = QSY2 = 0. Each operand is driven both ways by tests.
-    bool selects_eq88(const mf5x_parameters &parameters) {
+    /// True for FITTYP 5 with QSY1 = QSY2 = 0. Each operand is driven both ways by tests.
+    bool selects_my_from_shifts(const mf5x_parameters &parameters) {
       const mf5x_coefficients &c = parameters.coefficients;
       return parameters.metadata.fittyp == 5 && c.QSY1 == 0.0 && c.QSY2 == 0.0;
     }
@@ -25,7 +25,7 @@ namespace mf {
   }
 
   pac2002_model::pac2002_model(const mf5x_parameters &parameters, combined_method method)
-      : mf5x_model(parameters), method_(method), eq88_(selects_eq88(parameters)) {}
+      : mf5x_model(parameters), method_(method), my_from_shifts_(selects_my_from_shifts(parameters)) {}
 
   std::string_view pac2002_model::name() const noexcept {
     return "PAC2002";
@@ -35,19 +35,17 @@ namespace mf {
     return method_;
   }
 
-  bool pac2002_model::uses_eq88_rolling_resistance() const noexcept {
-    return eq88_;
+  bool pac2002_model::uses_my_from_shifts() const noexcept {
+    return my_from_shifts_;
   }
 
   double pac2002_model::trail_cosine(const operating_point &point) const noexcept {
-    // Eq (44).
     return std::cos(point.alpha_rad);
   }
 
   detail::combined_forces pac2002_model::combine(const operating_point &point,
                                                  const detail::slip_state &state) const noexcept {
     if (method_ == combined_method::FRICTION_ELLIPSE) {
-      // MSC p.33-34 with SVyk = 0 (D-06, AD-24).
       const detail::ellipse_ratios ratios = detail::friction_ellipse_ratios(state, point.kappa, point.alpha_rad);
       const double fx_n = state.lon.fx0_n * ratios.rx;
       const double fy_n = state.lat.fy0_n * ratios.ry;
@@ -56,12 +54,10 @@ namespace mf {
     return mf5x_model::combine(point, state);
   }
 
-  double pac2002_model::rolling_resistance(const operating_point &point, const detail::slip_state &state,
-                                           double fx_n) const noexcept {
-    if (eq88_) {
-      // Negative of eq (88) (AD-17).
-      return detail::rolling_resistance_moment_eq88(coefficients(), state.lon);
+  double pac2002_model::my(const operating_point &point, const detail::slip_state &state, double fx_n) const noexcept {
+    if (my_from_shifts_) {
+      return detail::my_from_shifts(coefficients(), state.lon);
     }
-    return mf5x_model::rolling_resistance(point, state, fx_n);
+    return mf5x_model::my(point, state, fx_n);
   }
 } // namespace mf

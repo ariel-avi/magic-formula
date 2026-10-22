@@ -14,11 +14,11 @@ namespace mf {
     DUPLICATE_KEY,     ///< a key or column that appears twice
     MISSING_KEY,       ///< a required key or column is absent
     INVALID_VALUE,     ///< a well-formed value that is not acceptable (range, type, relation)
-    UNSUPPORTED_UNIT,  ///< a unit other than the supported SI units (docs/research/decisions.md, AD-10)
-    UNSUPPORTED_MODEL, ///< a model/format identification that routes to no implemented model (AD-11)
-    NOT_IMPLEMENTED,   ///< a recognised but unimplemented feature (for example TYRESIDE mirroring, AD-06)
-    INVALID_INPUT,     ///< an operating point outside the model domain (AD-02)
-    NUMERICAL,         ///< a non-finite result (AD-22)
+    UNSUPPORTED_UNIT,  ///< a unit other than the supported SI units
+    UNSUPPORTED_MODEL, ///< a model/format identification that routes to no implemented model
+    NOT_IMPLEMENTED,   ///< a recognised but unimplemented feature (for example TYRESIDE mirroring)
+    INVALID_INPUT,     ///< an operating point outside the model domain
+    NUMERICAL,         ///< a non-finite result
   };
 
   /// Where a diagnostic applies. An empty file, line 0 and an empty key mean "not applicable".
@@ -33,11 +33,9 @@ namespace mf {
 
   /// A recoverable error: category, human-readable message and source location.
   struct error {
-    /// Category.
     error_code code = error_code::INVALID_VALUE;
     /// What went wrong, naming the key/column and the offending value.
     std::string message;
-    /// Where it went wrong.
     location where;
   };
 
@@ -45,7 +43,6 @@ namespace mf {
   struct warning {
     /// What the caller should know.
     std::string message;
-    /// Where it applies.
     location where;
   };
 

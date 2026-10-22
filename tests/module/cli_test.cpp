@@ -188,8 +188,7 @@ namespace {
   }
 
   /// Fixed text of the pressure warning.
-  constexpr std::string_view PRESSURE_WARNING =
-      "column P is ignored: PAC2002 and MF 5.2 have no pressure input (AD-09)";
+  constexpr std::string_view PRESSURE_WARNING = "column P is ignored: PAC2002 and MF 5.2 have no pressure input";
 } // namespace
 
 TEST(cli_run, Run_PacSVectors_PrintsExpectedRows) {
@@ -234,7 +233,7 @@ TEST(cli_run, Run_PacSVectors_PrintsExpectedRows) {
 TEST(cli_run, Run_Mf52Vectors_PrintsM1M2M5) {
   const run_result result = run_files("inputs_s_vectors.csv", "mf52_S52.tir");
   EXPECT_EQ(result.code, mf::cli::EXIT_OK);
-  // AD-19: the PAC2002-only camber factors of the file give one warning.
+  // The PAC2002-only camber factors of the file give one warning.
   EXPECT_TRUE(result.err.contains("mf: warning: ")) << result.err;
   EXPECT_TRUE(result.err.contains("LGAX, LGAY, LGAZ")) << result.err;
   EXPECT_EQ(count_of(result.err, "mf: warning: "), 1U) << result.err;
@@ -252,7 +251,7 @@ TEST(cli_run, Run_Mf52Vectors_PrintsM1M2M5) {
 }
 
 TEST(cli_run, Run_Mf52UserPff_ExitsZeroWithFiniteRowsEqualToMf52Run) {
-  // PROPERTY_FILE_FORMAT = 'USER' with FITTYP 6 routes to MF 5.2 (AD-11 amendment, Q-13): same numbers, no warning.
+  // PROPERTY_FILE_FORMAT = 'USER' with FITTYP 6 routes to MF 5.2: same numbers, no warning.
   const run_result user = run_files("inputs_s_vectors.csv", "mf52_user_pff.tir");
   EXPECT_EQ(user.code, mf::cli::EXIT_OK) << user.err;
   EXPECT_TRUE(user.err.empty()) << user.err;
@@ -345,16 +344,16 @@ TEST(cli_run, Run_Ranges_OneWarningPerVariable) {
   EXPECT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
   const std::string table = data_file("inputs_ranges.csv").string();
   EXPECT_TRUE(result.err.contains(table + ":5: SR outside the property-file range in 1 row(s); "
-                                          "evaluated at the limit (AD-15)\n"))
+                                          "evaluated at the limit\n"))
       << result.err;
   EXPECT_TRUE(result.err.contains(table + ":6: SA outside the property-file range in 1 row(s); "
-                                          "evaluated at the limit (AD-15)\n"))
+                                          "evaluated at the limit\n"))
       << result.err;
   EXPECT_TRUE(result.err.contains(table + ":7: IA outside the property-file range in 1 row(s); "
-                                          "evaluated at the limit (AD-15)\n"))
+                                          "evaluated at the limit\n"))
       << result.err;
   EXPECT_TRUE(result.err.contains(table + ":8: FZ outside the property-file range in 2 row(s); "
-                                          "evaluated at the limit (AD-15)\n"))
+                                          "evaluated at the limit\n"))
       << result.err;
   EXPECT_EQ(count_of(result.err, "mf: warning: "), 4U) << result.err;
 
@@ -403,8 +402,7 @@ TEST(cli_run, Run_LowSpeedPac2002_WarnsVxlowOnce) {
   const run_result result = run_files("inputs_low_speed.csv", "pac2002_S.tir");
   EXPECT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
   const std::string table = data_file("inputs_low_speed.csv").string();
-  EXPECT_TRUE(result.err.contains(table + ":3: VX below VXLOW in 2 row(s); VXLOW is not applied (AD-05)\n"))
-      << result.err;
+  EXPECT_TRUE(result.err.contains(table + ":3: VX below VXLOW in 2 row(s); VXLOW is not applied\n")) << result.err;
   EXPECT_EQ(count_of(result.err, "mf: warning: "), 1U) << result.err;
   EXPECT_EQ(rows_of(result.out).size(), 2U);
 }

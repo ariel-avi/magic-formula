@@ -93,7 +93,7 @@ The model is chosen from the `.tir` file:
 - **PAC2002**: `PROPERTY_FILE_FORMAT = 'PAC2002'`.
 - **MF 5.2**: `FITTYP = 6`, with `PROPERTY_FILE_FORMAT` absent or one of `'MF_05'`, `'USER'` (TNO MF-Tyre ADAMS user-tire form) or `'MF-TYRE'`.
 
-MF 6.x and every other model give an error (see `docs/research/model-routing.md`). The policy decisions behind the loader and the models (defaults, required keys, units, clamping, low speed, ...) are signed off in [`docs/research/decisions.md`](docs/research/decisions.md).
+MF 6.x and every other model give an error (see `docs/research/model-routing.md`). The rules behind the loader and the models (defaults, required keys, units, clamping, low speed, ...) are listed in [`docs/research/policies.md`](docs/research/policies.md).
 
 ### Input table
 

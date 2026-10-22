@@ -1,5 +1,5 @@
-$ synthetic, authored for magic-formula from docs/research/model-routing.md (row R7); not derived from any vendor file
-$ purpose: minimal MF-Tyre 6.x file (FITTYP 61); expected UNSUPPORTED_MODEL (AD-11)
+$ synthetic, authored for magic-formula from docs/research/model-routing.md; not derived from any vendor file
+$ purpose: minimal MF-Tyre 6.x file (FITTYP 61); expected UNSUPPORTED_MODEL
 [MDI_HEADER]
 FILE_TYPE = 'tir'
 FILE_VERSION = 3.0

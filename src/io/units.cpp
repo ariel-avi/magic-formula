@@ -20,7 +20,7 @@ namespace mf::io {
     };
 
     // clang-format off
-    /// The single unit table (AD-10): every dimensional [UNITS] key with its SI unit name.
+    /// The single unit table: every dimensional [UNITS] key with its SI unit name.
     constexpr std::array<si_unit, 6> SI_UNITS{
         si_unit{.key = "LENGTH", .symbol = "meter"},
         si_unit{.key = "FORCE", .symbol = "newton"},
@@ -42,8 +42,8 @@ namespace mf::io {
         where.file = reader.document().file_name();
         where.line = entry->line;
         where.key = unit.key;
-        std::string message = std::format("[UNITS] {} = '{}' is not supported; only SI '{}' is accepted (AD-10)",
-                                          unit.key, *value, unit.symbol);
+        std::string message =
+            std::format("[UNITS] {} = '{}' is not supported; only SI '{}' is accepted", unit.key, *value, unit.symbol);
         return make_error(error_code::UNSUPPORTED_UNIT, std::move(message), std::move(where));
       }
     }

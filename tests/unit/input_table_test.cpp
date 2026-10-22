@@ -223,7 +223,7 @@ TEST(input_table, Parse_NumberForms_Accepted) {
   const auto table = parse_success("FZ SA SR IA VX\n"
                                    "1e3 -0.0 +.5 2.5E-1 -7\n");
   ASSERT_EQ(table.rows.size(), 1U);
-  // Negative speed and signed zero are parsed as given; rejecting them is the model's job (AD-02).
+  // Negative speed and signed zero are parsed as given; rejecting them is the model's job.
   expect_point(table.rows[0], 1000.0, -0.0, 0.5, 0.25, -7.0);
 }
 

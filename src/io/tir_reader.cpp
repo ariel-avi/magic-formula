@@ -47,7 +47,7 @@ namespace mf::io {
       }
       if (entry->quoted) {
         return make_error(error_code::INVALID_VALUE,
-                          std::format("{}: expected a number, got the string '{}' (AD-20)", entry->key, entry->value),
+                          std::format("{}: expected a number, got the string '{}'", entry->key, entry->value),
                           entry_location(document, *entry));
       }
       const std::optional<double> parsed = parse_number(entry->value);

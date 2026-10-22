@@ -1,5 +1,5 @@
-$ synthetic, authored for magic-formula from docs/research/test-data.md section 2/3; not derived from any vendor file
-$ purpose: fixture S without any of the 20 R* combined-slip keys (selects the PAC2002 friction ellipse, AD-07)
+$ synthetic, authored for magic-formula from docs/research/test-data.md; not derived from any vendor file
+$ purpose: fixture S without any of the 20 R* combined-slip keys (selects the PAC2002 friction ellipse)
 [MDI_HEADER]
 FILE_TYPE = 'tir'
 FILE_VERSION = 3.0

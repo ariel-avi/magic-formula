@@ -72,8 +72,7 @@ TEST(model_routing, Route_R3_Pac2002Fittyp6_Pac2002WithWarning) {
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ(*result, model_kind::PAC2002);
   ASSERT_EQ(warnings.size(), 1U);
-  EXPECT_TRUE(warnings[0].message.contains("FITTYP 6 ignored for PAC2002")) << warnings[0].message;
-  EXPECT_TRUE(warnings[0].message.contains("MSC p.33")) << warnings[0].message;
+  EXPECT_EQ(warnings[0].message, "FITTYP 6 ignored for PAC2002");
   EXPECT_EQ(warnings[0].where.file, FILE_NAME);
   EXPECT_EQ(warnings[0].where.line, 3U);
   EXPECT_EQ(warnings[0].where.key, "FITTYP");
@@ -111,9 +110,10 @@ TEST(model_routing, Route_R5_Fittyp5WithoutPac2002_UnsupportedModel) {
     ASSERT_FALSE(result.has_value()) << text;
     EXPECT_EQ(result.error().code, error_code::UNSUPPORTED_MODEL) << text;
     EXPECT_EQ(result.error().where.key, "FITTYP") << text;
-    EXPECT_TRUE(result.error().message.contains("FITTYP 5")) << result.error().message;
-    EXPECT_TRUE(result.error().message.contains("PAC2002")) << result.error().message;
-    EXPECT_TRUE(result.error().message.contains("(AD-11)")) << result.error().message;
+    EXPECT_EQ(result.error().message,
+              "FITTYP 5 (MF-Tyre 5.0/5.1) is not supported; set PROPERTY_FILE_FORMAT = 'PAC2002' to evaluate the file "
+              "with PAC2002")
+        << text;
     EXPECT_TRUE(warnings.empty()) << text;
   }
 }
@@ -131,7 +131,7 @@ TEST_P(model_routing_unsupported_family, Route_R6_UnsupportedFamily_UnsupportedM
     EXPECT_EQ(result.error().code, error_code::UNSUPPORTED_MODEL) << text;
     EXPECT_EQ(result.error().where.key, "FITTYP") << text;
     EXPECT_TRUE(result.error().message.contains(std::format("FITTYP {} ", code))) << result.error().message;
-    EXPECT_TRUE(result.error().message.contains("is not supported (AD-11)")) << result.error().message;
+    EXPECT_TRUE(result.error().message.contains("is not supported")) << result.error().message;
   }
 }
 
@@ -145,8 +145,7 @@ TEST_P(model_routing_mf_six_x, Route_R7_Mf6x_NotImplemented) {
   EXPECT_EQ(result.error().code, error_code::UNSUPPORTED_MODEL);
   EXPECT_EQ(result.error().where.key, "FITTYP");
   EXPECT_EQ(result.error().where.line, 2U);
-  EXPECT_TRUE(result.error().message.contains(std::format("FITTYP {}:", code))) << result.error().message;
-  EXPECT_TRUE(result.error().message.contains("not implemented (AD-11)")) << result.error().message;
+  EXPECT_EQ(result.error().message, std::format("FITTYP {}: MF-Tyre 6.x is not implemented", code));
 }
 
 INSTANTIATE_TEST_SUITE_P(codes, model_routing_mf_six_x, ::testing::ValuesIn(MF6X_CODES));
@@ -158,8 +157,8 @@ TEST(model_routing, Route_R8_NoPffNoFittyp_CannotIdentify) {
   EXPECT_EQ(result.error().code, error_code::UNSUPPORTED_MODEL);
   EXPECT_EQ(result.error().where.key, "FITTYP");
   EXPECT_EQ(result.error().where.line, 0U);
-  EXPECT_TRUE(result.error().message.contains("cannot identify the tire model")) << result.error().message;
-  EXPECT_TRUE(result.error().message.contains("(AD-11)")) << result.error().message;
+  EXPECT_EQ(result.error().message,
+            "cannot identify the tire model: set PROPERTY_FILE_FORMAT = 'PAC2002' or FITTYP = 6");
 }
 
 TEST(model_routing, Route_R8_Fittyp0And7_CannotIdentify) {
@@ -190,10 +189,8 @@ TEST(model_routing, Route_R9_UnknownPff_UnsupportedModel) {
   EXPECT_EQ(result.error().where.key, "PROPERTY_FILE_FORMAT");
   EXPECT_EQ(result.error().where.line, 2U);
   EXPECT_EQ(result.error().where.file, FILE_NAME);
-  EXPECT_TRUE(result.error().message.contains("unknown PROPERTY_FILE_FORMAT 'MF61'")) << result.error().message;
-  EXPECT_TRUE(result.error().message.contains("(expected 'PAC2002', 'MF_05', 'USER' or 'MF-TYRE')"))
-      << result.error().message;
-  EXPECT_TRUE(result.error().message.contains("(AD-11)")) << result.error().message;
+  EXPECT_EQ(result.error().message,
+            "unknown PROPERTY_FILE_FORMAT 'MF61' (expected 'PAC2002', 'MF_05', 'USER' or 'MF-TYRE')");
 }
 
 TEST(model_routing, Route_UserPffFittyp6_Mf52NoWarning) {
@@ -286,14 +283,14 @@ TEST(model_routing, Route_EmptyPff_UnsupportedModel) {
 }
 
 TEST(model_routing, Route_Pac2002Fittyp61_UnsupportedModel) {
-  // AD-11 precedence: MF-Tyre 6.x is rejected even when the file declares PAC2002.
+  // Precedence: MF-Tyre 6.x is rejected even when the file declares PAC2002.
   std::vector<mf::warning> warnings;
   const auto result = route("[MODEL]\nPROPERTY_FILE_FORMAT = 'PAC2002'\nFITTYP = 61\n", warnings);
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error().code, error_code::UNSUPPORTED_MODEL);
   EXPECT_EQ(result.error().where.key, "FITTYP");
   EXPECT_EQ(result.error().where.line, 3U);
-  EXPECT_TRUE(result.error().message.contains("not implemented (AD-11)")) << result.error().message;
+  EXPECT_EQ(result.error().message, "FITTYP 61: MF-Tyre 6.x is not implemented");
   EXPECT_TRUE(warnings.empty());
 }
 

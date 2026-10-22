@@ -11,7 +11,7 @@
 #include <vector>
 
 namespace mf::io {
-  /// One `KEY = value` line of a .tir file (docs/research/tir-format.md section 2, AD-20).
+  /// One `KEY = value` line of a .tir file.
   struct tir_entry {
     /// Upper-case name of the enclosing section (for example "UNITS").
     std::string section;
@@ -41,8 +41,8 @@ namespace mf::io {
   inline constexpr std::array<std::string_view, 1> SECTION_SCOPED_KEYS{"MASS"};
 
   /// Syntax-level view of a .tir file: sections, `KEY = value` entries and table sections, each with its line number.
-  /// Lexical rules: docs/research/tir-format.md section 2 and AD-20 (docs/research/decisions.md). The document knows
-  /// nothing about the meaning of the keys; `tir_reader` provides typed access.
+  /// Lexical rules: docs/research/tir-format.md. The document knows nothing about the meaning of the keys;
+  /// `tir_reader` provides typed access.
   class tir_document {
   public:
     /// Parses `.tir` text.

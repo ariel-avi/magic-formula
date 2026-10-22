@@ -15,8 +15,7 @@ namespace mf::io {
 
     // clang-format off
     /// The common table, in `mf5x_coefficients` declaration order without LONGVL and LGAX/LGAY/LGAZ.
-    /// REQUIRED 9 (AD-12), SCALING 22, COEFFICIENT 62, COMBINED 20 (the R* keys: D-07, docs/research/pac2002.md
-    /// section 5.5, README.md decision list).
+    /// REQUIRED 9, SCALING 22, COEFFICIENT 62, COMBINED 20 (the R* keys).
     constexpr std::array<coefficient_binding, 113> COMMON_BINDINGS{
         make_binding("FNOMIN", &mf5x_coefficients::FNOMIN, binding_role::REQUIRED),
         make_binding("UNLOADED_RADIUS", &mf5x_coefficients::UNLOADED_RADIUS, binding_role::REQUIRED),
@@ -146,7 +145,7 @@ namespace mf::io {
         make_binding("LGAZ", &mf5x_coefficients::LGAZ, binding_role::SCALING),
     };
 
-    /// Keys of PAC2002 / MF-Tyre 6.x that MF 5.2 does not have (docs/research/mf52.md section 3, "not MF 5.2"): the 30
+    /// Keys of PAC2002 / MF-Tyre 6.x that MF 5.2 does not have (docs/research/mf52.md): the 30
     /// PAC2002 / 6.x coefficient keys, the pressure set, the turn-slip set and Q_FYS1-3.
     constexpr std::array<std::string_view, 70> FOREIGN_KEYS{
         "LGAX", "LGAY", "LGAZ", "PKY4", "PKY5", "PKY6", "PKY7", "PEY5", "RBX3", "RBY4",
@@ -159,7 +158,7 @@ namespace mf::io {
         "Q_FYS1", "Q_FYS2", "Q_FYS3",
     };
 
-    /// Sections whose every key is foreign to MF 5.2 (docs/research/mf52.md section 3): [STRUCTURAL], [INERTIA] and
+    /// Sections whose every key is foreign to MF 5.2: [STRUCTURAL], [INERTIA] and
     /// the enveloping section [CONTACT_PATCH].
     constexpr std::array<std::string_view, 3> FOREIGN_SECTIONS{"STRUCTURAL", "INERTIA", "CONTACT_PATCH"};
     // clang-format on

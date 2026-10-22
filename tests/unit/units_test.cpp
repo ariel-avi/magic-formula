@@ -95,9 +95,7 @@ TEST(units, CheckUnits_Millimeter_ReturnsUnsupportedUnit) {
   EXPECT_EQ(result.error().where.key, "LENGTH");
   EXPECT_EQ(result.error().where.line, 4U);
   EXPECT_EQ(result.error().where.file, FILE_NAME);
-  EXPECT_TRUE(result.error().message.contains("'mm'")) << result.error().message;
-  EXPECT_TRUE(result.error().message.contains("'meter'")) << result.error().message;
-  EXPECT_TRUE(result.error().message.contains("AD-10")) << result.error().message;
+  EXPECT_EQ(result.error().message, "[UNITS] LENGTH = 'mm' is not supported; only SI 'meter' is accepted");
 }
 
 TEST_P(units_wrong, CheckUnits_WrongSymbol_ReturnsUnsupportedUnitNamingKeyAndValue) {

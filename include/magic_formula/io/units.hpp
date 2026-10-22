@@ -5,8 +5,7 @@
 #include <magic_formula/io/tir_reader.hpp>
 
 namespace mf::io {
-  /// Checks the [UNITS] section of a .tir file (docs/research/tir-format.md section 4, AD-10 in
-  /// docs/research/decisions.md).
+  /// Checks the [UNITS] section of a .tir file (see docs/research/tir-format.md).
   ///
   /// The library works in SI only and does not convert. The six keys LENGTH, FORCE, ANGLE, MASS, TIME and
   /// PRESSURE, when present in [UNITS], must name the SI unit ('meter', 'newton', 'radians', 'kg', 'second',

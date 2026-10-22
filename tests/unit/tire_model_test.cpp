@@ -94,7 +94,7 @@ namespace {
     return text.find(part) != std::string::npos;
   }
 
-  /// True when all five outputs are bit-equal to +0.0 (the AD-01 zero outputs).
+  /// True when all five outputs are bit-equal to +0.0 (the zero outputs).
   bool all_outputs_positive_zero(const mf::tire_outputs &out) {
     const std::uint64_t zero = bits(0.0);
     return bits(out.fx_n) == zero && bits(out.fy_n) == zero && bits(out.mz_nm) == zero && bits(out.mx_nm) == zero &&
@@ -139,6 +139,7 @@ TEST_P(validate_limits_invalid, ValidateLimits_LowerAboveUpper_ReturnsInvalidVal
   EXPECT_EQ(result.error().where.key, param.min_key);
   EXPECT_TRUE(contains(result.error().message, param.min_key));
   EXPECT_TRUE(contains(result.error().message, param.max_key));
+  EXPECT_TRUE(contains(result.error().message, "lower limit above upper limit"));
 }
 
 namespace {
@@ -160,7 +161,7 @@ namespace {
 INSTANTIATE_TEST_SUITE_P(limit_pairs, validate_limits_invalid, ::testing::ValuesIn(limits_cases()), limits_case_name);
 
 // ---------------------------------------------------------------------------------------------------------------------
-// tire_model: input validation (AD-02)
+// tire_model: input validation
 // ---------------------------------------------------------------------------------------------------------------------
 
 namespace {
@@ -239,7 +240,7 @@ TEST_P(tire_model_negative_vx, Evaluate_NegativeVx_ReturnsInvalidInputVx) {
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error().code, mf::error_code::INVALID_INPUT);
   EXPECT_EQ(result.error().where.key, "VX");
-  EXPECT_TRUE(contains(result.error().message, "AD-02"));
+  EXPECT_TRUE(contains(result.error().message, "is negative; reverse driving is not supported"));
   EXPECT_EQ(model.compute_calls(), 0U);
 }
 
@@ -262,7 +263,7 @@ TEST(tire_model, Evaluate_ZeroVx_IsAccepted) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// tire_model: Fz <= 0 (AD-01) and VXLOW (AD-05)
+// tire_model: Fz <= 0 and VXLOW
 // ---------------------------------------------------------------------------------------------------------------------
 
 class tire_model_non_positive_fz : public ::testing::TestWithParam<double> {};
@@ -335,7 +336,7 @@ TEST(tire_model, Evaluate_VxAtVxlow_ClearsFlag) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// tire_model: clamping to the limits (AD-15)
+// tire_model: clamping to the limits
 // ---------------------------------------------------------------------------------------------------------------------
 
 namespace {
@@ -485,7 +486,7 @@ TEST(tire_model, Evaluate_PositiveFzBelowFzmin_RaisedToFzmin) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// tire_model: finite-output check (AD-22) and mode forwarding
+// tire_model: finite-output check and mode forwarding
 // ---------------------------------------------------------------------------------------------------------------------
 
 class tire_model_nan_output : public ::testing::TestWithParam<std::size_t> {};
@@ -498,7 +499,7 @@ TEST_P(tire_model_nan_output, Evaluate_NonFiniteOutput_ReturnsNumericalNamingOut
   EXPECT_EQ(result.error().code, mf::error_code::NUMERICAL);
   EXPECT_EQ(result.error().where.key, OUTPUT_KEYS.at(index));
   EXPECT_TRUE(contains(result.error().message, OUTPUT_KEYS.at(index)));
-  EXPECT_TRUE(contains(result.error().message, "AD-22"));
+  EXPECT_TRUE(contains(result.error().message, "non-finite"));
   EXPECT_EQ(model.compute_calls(), 1U);
 }
 

@@ -125,8 +125,8 @@ namespace {
     return point;
   }
 
-  // Parameters of the eq (88) tests: nonzero SVx and SHx, so that eq (88) and eq (87) differ.
-  parameters_t eq88_parameters(std::optional<int> fittyp, double qsy1, double qsy2) {
+  // Parameters of the shift-form My tests: nonzero SVx and SHx, so that the shift form and the QSY form differ.
+  parameters_t my_from_shifts_parameters(std::optional<int> fittyp, double qsy1, double qsy2) {
     parameters_t parameters = s_with({{&coeffs::PHX1, 0.001}, {&coeffs::PVX1, 0.01}});
     parameters.coefficients.QSY1 = qsy1;
     parameters.coefficients.QSY2 = qsy2;
@@ -134,21 +134,21 @@ namespace {
     return parameters;
   }
 
-  bool uses_eq88(const parameters_t &parameters) {
+  bool selects_my_from_shifts(const parameters_t &parameters) {
     const std::expected<mf::pac2002_model, mf::error> model = mf::pac2002_model::create(parameters);
-    return model.has_value() && model->uses_eq88_rolling_resistance();
+    return model.has_value() && model->uses_my_from_shifts();
   }
 } // namespace
 
 // ---- construction -----------------------------------------------------------------------------------------------
 
-TEST(pac2002_model, Create_FixtureS_CosineNoEq88) {
+TEST(pac2002_model, Create_FixtureS_CosineNoMyFromShifts) {
   const parameters_t parameters = mf::test::fixture_s();
   const std::expected<mf::pac2002_model, mf::error> model = mf::pac2002_model::create(parameters);
   ASSERT_TRUE(model.has_value());
   EXPECT_EQ(model->name(), "PAC2002");
   EXPECT_EQ(model->method(), combined_method::COSINE);
-  EXPECT_FALSE(model->uses_eq88_rolling_resistance());
+  EXPECT_FALSE(model->uses_my_from_shifts());
   EXPECT_EQ(raw_bits(model->coefficients()), raw_bits(parameters.coefficients));
   EXPECT_EQ(model->metadata().use_mode, 4);
   EXPECT_DOUBLE_EQ(model->limits().vxlow_mps, 1.0);
@@ -253,46 +253,46 @@ TEST(pac2002_model, Evaluate_V9_Overturning) {
   EXPECT_TRUE(rel_near_result(out.mx_nm, -18.0, REL_TOL_CLOSED_FORM));
 }
 
-TEST(pac2002_model, Evaluate_V10_Eq88) {
+TEST(pac2002_model, Evaluate_V10_MyFromShifts) {
   parameters_t parameters = s_with({{&coeffs::QSY1, 0.0}, {&coeffs::PHX1, 0.001}, {&coeffs::PVX1, 0.01}});
   parameters.metadata.fittyp = 5;
   const std::expected<mf::pac2002_model, mf::error> model = mf::pac2002_model::create(parameters);
   ASSERT_TRUE(model.has_value());
-  EXPECT_TRUE(model->uses_eq88_rolling_resistance());
+  EXPECT_TRUE(model->uses_my_from_shifts());
   const result_t out = model->evaluate(make_point(FZ_NOMINAL, 0.0, 0.0));
   ASSERT_TRUE(out.has_value());
   EXPECT_TRUE(rel_near_result(out->my_nm, -36.0, REL_TOL_CLOSED_FORM));
 }
 
-TEST(pac2002_model, Evaluate_Eq88Combinations) {
+TEST(pac2002_model, Evaluate_MyFromShiftsCombinations) {
   const point_t point = make_point(FZ_NOMINAL, 0.0, 0.0);
 
-  // No FITTYP: eq (87) with QSY1 = QSY2 = 0 gives zero.
-  const parameters_t no_fittyp = eq88_parameters(std::nullopt, 0.0, 0.0);
-  EXPECT_FALSE(uses_eq88(no_fittyp));
+  // No FITTYP: the QSY form with QSY1 = QSY2 = 0 gives zero.
+  const parameters_t no_fittyp = my_from_shifts_parameters(std::nullopt, 0.0, 0.0);
+  EXPECT_FALSE(selects_my_from_shifts(no_fittyp));
   EXPECT_NEAR(eval(no_fittyp, point).my_nm, 0.0, 1e-12);
 
-  // FITTYP 6: eq (87).
-  const parameters_t fittyp6 = eq88_parameters(6, 0.0, 0.0);
-  EXPECT_FALSE(uses_eq88(fittyp6));
+  // FITTYP 6: the QSY form.
+  const parameters_t fittyp6 = my_from_shifts_parameters(6, 0.0, 0.0);
+  EXPECT_FALSE(selects_my_from_shifts(fittyp6));
   EXPECT_NEAR(eval(fittyp6, point).my_nm, 0.0, 1e-12);
 
-  // FITTYP 5 with QSY1 != 0: eq (87).
-  const parameters_t qsy1_set = eq88_parameters(5, 0.01, 0.0);
-  EXPECT_FALSE(uses_eq88(qsy1_set));
+  // FITTYP 5 with QSY1 != 0: the QSY form.
+  const parameters_t qsy1_set = my_from_shifts_parameters(5, 0.01, 0.0);
+  EXPECT_FALSE(selects_my_from_shifts(qsy1_set));
   EXPECT_TRUE(rel_near_result(eval(qsy1_set, point).my_nm, -12.0, REL_TOL_CLOSED_FORM));
 
-  // FITTYP 5 with QSY1 = 0 and QSY2 != 0: eq (87), My = -R0*Fz*QSY2*Fx/FNOMIN = -0.03*Fx.
-  const parameters_t qsy2_set = eq88_parameters(5, 0.0, 0.1);
-  EXPECT_FALSE(uses_eq88(qsy2_set));
+  // FITTYP 5 with QSY1 = 0 and QSY2 != 0: the QSY form, My = -R0*Fz*QSY2*Fx/FNOMIN = -0.03*Fx.
+  const parameters_t qsy2_set = my_from_shifts_parameters(5, 0.0, 0.1);
+  EXPECT_FALSE(selects_my_from_shifts(qsy2_set));
   const mf::tire_outputs qsy2_out = eval(qsy2_set, point);
   EXPECT_GT(qsy2_out.fx_n, 1.0);
   EXPECT_TRUE(rel_near_result(qsy2_out.my_nm, -0.03 * qsy2_out.fx_n, REL_TOL_CLOSED_FORM));
   EXPECT_GT(std::abs(qsy2_out.my_nm - (-36.0)), 1.0);
 
-  // FITTYP 5 with QSY1 = QSY2 = 0: eq (88).
-  const parameters_t both_zero = eq88_parameters(5, 0.0, 0.0);
-  EXPECT_TRUE(uses_eq88(both_zero));
+  // FITTYP 5 with QSY1 = QSY2 = 0: the shift form.
+  const parameters_t both_zero = my_from_shifts_parameters(5, 0.0, 0.0);
+  EXPECT_TRUE(selects_my_from_shifts(both_zero));
   EXPECT_TRUE(rel_near_result(eval(both_zero, point).my_nm, -36.0, REL_TOL_CLOSED_FORM));
 }
 
@@ -339,7 +339,7 @@ TEST(pac2002_model, Evaluate_V15_ExClamp) {
 }
 
 TEST(pac2002_model, Evaluate_EClamps_EyEtExaEyk) {
-  // Ey: pure lateral force; Et: aligning trail; Exa: Gxa in Fx; Eyk: Gyk in Fy. 1.5 is bit-equal to 1.0 (D-17).
+  // Ey: pure lateral force; Et: aligning trail; Exa: Gxa in Fx; Eyk: Gyk in Fy. 1.5 is bit-equal to 1.0.
   expect_curvature_clamp(&coeffs::PEY1, make_point(FZ_NOMINAL, 0.0, 0.05));
   expect_curvature_clamp(&coeffs::QEZ1, make_point(FZ_NOMINAL, 0.0, 0.05));
   expect_curvature_clamp(&coeffs::REX1, make_point(FZ_NOMINAL, 0.1, 0.1));
@@ -356,7 +356,7 @@ TEST(pac2002_model, Evaluate_V16_GammaX) {
   EXPECT_TRUE(rel_near_result(out.fx_n, expected, REL_TOL_CLOSED_FORM));
 }
 
-TEST(pac2002_model, Evaluate_V17_ReadingA) {
+TEST(pac2002_model, Evaluate_V17_FyPrimeAtActualCamber) {
   const parameters_t parameters = s_with({{&coeffs::PHY3, 0.1}});
   for (const slip_mode mode : {slip_mode::COMBINED, slip_mode::UNCOMBINED}) {
     const mf::tire_outputs out = eval(parameters, make_point(FZ_NOMINAL, 0.0, 0.0, 0.1), mode);
@@ -374,9 +374,8 @@ TEST(pac2002_model, Evaluate_V18_Lfzo12) {
   EXPECT_TRUE(rel_near_result(state.aln.dt_m, 0.03, REL_TOL_CLOSED_FORM));
   EXPECT_NEAR(state.lat.ky0_n, -61132.08, printed_tol(2));
   const double cos_alpha = std::cos(point.alpha_rad);
-  const double trail_m = kernels::trail(state.aln, state.aln.alpha_t, cos_alpha);
-  const double expected_mz =
-      -(trail_m * state.lat.fy0_n) + kernels::residual_moment(state.aln, state.aln.alpha_r, cos_alpha);
+  const double trail_m = kernels::t(state.aln, state.aln.alpha_t, cos_alpha);
+  const double expected_mz = -(trail_m * state.lat.fy0_n) + kernels::mzr(state.aln, state.aln.alpha_r, cos_alpha);
   const result_t pure = model->evaluate(point, slip_mode::UNCOMBINED);
   ASSERT_TRUE(pure.has_value());
   EXPECT_TRUE(rel_near_result(pure->fy_n, state.lat.fy0_n, REL_TOL_CLOSED_FORM));
@@ -447,8 +446,8 @@ TEST(pac2002_model, Evaluate_V22_NonPositiveFz_ExactZeros) {
   for (const double fz : {0.0, -0.0, -100.0}) {
     SCOPED_TRACE(fz);
     for (const slip_mode mode : {slip_mode::COMBINED, slip_mode::UNCOMBINED}) {
+      // Bit-equal to +0.0.
       const mf::tire_outputs out = eval(parameters, make_point(fz, 0.1, 0.05, 0.02), mode);
-      // V22: bit-equal to +0.0.
       EXPECT_EQ(bits(out.fx_n), bits(0.0));
       EXPECT_EQ(bits(out.fy_n), bits(0.0));
       EXPECT_EQ(bits(out.mz_nm), bits(0.0));
@@ -470,7 +469,7 @@ TEST(pac2002_model, Evaluate_P3_ZeroKappaIdentity) {
   const mf::tire_outputs combined = eval(parameters, point, slip_mode::COMBINED);
   const mf::tire_outputs pure = eval(parameters, point, slip_mode::UNCOMBINED);
   const kernels::slip_state state = state_of(parameters, point);
-  const double arm_m = kernels::moment_arm(parameters.coefficients, state.load, combined.fy_n, point.gamma_rad);
+  const double arm_m = kernels::s(parameters.coefficients, state.load, combined.fy_n, point.gamma_rad);
   // The Fx term is not trivially zero.
   EXPECT_GT(std::abs(arm_m * combined.fx_n), 0.1);
   EXPECT_TRUE(rel_near_result(combined.mz_nm - (arm_m * combined.fx_n), pure.mz_nm, REL_TOL_CLOSED_FORM));
@@ -507,8 +506,8 @@ TEST(pac2002_model, Evaluate_Uncombined_MxMyFromPureForces) {
   const point_t point = make_point(FZ_NOMINAL, 0.1, 0.05, 0.02);
   const kernels::slip_state state = state_of(parameters, point);
   const coeffs &c = parameters.coefficients;
-  const double expected_mx = kernels::overturning_moment(c, point.fz_n, state.lat.fy0_n, point.gamma_rad);
-  const double expected_my = kernels::rolling_resistance_moment(c, point.fz_n, state.lon.fx0_n, point.vx_mps);
+  const double expected_mx = kernels::mx(c, point.fz_n, state.lat.fy0_n, point.gamma_rad);
+  const double expected_my = kernels::my(c, point.fz_n, state.lon.fx0_n, point.vx_mps);
   const mf::tire_outputs pure = eval(parameters, point, slip_mode::UNCOMBINED);
   EXPECT_TRUE(rel_near_result(pure.mx_nm, expected_mx, REL_TOL_CLOSED_FORM));
   EXPECT_TRUE(rel_near_result(pure.my_nm, expected_my, REL_TOL_CLOSED_FORM));
@@ -557,16 +556,15 @@ TEST(pac2002_model, Evaluate_FrictionEllipse_UsesRatiosAndSvykZero) {
   EXPECT_TRUE(rel_near_result(out.fx_n, expected_fx, REL_TOL_CLOSED_FORM));
   EXPECT_TRUE(rel_near_result(out.fy_n, expected_fy, REL_TOL_CLOSED_FORM));
 
-  // Eq (78) with F'y = Fy (SVyk = 0).
+  // Mz with F'y = Fy (SVyk = 0).
   const coeffs &c = parameters.coefficients;
   const double cos_alpha = std::cos(point.alpha_rad);
   const double ky_guarded_n = kernels::add_epsilon(state.lat.ky_n);
-  const double ate = kernels::equivalent_slip_angle(state.aln.alpha_t, point.kappa, state.lon.kx_n, ky_guarded_n);
-  const double are = kernels::equivalent_slip_angle(state.aln.alpha_r, point.kappa, state.lon.kx_n, ky_guarded_n);
-  const double arm_m = kernels::moment_arm(c, state.load, expected_fy, point.gamma_rad);
-  const double trail_m = kernels::trail(state.aln, ate, cos_alpha);
-  const double expected_mz =
-      -(trail_m * expected_fy) + kernels::residual_moment(state.aln, are, cos_alpha) + (arm_m * expected_fx);
+  const double ate = kernels::alpha_eq(state.aln.alpha_t, point.kappa, state.lon.kx_n, ky_guarded_n);
+  const double are = kernels::alpha_eq(state.aln.alpha_r, point.kappa, state.lon.kx_n, ky_guarded_n);
+  const double arm_m = kernels::s(c, state.load, expected_fy, point.gamma_rad);
+  const double trail_m = kernels::t(state.aln, ate, cos_alpha);
+  const double expected_mz = -(trail_m * expected_fy) + kernels::mzr(state.aln, are, cos_alpha) + (arm_m * expected_fx);
   EXPECT_TRUE(rel_near_result(out.mz_nm, expected_mz, REL_TOL_CLOSED_FORM));
 
   // The ellipse differs from the cosine method.
@@ -685,7 +683,7 @@ TEST(pac2002_model, Evaluate_M10_Pac2002MzZero) {
   parameters.coefficients.RVY6 = 10.0;
   parameters.coefficients.QCZ1 = 0.0;
   const mf::tire_outputs out = eval(parameters, make_point(FZ_NOMINAL, 0.1, 0.0, 0.1));
-  // F'y = Fy - SVyk = 0 (reading A), so Mz = 0 even though Fy = SVyk != 0.
+  // F'y = Fy - SVyk = 0, so Mz = 0 even though Fy = SVyk != 0.
   const double svyk_n = (1.0 - (1.0 * 0.1 * 0.1)) * FZ_NOMINAL * 0.1 * std::sin(std::numbers::pi / 4.0);
   EXPECT_TRUE(rel_near_result(out.fy_n, svyk_n, 1e-9));
   EXPECT_NEAR(out.mz_nm, 0.0, 1e-12);

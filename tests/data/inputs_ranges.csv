@@ -1,5 +1,5 @@
-# synthetic, authored for magic-formula from docs/research/test-data.md section 3; not derived from any vendor file
-# rows beyond each S-rng limit (AD-28) plus one inside; see README.md
+# synthetic, authored for magic-formula from docs/research/test-data.md; not derived from any vendor file
+# rows beyond each S-rng limit plus one inside; see README.md
 FZ[N],SA[rad],SR[-],IA[rad],VX[m/s]
 4000,0.05,0.1,0,10
 4000,0,10,0,10

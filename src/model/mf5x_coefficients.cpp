@@ -8,13 +8,13 @@
 
 namespace mf {
   namespace {
-    /// INVALID_VALUE for coefficient `name` that violates `rule` (AD-12); the key is the member name.
+    /// INVALID_VALUE for coefficient `name` that violates `rule`; the key is the member name.
     std::unexpected<error> invalid_coefficient(std::string_view name, std::string_view rule, double value) {
       // The location is built in a named variable: a designated-initialiser temporary inside the call makes GCC emit
       // a cleanup block with two branches that no test can reach.
       location where;
       where.key = std::string{name};
-      return make_error(error_code::INVALID_VALUE, std::format("{} must be {} (got {}) (AD-12)", name, rule, value),
+      return make_error(error_code::INVALID_VALUE, std::format("{} must be {} (got {})", name, rule, value),
                         std::move(where));
     }
   } // namespace

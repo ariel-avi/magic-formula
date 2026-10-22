@@ -22,7 +22,6 @@ namespace mf {
   } // namespace
 
   std::expected<mf52_model, error> mf52_model::create(mf5x_parameters parameters) {
-    // D-14, AD-19: MF 5.2 has no camber scaling factors.
     parameters.coefficients.LGAX = 1.0;
     parameters.coefficients.LGAY = 1.0;
     parameters.coefficients.LGAZ = 1.0;
@@ -42,10 +41,10 @@ namespace mf {
     if (const std::expected<void, error> valid = tire_model::validate_input(point); !valid.has_value()) {
       return std::unexpected<error>(valid.error());
     }
-    // D-27: the standstill cases of MFeval are not reproduced; `<=` also rejects -0.0.
+    // `<=` also rejects -0.0.
     if (point.vx_mps <= 0.0) {
-      return make_error(error_code::INVALID_INPUT,
-                        std::format("Vx = {} m/s: MF 5.2 requires Vx > 0 (AD-02)", point.vx_mps), vx_location());
+      return make_error(error_code::INVALID_INPUT, std::format("Vx = {} m/s: MF 5.2 requires Vx > 0", point.vx_mps),
+                        vx_location());
     }
     return {};
   }
@@ -56,13 +55,12 @@ namespace mf {
     return vx / (std::hypot(vx, std::tan(point.alpha_rad) * vx) + detail::EPSILON);
   }
 
-  double mf52_model::aligning_lateral_force(const operating_point &point, const detail::slip_state &state,
-                                            const detail::combined_forces &forces) const noexcept {
-    // AD-25: SVyk0 uses mu_y at gamma = 0, the other terms at the actual camber.
+  double mf52_model::fy_prime(const operating_point &point, const detail::slip_state &state,
+                              const detail::combined_forces &forces) const noexcept {
     const mf5x_coefficients &c = coefficients();
-    const double mu_y_zero_camber = detail::lateral_friction(c, state.load, 0.0);
-    const double svyk0_n = detail::kappa_induced_side_force(c, state.load, mu_y_zero_camber, point.fz_n, point.kappa,
-                                                            point.alpha_rad, point.gamma_rad);
+    const double mu_y_zero_camber = detail::mu_y(c, state.load, 0.0);
+    const double svyk0_n =
+        detail::svyk(c, state.load, mu_y_zero_camber, point.fz_n, point.kappa, point.alpha_rad, point.gamma_rad);
     return forces.fy_n - svyk0_n;
   }
 } // namespace mf

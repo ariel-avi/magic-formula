@@ -252,12 +252,12 @@ TEST(validate_coefficients, ValidateCoefficients_SeveralInvalid_ReportsFirstInDo
   EXPECT_EQ(result.error().where.key, "LONGVL");
 }
 
-TEST(validate_coefficients, ValidateCoefficients_NegativeFnomin_MessageNamesKeyValueAndDecision) {
+TEST(validate_coefficients, ValidateCoefficients_NegativeFnomin_MessageNamesKeyAndValue) {
   coeffs c = mf::test::fixture_s().coefficients;
   c.FNOMIN = -1.0;
   const auto result = mf::validate_coefficients(c);
   ASSERT_FALSE(result.has_value());
-  EXPECT_EQ(result.error().message, "FNOMIN must be > 0 (got -1) (AD-12)");
+  EXPECT_EQ(result.error().message, "FNOMIN must be > 0 (got -1)");
 }
 
 TEST(validate_coefficients, ValidateCoefficients_NegativeLmuy_IsAcceptedAsNonZero) {
@@ -276,7 +276,7 @@ TEST_P(validate_coefficients_invalid, ValidateCoefficients_InvalidValue_ReturnsI
   EXPECT_EQ(result.error().code, mf::error_code::INVALID_VALUE);
   EXPECT_EQ(result.error().where.key, param.key);
   EXPECT_NE(result.error().message.find(std::string{param.key}), std::string::npos);
-  EXPECT_NE(result.error().message.find("AD-12"), std::string::npos);
+  EXPECT_NE(result.error().message.find(" must be "), std::string::npos);
 }
 
 INSTANTIATE_TEST_SUITE_P(cases, validate_coefficients_invalid, ::testing::ValuesIn(INVALID_CASES));

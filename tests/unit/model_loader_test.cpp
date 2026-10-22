@@ -39,12 +39,12 @@ namespace {
   constexpr std::string_view VARIANT_NAME = "variant.tir";
 
   // clang-format off
-  /// The REQUIRED keys of AD-12.
+  /// The REQUIRED keys.
   constexpr std::array<std::string_view, 9> REQUIRED_KEYS{
       "FNOMIN", "UNLOADED_RADIUS", "PCX1", "PDX1", "PKX1", "PCY1", "PDY1", "PKY1", "PKY2",
   };
 
-  /// The 20 combined-slip R* keys (D-07).
+  /// The 20 combined-slip R* keys.
   constexpr std::array<std::string_view, 20> COMBINED_KEYS{
       "RBX1", "RBX2", "RCX1", "REX1", "REX2", "RHX1", "RBY1", "RBY2", "RBY3", "RCY1",
       "REY1", "REY2", "RHY1", "RHY2", "RVY1", "RVY2", "RVY3", "RVY4", "RVY5", "RVY6",
@@ -54,15 +54,14 @@ namespace {
   /// The camber scaling factors that only PAC2002 has.
   constexpr std::array<std::string_view, 3> CAMBER_KEYS{"LGAX", "LGAY", "LGAZ"};
 
-  /// Warning of the MSC friction-ellipse selection (AD-07).
-  constexpr std::string_view ELLIPSE_MESSAGE =
-      "no combined-slip R* coefficients: using the MSC friction-ellipse method (MSC p.33, AD-07)";
+  /// Warning of the friction-ellipse selection.
+  constexpr std::string_view ELLIPSE_MESSAGE = "no combined-slip R* coefficients: using the friction-ellipse method";
 
-  /// Format string of the USE_MODE warning (AD-16).
+  /// Format string of the USE_MODE warning.
   constexpr std::string_view USE_MODE_MESSAGE =
-      "USE_MODE {} is echoed only; combined/uncombined is selected by the caller (AD-16)";
+      "USE_MODE {} is echoed only; combined/uncombined is selected by the caller";
 
-  /// One row of the LONGVL rule (AD-13): the text edits and the expected outcome.
+  /// One row of the LONGVL rule: the text edits and the expected outcome.
   struct longvl_case {
     /// Short description, for failure messages.
     std::string_view label;
@@ -97,7 +96,7 @@ namespace {
   class model_loader_longvl : public ::testing::TestWithParam<longvl_case> {};
 
   // clang-format off
-  /// Keys of fixture S that no code reads: the header keys and the MSC scaling factors that PAC2002 does not use.
+  /// Keys of fixture S that no code reads: the header keys and the scaling factors that PAC2002 does not use.
   const std::vector<std::string> S_IGNORED_KEYS{"FILE_TYPE", "FILE_VERSION", "FILE_FORMAT", "LCZ", "LSGKP", "LSGAL", "LGYR"};
   // clang-format on
 
@@ -314,12 +313,11 @@ namespace {
     return text;
   }
 
-  /// The load must fail with MISSING_KEY on LONGVL (AD-13).
+  /// The load must fail with MISSING_KEY on LONGVL.
   void expect_longvl_missing(const load_result &result, const longvl_case &param) {
     ASSERT_FALSE(result.has_value()) << param.label;
     expect_error(result, error_code::MISSING_KEY, "LONGVL", 0U);
-    EXPECT_TRUE(result.error().message.contains("QSY3 or QSY4")) << result.error().message;
-    EXPECT_TRUE(result.error().message.contains("AD-13")) << result.error().message;
+    EXPECT_EQ(result.error().message, "LONGVL is required when QSY3 or QSY4 is non-zero");
   }
 
   /// The load must succeed with the expected LONGVL.
@@ -350,7 +348,7 @@ TEST(model_loader, Load_FixtureS_Pac2002CosineNoWarnings) {
   const mf::pac2002_model *const pac2002 = pac2002_of(*loaded);
   ASSERT_NE(pac2002, nullptr);
   EXPECT_EQ(pac2002->method(), mf::combined_method::COSINE);
-  EXPECT_FALSE(pac2002->uses_eq88_rolling_resistance());
+  EXPECT_FALSE(pac2002->uses_my_from_shifts());
 
   EXPECT_TRUE(loaded->warnings.empty());
   EXPECT_EQ(loaded->ignored_keys, S_IGNORED_KEYS);
@@ -371,8 +369,7 @@ TEST_P(model_loader_required, Load_MissingRequiredKey_ReturnsMissingKey) {
   const load_result result = load_text(remove_key(s_text(), key));
   ASSERT_FALSE(result.has_value()) << key;
   expect_error(result, error_code::MISSING_KEY, key, 0U);
-  EXPECT_TRUE(result.error().message.contains(key)) << result.error().message;
-  EXPECT_TRUE(result.error().message.contains("AD-12")) << result.error().message;
+  EXPECT_EQ(result.error().message, std::format("required key {} is missing", key));
 }
 
 INSTANTIATE_TEST_SUITE_P(required, model_loader_required, ::testing::ValuesIn(REQUIRED_KEYS));
@@ -381,8 +378,7 @@ TEST(model_loader, Load_Mf52MissingWidth_ReturnsMissingKey) {
   const load_result result = load_text(remove_key(mf52_clean_text(), "WIDTH"));
   ASSERT_FALSE(result.has_value());
   expect_error(result, error_code::MISSING_KEY, "WIDTH", 0U);
-  EXPECT_TRUE(result.error().message.contains("MF 5.2")) << result.error().message;
-  EXPECT_TRUE(result.error().message.contains("AD-12")) << result.error().message;
+  EXPECT_EQ(result.error().message, "required key WIDTH is missing for MF 5.2");
 }
 
 TEST(model_loader, Load_Mf52MissingRimRadius_ReturnsMissingKey) {
@@ -419,7 +415,7 @@ TEST(model_loader, Load_CoefficientsAbsent_DefaultZeroWithOneWarning) {
   EXPECT_EQ(bits(coefficients_of(*loaded).PDX2), bits(0.0));
   EXPECT_EQ(bits(coefficients_of(*loaded).QBZ2), bits(0.0));
   ASSERT_EQ(loaded->warnings.size(), 1U);
-  EXPECT_EQ(loaded->warnings[0].message, "2 coefficient(s) absent, defaulted to 0: PDX2, QBZ2 (AD-14)");
+  EXPECT_EQ(loaded->warnings[0].message, "2 coefficient(s) absent, defaulted to 0: PDX2, QBZ2");
   EXPECT_EQ(loaded->warnings[0].where.file, VARIANT_NAME);
   EXPECT_EQ(loaded->warnings[0].where.line, 0U);
   EXPECT_TRUE(loaded->warnings[0].where.key.empty());
@@ -433,8 +429,7 @@ TEST(model_loader, Load_NoCombinedKeys_SelectsEllipseWithWarning) {
   EXPECT_EQ(pac2002->method(), mf::combined_method::FRICTION_ELLIPSE);
   expect_combined_zero(coefficients_of(*loaded));
   ASSERT_EQ(loaded->warnings.size(), 1U);
-  EXPECT_TRUE(loaded->warnings[0].message.contains("friction-ellipse")) << loaded->warnings[0].message;
-  EXPECT_TRUE(loaded->warnings[0].message.contains("AD-07")) << loaded->warnings[0].message;
+  EXPECT_EQ(loaded->warnings[0].message, ELLIPSE_MESSAGE);
   EXPECT_FALSE(loaded->warnings[0].where.file.empty());
 }
 
@@ -456,14 +451,14 @@ TEST(model_loader, Load_PartialCombined_MissingKeyNamingRhx1) {
   const load_result result = load_text(remove_key(s_text(), "RHX1"));
   ASSERT_FALSE(result.has_value());
   expect_error(result, error_code::MISSING_KEY, "RHX1", 0U);
-  EXPECT_EQ(result.error().message, "incomplete combined-slip coefficient set; missing: RHX1 (AD-07)");
+  EXPECT_EQ(result.error().message, "incomplete combined-slip coefficient set; missing: RHX1");
 }
 
 TEST(model_loader, Load_PartialCombinedTwoMissing_NamesBothAndKeysTheFirst) {
   const load_result result = load_text(remove_key(remove_key(s_text(), "RVY6"), "RBX1"));
   ASSERT_FALSE(result.has_value());
   expect_error(result, error_code::MISSING_KEY, "RBX1", 0U);
-  EXPECT_EQ(result.error().message, "incomplete combined-slip coefficient set; missing: RBX1, RVY6 (AD-07)");
+  EXPECT_EQ(result.error().message, "incomplete combined-slip coefficient set; missing: RBX1, RVY6");
 }
 
 TEST(model_loader, Load_Mf52PartialCombined_DefaultsWithWarning) {
@@ -471,7 +466,7 @@ TEST(model_loader, Load_Mf52PartialCombined_DefaultsWithWarning) {
   const load_result loaded = load_text(remove_key(mf52_clean_text(), "RBX1"));
   ASSERT_TRUE(loaded.has_value()) << describe(loaded);
   EXPECT_EQ(bits(coefficients_of(*loaded).RBX1), bits(0.0));
-  expect_single_warning(*loaded, "1 coefficient(s) absent, defaulted to 0: RBX1 (AD-14)", "", 0U);
+  expect_single_warning(*loaded, "1 coefficient(s) absent, defaulted to 0: RBX1", "", 0U);
 }
 
 TEST(model_loader, Load_Mf52NoCombinedKeys_DefaultsAllWithoutEllipseWarning) {
@@ -484,7 +479,7 @@ TEST(model_loader, Load_Mf52NoCombinedKeys_DefaultsAllWithoutEllipseWarning) {
   ASSERT_EQ(loaded->warnings.size(), 1U);
   const std::string &message = loaded->warnings[0].message;
   EXPECT_TRUE(message.starts_with("20 coefficient(s) absent, defaulted to 0: RBX1, RBX2")) << message;
-  EXPECT_TRUE(message.contains("RVY6 (AD-14)")) << message;
+  EXPECT_TRUE(message.ends_with("RVY5, RVY6")) << message;
   EXPECT_FALSE(message.contains("ellipse")) << message;
 }
 
@@ -493,8 +488,7 @@ TEST(model_loader, Load_Mf52ForeignKeys_WarnConsumedAndForcedOne) {
   const std::string text = set_value(read_fixture("mf52_S52.tir"), "LGAX", "0.5");
   const load_result loaded = load_text(text);
   ASSERT_TRUE(loaded.has_value()) << describe(loaded);
-  constexpr std::string_view message =
-      "MF 5.2 ignores parameters that are not part of MF 5.2: LGAX, LGAY, LGAZ (AD-19)";
+  constexpr std::string_view message = "MF 5.2 ignores parameters that are not part of MF 5.2: LGAX, LGAY, LGAZ";
   expect_single_warning(*loaded, message, "LGAX", line_of(text, "LGAX"));
   EXPECT_FALSE(has_key(loaded->ignored_keys, "LGAX"));
   EXPECT_FALSE(has_key(loaded->ignored_keys, "LGAY"));
@@ -509,24 +503,24 @@ TEST(model_loader, Load_Mf52OtherForeignKey_WarnsWithThatKey) {
   const load_result loaded = load_text(text);
   ASSERT_TRUE(loaded.has_value()) << describe(loaded);
   const std::size_t line = line_of(text, "PKY4");
-  expect_single_warning(*loaded, "MF 5.2 ignores parameters that are not part of MF 5.2: PKY4 (AD-19)", "PKY4", line);
+  expect_single_warning(*loaded, "MF 5.2 ignores parameters that are not part of MF 5.2: PKY4", "PKY4", line);
   EXPECT_FALSE(has_key(loaded->ignored_keys, "PKY4"));
 }
 
 TEST(model_loader, Load_Mf52EveryForeignKey_WarnsWithThatKeyAndConsumesIt) {
-  // TIR-2: the pressure, turn-slip and Q_FYS keys of mf52_foreign_keys() are as foreign as the PAC2002 ones.
+  // The pressure, turn-slip and Q_FYS keys of mf52_foreign_keys() are as foreign as the PAC2002 ones.
   for (const std::string_view key : mf::io::mf52_foreign_keys()) {
     const std::string text = append(mf52_clean_text(), std::format("{} = 1\n", key));
     const load_result loaded = load_text(text);
     ASSERT_TRUE(loaded.has_value()) << key << ": " << describe(loaded);
-    const std::string message = std::format("MF 5.2 ignores parameters that are not part of MF 5.2: {} (AD-19)", key);
+    const std::string message = std::format("MF 5.2 ignores parameters that are not part of MF 5.2: {}", key);
     expect_single_warning(*loaded, message, key, line_of(text, key));
     EXPECT_FALSE(has_key(loaded->ignored_keys, std::string(key))) << key;
   }
 }
 
 TEST(model_loader, Load_Mf52PressureTurnSlipStructuralInertia_OneWarningNamesEach) {
-  // TIR-2: one AD-19 warning lists the table keys (table order) and then the keys of the foreign sections.
+  // One foreign-key warning lists the table keys (table order) and then the keys of the foreign sections.
   constexpr std::string_view foreign_lines = "PPX1 = -4.8571\n"
                                              "PPMX1 = 0\n"
                                              "PDXP1 = 0.4\n"
@@ -541,7 +535,7 @@ TEST(model_loader, Load_Mf52PressureTurnSlipStructuralInertia_OneWarningNamesEac
   ASSERT_TRUE(loaded.has_value()) << describe(loaded);
   constexpr std::string_view message =
       "MF 5.2 ignores parameters that are not part of MF 5.2: PPX1, PPMX1, PDXP1, QDRP1, Q_FYS1, "
-      "LONGITUDINAL_STIFFNESS, MASS (AD-19)";
+      "LONGITUDINAL_STIFFNESS, MASS";
   expect_single_warning(*loaded, message, "PPX1", line_of(text, "PPX1"));
   for (const std::string_view key : {"PPX1", "PPMX1", "PDXP1", "QDRP1", "Q_FYS1", "LONGITUDINAL_STIFFNESS", "MASS"}) {
     EXPECT_FALSE(has_key(loaded->ignored_keys, std::string(key))) << key;
@@ -557,7 +551,7 @@ TEST(model_loader, Load_Mf52InertiaMassOnly_WarningIsLocatedAtInertiaMassNotUnit
   ASSERT_TRUE(loaded.has_value()) << describe(loaded);
   // The appended MASS follows the [INERTIA] header, which follows the last line of the base text.
   const std::size_t inertia_mass_line = split_lines(base).size() + 2U;
-  expect_single_warning(*loaded, "MF 5.2 ignores parameters that are not part of MF 5.2: MASS (AD-19)", "MASS",
+  expect_single_warning(*loaded, "MF 5.2 ignores parameters that are not part of MF 5.2: MASS", "MASS",
                         inertia_mass_line);
   EXPECT_FALSE(has_key(loaded->ignored_keys, "MASS"));
 }
@@ -566,8 +560,7 @@ TEST(model_loader, Load_Mf52ContactPatchSection_AllKeysWarnedAndConsumed) {
   const std::string text = append(mf52_clean_text(), "[CONTACT_PATCH]\nELLIPS_SHIFT = 0.1\nENV_C1 = 0.2\n");
   const load_result loaded = load_text(text);
   ASSERT_TRUE(loaded.has_value()) << describe(loaded);
-  constexpr std::string_view message =
-      "MF 5.2 ignores parameters that are not part of MF 5.2: ELLIPS_SHIFT, ENV_C1 (AD-19)";
+  constexpr std::string_view message = "MF 5.2 ignores parameters that are not part of MF 5.2: ELLIPS_SHIFT, ENV_C1";
   expect_single_warning(*loaded, message, "ELLIPS_SHIFT", line_of(text, "ELLIPS_SHIFT"));
   EXPECT_FALSE(has_key(loaded->ignored_keys, "ELLIPS_SHIFT"));
   EXPECT_FALSE(has_key(loaded->ignored_keys, "ENV_C1"));
@@ -580,7 +573,7 @@ TEST(model_loader, Load_Mf52UnitsMassOnly_NoForeignWarning) {
   EXPECT_TRUE(loaded->warnings.empty());
 }
 
-TEST(model_loader, Load_Pac2002SameKeys_NoAd19WarningAndKeysIgnored) {
+TEST(model_loader, Load_Pac2002SameKeys_NoForeignKeyWarningAndKeysIgnored) {
   constexpr std::string_view foreign_lines = "PPX1 = -4.8571\n"
                                              "PDXP1 = 0.4\n"
                                              "Q_FYS1 = 0\n"
@@ -669,14 +662,14 @@ TEST(model_loader, Load_Ranges_SingleBound_WarnsNotApplied) {
   ASSERT_TRUE(lower.has_value()) << describe(lower);
   EXPECT_FALSE(lower->model->limits().fz_n.has_value());
   const std::size_t min_line = line_of(lower_only, "FZMIN");
-  expect_single_warning(*lower, "only one of FZMIN/FZMAX given; the range is not applied (AD-15)", "FZMIN", min_line);
+  expect_single_warning(*lower, "only one of FZMIN/FZMAX given; the range is not applied", "FZMIN", min_line);
 
   const std::string upper_only = append(s_text(), "[VERTICAL_FORCE_RANGE]\nFZMAX = 10000\n");
   const load_result upper = load_text(upper_only);
   ASSERT_TRUE(upper.has_value()) << describe(upper);
   EXPECT_FALSE(upper->model->limits().fz_n.has_value());
   const std::size_t max_line = line_of(upper_only, "FZMAX");
-  expect_single_warning(*upper, "only one of FZMIN/FZMAX given; the range is not applied (AD-15)", "FZMAX", max_line);
+  expect_single_warning(*upper, "only one of FZMIN/FZMAX given; the range is not applied", "FZMAX", max_line);
 }
 
 TEST(model_loader, Load_Ranges_OtherRangesFillTheirOwnInterval) {
@@ -733,7 +726,7 @@ TEST(model_loader, Load_Tyreside_Right_Warns) {
   ASSERT_TRUE(loaded.has_value()) << describe(loaded);
   EXPECT_EQ(loaded->model->metadata().side, mf::tyre_side::RIGHT);
   const std::size_t line = line_of(text, "TYRESIDE");
-  expect_single_warning(*loaded, "TYRESIDE 'RIGHT': no mirroring is applied (AD-06)", "TYRESIDE", line);
+  expect_single_warning(*loaded, "TYRESIDE 'RIGHT': no mirroring is applied", "TYRESIDE", line);
 }
 
 TEST(model_loader, Load_Tyreside_Symmetric_NotImplemented) {
@@ -741,8 +734,7 @@ TEST(model_loader, Load_Tyreside_Symmetric_NotImplemented) {
   const load_result result = load_text(text);
   ASSERT_FALSE(result.has_value());
   expect_error(result, error_code::NOT_IMPLEMENTED, "TYRESIDE", line_of(text, "TYRESIDE"));
-  EXPECT_TRUE(result.error().message.contains("'SYMMETRIC'")) << result.error().message;
-  EXPECT_TRUE(result.error().message.contains("AD-06")) << result.error().message;
+  EXPECT_EQ(result.error().message, "TYRESIDE 'SYMMETRIC' is not implemented; only LEFT or RIGHT");
 }
 
 TEST(model_loader, Load_UseMode_AbsentAnd4_NoWarning) {
@@ -805,31 +797,32 @@ TEST(model_loader, Load_Pac2002Fittyp6_WarningForwarded) {
 }
 
 TEST(model_loader, Load_FeMethod_Warns) {
-  const std::string text = insert_after(s_text(), "[MODEL]", "FE_METHOD = 'MSC'");
+  const std::string text = insert_after(s_text(), "[MODEL]", "FE_METHOD = 'ELLIPSE'");
   const load_result loaded = load_text(text);
   ASSERT_TRUE(loaded.has_value()) << describe(loaded);
   const std::size_t line = line_of(text, "FE_METHOD");
-  expect_single_warning(*loaded, "FE_METHOD is not an MSC key and is ignored (AD-07)", "FE_METHOD", line);
+  expect_single_warning(*loaded, "FE_METHOD is not a PAC2002 or MF 5.2 key and is ignored", "FE_METHOD", line);
   EXPECT_FALSE(has_key(loaded->ignored_keys, "FE_METHOD"));
 }
 
-TEST(model_loader, Load_Eq88_Warns) {
+TEST(model_loader, Load_MyFromShifts_Warns) {
   const std::string text = set_value(insert_after(s_text(), "[MODEL]", "FITTYP = 5"), "QSY1", "0");
   const load_result loaded = load_text(text);
   ASSERT_TRUE(loaded.has_value()) << describe(loaded);
   const mf::pac2002_model *const pac2002 = pac2002_of(*loaded);
   ASSERT_NE(pac2002, nullptr);
-  EXPECT_TRUE(pac2002->uses_eq88_rolling_resistance());
+  EXPECT_TRUE(pac2002->uses_my_from_shifts());
   const std::size_t line = line_of(text, "FITTYP");
-  expect_single_warning(*loaded, "FITTYP 5 with QSY1 = QSY2 = 0: My uses MSC eq (88) (MSC p.33)", "FITTYP", line);
+  expect_single_warning(*loaded, "FITTYP 5 with QSY1 = QSY2 = 0: My uses the shift form -R0*(SVx + Kx*SHx)", "FITTYP",
+                        line);
 }
 
-TEST(model_loader, Load_Fittyp5WithQsy1_NoEq88Warning) {
+TEST(model_loader, Load_Fittyp5WithQsy1_NoMyFromShiftsWarning) {
   const load_result loaded = load_text(insert_after(s_text(), "[MODEL]", "FITTYP = 5"));
   ASSERT_TRUE(loaded.has_value()) << describe(loaded);
   const mf::pac2002_model *const pac2002 = pac2002_of(*loaded);
   ASSERT_NE(pac2002, nullptr);
-  EXPECT_FALSE(pac2002->uses_eq88_rolling_resistance());
+  EXPECT_FALSE(pac2002->uses_my_from_shifts());
   EXPECT_TRUE(loaded->warnings.empty());
 }
 

@@ -7,7 +7,7 @@ user-invocable: true
 
 # Tire model domain primer
 
-**Ground rule:** this primer states only well-established facts. The version-specific and convention-dependent items that used to be marked "to be confirmed" are now resolved in `docs/research/` (start at `README.md`: source register, evidence tags, decision list), and each one below points at its note. Do not implement from this file: `docs/research/`, not this primer, is the source of truth for equations, coefficient sets and conventions. Policy items that have no primary source are signed off in `docs/research/decisions.md` (AD-xx). Items still open for primary evidence are in `docs/research/open-questions.md`. If a point is not covered there, ask `researcher` for a cited finding and record it in `docs/research/<topic>.md`.
+**Ground rule:** this primer states only well-established facts. The version-specific and convention-dependent items that used to be marked "to be confirmed" are now resolved in `docs/research/` (start at `README.md`: source register, evidence tags, findings), and each one below points at its note. Do not implement from this file: `docs/research/`, not this primer, is the source of truth for equations, coefficient sets and conventions. Project rules for items that have no primary source are in `docs/research/policies.md`. Items still open for primary evidence are in `docs/research/open-questions.md`. If a point is not covered there, ask `researcher` for a cited finding and record it in `docs/research/<topic>.md`.
 
 ## What the Magic Formula is
 
@@ -58,7 +58,7 @@ Input files often give angles in degrees. Conversion to radians happens once, at
 
 ## The .tir property file
 
-The file is plain ASCII. Section headers are written `[SECTION_NAME]` and entries `KEY = value`. Strings are single-quoted (`'PAC2002'`). A `$` starts a comment (full-line or trailing). Lines starting with `!` are comment/metadata lines. Whether `!` is a trailing-comment marker, and the key and section case rules, are fixed in `docs/research/tir-format.md` section 2 (lexical rules, refined by AD-20 in `docs/research/decisions.md`).
+The file is plain ASCII. Section headers are written `[SECTION_NAME]` and entries `KEY = value`. Strings are single-quoted (`'PAC2002'`). A `$` starts a comment (full-line or trailing). Lines starting with `!` are comment/metadata lines. Whether `!` is a trailing-comment marker, and the key and section case rules, are fixed in `docs/research/tir-format.md` section 2 (lexical rules, refined in `docs/research/policies.md` section 4).
 
 Common sections (which ones appear, and their contents, vary by version; required keys and defaults per model: `docs/research/tir-format.md` section 3):
 
@@ -78,7 +78,7 @@ Common sections (which ones appear, and their contents, vary by version; require
 | `[ROLLING_COEFFICIENTS]` | `QSY…` |
 | `[ALIGNING_COEFFICIENTS]` | `Q?Z…`, `SSZ…` |
 
-The values in `[UNITS]` define the units of every dimensional key in the file. The parser must honour them (or reject units it does not support) instead of assuming SI; the policy (SI only, anything else rejected) is `docs/research/tir-format.md` section 4 and AD-10.
+The values in `[UNITS]` define the units of every dimensional key in the file. The parser must honour them (or reject units it does not support) instead of assuming SI; the policy (SI only, anything else rejected) is `docs/research/tir-format.md` section 4 and `docs/research/policies.md` section 3.
 
 ## Coefficient families (naming scheme)
 
@@ -100,24 +100,22 @@ The exact index ranges (e.g. how many `PKY`, `QSX`, `QDZ` coefficients exist), t
 
 ## Versions and identification
 
-- **PAC2002**: the Magic Formula implementation used in MSC ADAMS, close to the MF 5.x formulation. Equations: `docs/research/pac2002.md`; differences from MF 5.2: `docs/research/pac2002-vs-mf52.md`.
-- **MF 5.2**: an MF-Tyre (TNO) release of the formulation described in Pacejka's book. Equations (evidence tier [impl]) and coefficient list: `docs/research/mf52.md`; differences from PAC2002: `docs/research/pac2002-vs-mf52.md`.
-- **MF 6.1 / 6.2**: later releases that add inflation-pressure dependence (Besselink, Schmeitz, Pacejka, 2010) and other changes. Out of scope at first, but the architecture must allow adding them (see `docs/research/pac2002-vs-mf52.md` for the version differences).
-- Identification: `[MODEL]` holds `FITTYP` (integer) and, in many files, `PROPERTY_FILE_FORMAT` (string). The mapping from `FITTYP` / `PROPERTY_FILE_FORMAT` values to formulations (which numbers mean PAC2002, MF 5.2, MF 6.1, …) and its precedence are in `docs/research/model-routing.md` (AD-11). An unknown value must give an explicit error, never a silent fallback.
+- **PAC2002**: the Magic Formula implementation used in ADAMS, close to the MF 5.x formulation. Equations: `docs/research/pac2002.md`; differences from MF 5.2: `docs/research/pac2002-vs-mf52.md`.
+- **MF 5.2**: an MF-Tyre (TNO) release of the formulation described in Pacejka's book. Equations (implementation-derived) and coefficient list: `docs/research/mf52.md`; differences from PAC2002: `docs/research/pac2002-vs-mf52.md`.
+- **MF 6.1 / 6.2**: later releases that add inflation-pressure dependence and other changes. Out of scope at first, but the architecture must allow adding them (see `docs/research/pac2002-vs-mf52.md` for the version differences).
+- Identification: `[MODEL]` holds `FITTYP` (integer) and, in many files, `PROPERTY_FILE_FORMAT` (string). The mapping from `FITTYP` / `PROPERTY_FILE_FORMAT` values to formulations (which numbers mean PAC2002, MF 5.2, MF 6.1, …) and its precedence are in `docs/research/model-routing.md`. An unknown value must give an explicit error, never a silent fallback.
 
 ## Sign conventions and units
 
 - Several axis systems are in use: ISO 8855 / ISO-W (z up, y to the left), SAE J670 (z down, y to the right), and the "adapted" conventions in Pacejka's book and in ADAMS/TYDEX. The signs of Fy, Mz, Mx, α, γ and sometimes κ differ between them.
 - Which convention each formulation's coefficients assume, and which convention this repo uses for inputs and outputs (TYDEX W-axis, ISO orientation), is fixed in `docs/research/conventions.md` sections 1-4. Do not "fix" signs ad hoc. Every conversion lives in one tested place.
 - Library-internal units are SI with angles in radians. `.tir` units come from `[UNITS]`.
-- `TYRESIDE` (left/right) can mirror lateral quantities. Mirroring is not implemented; the policy is in `docs/research/conventions.md` section 9 (AD-06).
+- `TYRESIDE` (left/right) can mirror lateral quantities. Mirroring is not implemented; the policy is in `docs/research/conventions.md` section 9.
 
-## Literature (locate via researcher; do not quote from memory)
+## Literature
 
-- H. B. Pacejka, *Tire and Vehicle Dynamics* (3rd ed., with I. Besselink, 2012), chapter 4 (Magic Formula).
-- I. J. M. Besselink, A. J. C. Schmeitz, H. B. Pacejka, "An improved Magic Formula/Swift tyre model that can handle inflation pressure changes", *Vehicle System Dynamics* 48 (sup1), 2010.
-- MSC ADAMS/Tire documentation (PAC2002), TNO / Siemens MF-Tyre/MF-Swift user manuals.
-- Open implementations, used only for cross-checks and never copied: e.g. MFeval (MATLAB), other open-source MF codes. Check licences before using any test vector.
+Sources: the source register in `docs/research/README.md`; locate them through `researcher`, never quote from memory.
+Open implementations are used only for cross-checks and never copied; check licences before using any test vector.
 
 ## Testing implications
 

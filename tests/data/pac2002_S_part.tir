@@ -1,4 +1,4 @@
-$ synthetic, authored for magic-formula from docs/research/test-data.md section 2/3 (vector V23); not derived from any vendor file
+$ synthetic, authored for magic-formula from docs/research/test-data.md; not derived from any vendor file
 $ purpose: fixture S without RHX1 only (partial R* set, expected MISSING_KEY naming RHX1)
 [MDI_HEADER]
 FILE_TYPE = 'tir'

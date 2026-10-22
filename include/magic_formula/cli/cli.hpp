@@ -9,7 +9,7 @@
 #include <string_view>
 
 namespace mf::cli {
-  /// Process exit status: success, `--help` and `--version` (AD-27).
+  /// Process exit status: success, `--help` and `--version`.
   inline constexpr int EXIT_OK = 0;
   /// Process exit status: a file, model, input-table or evaluation error, a caught exception, or an output failure.
   /// The message is on stderr. Nothing has been written to stdout unless the failure happened while the results were
@@ -33,7 +33,7 @@ namespace mf::cli {
     std::string inputs_path;
     /// Second positional argument: the .tir property file.
     std::string tir_path;
-    /// `--uncombined` selects pure-slip outputs, otherwise combined slip (AD-16).
+    /// `--uncombined` selects pure-slip outputs, otherwise combined slip.
     slip_mode mode = slip_mode::COMBINED;
     /// `--verbose` prints the model information and the ignored .tir keys on stderr.
     bool verbose = false;
@@ -54,8 +54,8 @@ namespace mf::cli {
   [[nodiscard]] std::string_view usage() noexcept;
 
   /// The application: parses the command line, loads the .tir file, reads the input table, evaluates every row and
-  /// writes the results as CSV (`io::write_results`) to `out`. Diagnostics go to `err` (AD-27): load warnings,
-  /// optional `--verbose` information, the pressure-column warning (AD-09), and one clamp / VXLOW warning per variable
+  /// writes the results as CSV (`io::write_results`) to `out`. Diagnostics go to `err`: load warnings,
+  /// optional `--verbose` information, the pressure-column warning, and one clamp / VXLOW warning per variable
   /// naming the first table line and the number of rows. Nothing is written to `out` for a usage, file, model,
   /// input-table or evaluation error, because the results are written only after every row has been evaluated. The
   /// results are then streamed to `out` row by row, so if `out` fails or throws while they are written, the rows

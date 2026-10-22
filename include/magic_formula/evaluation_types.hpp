@@ -6,24 +6,23 @@
 #include <optional>
 
 namespace mf {
-  /// One steady-state operating point. SI units, TYDEX W-axis system with ISO orientation
-  /// (docs/research/conventions.md sections 1-3).
+  /// One steady-state operating point. SI units, TYDEX W-axis system with ISO orientation.
   struct operating_point {
-    /// Vertical load Fz [N]; > 0 = load, <= 0 = no contact and zero outputs (AD-01).
+    /// Vertical load Fz [N]; > 0 = load, <= 0 = no contact and zero outputs.
     double fz_n = 0.0;
-    /// Slip ratio SR [-]; kappa = -Vsx/Vx (conventions.md section 2); -1 = locked wheel.
+    /// Slip ratio SR [-]; kappa = -Vsx/Vx; -1 = locked wheel.
     double kappa = 0.0;
-    /// Slip angle SA [rad]; tan(alpha) = Vsy/|Vx| (conventions.md section 2).
+    /// Slip angle SA [rad]; tan(alpha) = Vsy/|Vx|.
     double alpha_rad = 0.0;
-    /// Inclination angle IA [rad]; ISO sign (conventions.md section 3).
+    /// Inclination angle IA [rad]; ISO sign.
     double gamma_rad = 0.0;
-    /// Longitudinal speed Vx [m/s]; negative values are rejected (AD-02).
+    /// Longitudinal speed Vx [m/s]; negative values are rejected.
     double vx_mps = 0.0;
   };
 
   /// Which input adjustments were applied to one evaluated row.
   struct input_flags {
-    /// Fz was clamped to FZMIN/FZMAX (AD-15, conventions.md section 8).
+    /// Fz was clamped to FZMIN/FZMAX.
     bool fz_clamped = false;
     /// SR was clamped to KPUMIN/KPUMAX.
     bool kappa_clamped = false;
@@ -31,11 +30,11 @@ namespace mf {
     bool alpha_clamped = false;
     /// IA was clamped to CAMMIN/CAMMAX.
     bool gamma_clamped = false;
-    /// Vx < VXLOW; the row is flagged but not modified (AD-05).
+    /// Vx < VXLOW; the row is flagged but not modified.
     bool below_vxlow = false;
   };
 
-  /// Contact-point forces and moments in the W-axis system, ISO orientation (conventions.md sections 1 and 4).
+  /// Contact-point forces and moments in the W-axis system, ISO orientation.
   struct tire_outputs {
     /// Longitudinal force Fx [N].
     double fx_n = 0.0;
@@ -51,7 +50,7 @@ namespace mf {
     input_flags flags;
   };
 
-  /// Combined-slip handling of an evaluation (USE_MODE 4 / 3 semantics, decision D-26 and AD-16).
+  /// Combined-slip handling of an evaluation (USE_MODE 4 / 3 semantics).
   enum class slip_mode : std::uint8_t {
     COMBINED,  ///< Fx, Fy and Mz include the combined-slip interaction
     UNCOMBINED ///< pure-slip Fx0, Fy0 and Mz0 only
@@ -59,14 +58,12 @@ namespace mf {
 
   /// A closed interval [lower, upper]. `lower`/`upper` avoid the Windows `min`/`max` macros.
   struct interval {
-    /// Lower bound.
     double lower = 0.0;
     /// Upper bound; `validate_limits` rejects lower > upper.
     double upper = 0.0;
   };
 
-  /// Validity ranges (*_RANGE sections of the .tir file). An interval applies only when both bounds exist
-  /// (AD-15, conventions.md section 8).
+  /// Validity ranges (*_RANGE sections of the .tir file). An interval applies only when both bounds exist.
   struct operating_limits {
     /// FZMIN/FZMAX [N].
     std::optional<interval> fz_n;
@@ -76,18 +73,18 @@ namespace mf {
     std::optional<interval> alpha_rad;
     /// CAMMIN/CAMMAX [rad].
     std::optional<interval> gamma_rad;
-    /// VXLOW [m/s]; only flags rows, it never changes results (AD-05).
+    /// VXLOW [m/s]; only flags rows, it never changes results.
     double vxlow_mps = 1.0;
   };
 
-  /// Tire mounting side (TYRESIDE). Mirroring is not implemented (AD-06, conventions.md section 9).
+  /// Tire mounting side (TYRESIDE). Mirroring is not implemented.
   enum class tyre_side : std::uint8_t { LEFT, RIGHT };
 
   /// [MODEL] values that are echoed by the model; FITTYP also selects the PAC2002 rolling-resistance form.
   struct model_metadata {
     /// FITTYP, when present.
     std::optional<int> fittyp;
-    /// USE_MODE, when present (echoed only, AD-16).
+    /// USE_MODE, when present (echoed only).
     std::optional<int> use_mode;
     /// TYRESIDE; absent means LEFT.
     tyre_side side = tyre_side::LEFT;

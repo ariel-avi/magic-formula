@@ -5,10 +5,10 @@
 #include <magic_formula/evaluation_types.hpp>
 
 namespace mf {
-  /// The MF 5.x-family coefficient set shared by PAC2002 and MF 5.2 (docs/research/pac2002.md section 3,
-  /// docs/research/mf52.md section 3). Exactly 117 doubles and no padding. Member names equal the .tir keys.
-  /// Defaults: scaling factors L* = 1, every P/Q/R/S coefficient = 0, LONGVL = 1 m/s as an unused placeholder
-  /// (AD-13). The camber factors LGAX, LGAY and LGAZ are PAC2002 keys; MF 5.2 forces them to 1 (AD-19).
+  /// The MF 5.x-family coefficient set shared by PAC2002 and MF 5.2 (docs/research/mf52.md). Exactly 117 doubles and
+  /// no padding. Member names equal the .tir keys. Defaults: scaling factors L* = 1, every P/Q/R/S coefficient = 0,
+  /// LONGVL = 1 m/s as an unused placeholder. The camber factors LGAX, LGAY and LGAZ are PAC2002 keys; MF 5.2 forces
+  /// them to 1.
   struct mf5x_coefficients {
     // NOLINTBEGIN(readability-identifier-naming): MF coefficient names match the .tir keys one-to-one
 
@@ -258,15 +258,14 @@ namespace mf {
 
   /// Everything an MF 5.x-family model is built from (by `mf::io` from a .tir file, or by code).
   struct mf5x_parameters {
-    /// Coefficients.
     mf5x_coefficients coefficients;
     /// Validity ranges and VXLOW.
     operating_limits limits;
-    /// Echoed [MODEL] values (FITTYP also gates the PAC2002 eq (88) rolling resistance).
+    /// Echoed [MODEL] values (FITTYP also selects the PAC2002 shift form of My).
     model_metadata metadata;
   };
 
-  /// Checks the coefficients that the equations divide by or take as a base (AD-12). Six independent checks, in this
+  /// Checks the coefficients that the equations divide by or take as a base. Six independent checks, in this
   /// order: FNOMIN > 0, UNLOADED_RADIUS > 0, LFZO > 0, PKY2 != 0, LMUY != 0, LONGVL > 0. A failure is an
   /// INVALID_VALUE whose `where.key` is the member name (a NaN fails the "> 0" checks).
   [[nodiscard]] std::expected<void, error> validate_coefficients(const mf5x_coefficients &coefficients);
