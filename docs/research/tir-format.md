@@ -1,7 +1,5 @@
 # .tir property file
 
-Revision 4.
-
 ## 1. Primary statements
 
 - The file 'typically has the extension .tir (although this is not mandatory)' (SIM20 p.24). Do not require the extension.
@@ -46,11 +44,11 @@ Revision 4.
 | Kernel-critical (both models) | PCX1, PDX1, PKX1, PCY1, PDY1, PKY1, PKY2 present, else load error | [policy]: a zero gives zero force or a division by zero. SIM20 p.25 lists PDX1, PKX1, PDY1, PKY1 and PKY2 as 'highly recommended' |
 | Validation | FNOMIN > 0, UNLOADED_RADIUS > 0, LFZO > 0 | [policy] |
 | Scaling factors L* | default 1 | MSC p.17-18; SIM20 p.26; MFEVAL readTIR.m:122-146 |
-| Other P*, Q*, R*, S* | default 0, with one warning listing them. PAC2002 partial R* sets follow D-07. MF 5.2: TNO's estimation (SIM20 p.24-25) is not implemented | [policy] |
+| Other P*, Q*, R*, S* | default 0, with one warning listing them. PAC2002 partial R* sets follow pac2002.md section 5.5. MF 5.2: TNO's estimation (SIM20 p.24-25) is not implemented | [policy] |
 | TYRESIDE | default LEFT | SIM20 p.19; MFEVAL readTIR.m:36 |
 | VXLOW | default 1 (used only for the warning) | MSC p.45 'approximately 1 m/s'; MFEVAL :38 |
-| LONGVL | no default; required when QSY3 != 0 or QSY4 != 0 | [policy]. The MSC checklist says '1 m/s' (p.45) while the example uses 16.6 (Q-16); MFEVAL defaults to 16.7 |
-| *_RANGE | clamp only when both limits of a pair are present | D-03 |
+| LONGVL | no default; required when QSY3 != 0 or QSY4 != 0 | [policy]. The MSC checklist says '1 m/s' (p.45) while the example uses 16.6 (open question, open-questions.md); MFEVAL defaults to 16.7 |
+| *_RANGE | clamp only when both limits of a pair are present | clamp rule in policies.md section 1 |
 
 MFEVAL's readTIR defaults are uncited sample numbers (FITTYP 0, PCX1 1.65, PKY1 -20, QBZ1 10, FZMIN 100, KPU/ALP +/-1.5, CAM +/-0.175; readTIR.m:27-317) and must not be adopted.
 
@@ -61,9 +59,9 @@ MFEVAL's readTIR defaults are uncited sample numbers (FITTYP 0, PCX1 1.65, PKY1 
   - a missing section or key means SI;
   - a present key must equal its SI symbol, compared case-insensitively, otherwise it is a load error naming the key and value;
   - PRESSURE 'pascal' is accepted and ignored;
-  - aliases need an architect decision (Q-14).
+  - no aliases are accepted (policies.md section 3).
 - Why not convert:
   - no primary source says which keys carry which dimension;
   - MFEVAL and TEASIT do no conversion at all (readTIR.m:431-452);
   - CHRONO converts some keys only, never applies its angle factor, and inverts the KN and KPOUND factors.
-- The rev-2 angle-exponent table is no longer needed, because a non-radian ANGLE is rejected. Rev 2 doubted RVY4's exponent; that was a false alarm: RVY4 multiplies alpha in (76), so its exponent A^-1 is correct.
+- No angle-exponent table is needed, because a non-radian ANGLE is rejected. RVY4's exponent is correct: RVY4 multiplies alpha in (76), so its exponent A^-1 holds.

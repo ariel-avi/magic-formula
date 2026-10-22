@@ -3,14 +3,14 @@
 ## Origin
 
 Every file in this directory (except `reference/`) is **synthetic**: authored for magic-formula from
-`docs/research/test-data.md` (sections 2 and 3) and `docs/research/model-routing.md`.
-Nothing is copied from, or derived from, any vendor, third-party or reference-implementation file
-(MSC, Chrono, MFeval, TEASIT). `reference/` holds numbers computed by MFeval 4.0 on our synthetic
-fixture, with their origin and licence notice in `reference/README.md`. The coefficient values are the hand-derivable fixture "S" of the
-research notes; the operating ranges of `pac2002_S_rng.tir` are synthetic values (AD-28).
+`docs/research/test-data.md`.
+Nothing is copied from, or derived from, any vendor, third-party or reference-implementation file.
+`reference/` holds numbers computed by MFeval 4.0 on our synthetic fixture, with their origin and
+licence notice in `reference/README.md`. The coefficient values are the hand-derivable fixture "S" of the
+research notes; the operating ranges of `pac2002_S_rng.tir` are synthetic values.
 
 Each `.tir` file starts with `$` / `!` origin comment lines, each input table with a `#` origin line.
-All files use LF line endings and are authored so that the parser's lexical rules (AD-20) hold,
+All files use LF line endings and are authored so that the parser's lexical rules hold,
 except for the deliberate lexical variants of `lexical_mix.tir`. CRLF handling is tested inline in the
 C++ tests (string literals with `"\r\n"`), not with a file, because git may normalise line endings.
 
@@ -19,12 +19,12 @@ C++ tests (string literals with `"\r\n"`), not with a file, because git may norm
 | File | Purpose | Derivation | Vector ids | Expected load outcome |
 |------|---------|------------|------------|-----------------------|
 | `pac2002_S.tir` | Fixture S, PAC2002, cosine combined slip, no ranges | 133 assignment lines, `PROPERTY_FILE_FORMAT = 'PAC2002'`, no `FITTYP` | V1-V22 (V11 included), P* | PAC2002, cosine method, no warnings |
-| `mf52_S52.tir` | Fixture S52, MF 5.2 (FITTYP 6) | S - `PROPERTY_FILE_FORMAT` + `FITTYP = 6` + `WIDTH = 0.2` + `RIM_RADIUS = 0.2` (135 lines); keeps `LGAX/LGAY/LGAZ` | M1-M11 | MF 5.2, one warning listing LGAX, LGAY, LGAZ (AD-19) |
-| `mf52_user_pff.tir` | MF 5.2 in the TNO MF-Tyre ADAMS user-tire form (AD-11 amendment, Q-13) | S52 without `LGAX/LGAY/LGAZ`, plus `PROPERTY_FILE_FORMAT = 'USER'` and `USER_SUB_ID = 815` (hand-written, not copied from any MFeval file) | R-USER | MF 5.2, no warnings; outputs equal `mf52_S52.tir`; `USER_SUB_ID` is an ignored key |
+| `mf52_S52.tir` | Fixture S52, MF 5.2 (FITTYP 6) | S - `PROPERTY_FILE_FORMAT` + `FITTYP = 6` + `WIDTH = 0.2` + `RIM_RADIUS = 0.2` (135 lines); keeps `LGAX/LGAY/LGAZ` | M1-M11 | MF 5.2, one warning listing LGAX, LGAY, LGAZ |
+| `mf52_user_pff.tir` | MF 5.2 in the TNO MF-Tyre ADAMS user-tire form | S52 without `LGAX/LGAY/LGAZ`, plus `PROPERTY_FILE_FORMAT = 'USER'` and `USER_SUB_ID = 815` (hand-written, not copied from any MFeval file) | R-USER | MF 5.2, no warnings; outputs equal `mf52_S52.tir`; `USER_SUB_ID` is an ignored key |
 | `pac2002_S_rng.tir` | Operating ranges and clamping | S + `[LONG_SLIP_RANGE]` KPU -1.0..1.0, `[SLIP_ANGLE_RANGE]` ALP -1.5..1.5, `[INCLINATION_ANGLE_RANGE]` CAM -0.2..0.2, `[VERTICAL_FORCE_RANGE]` FZ 200..10000 (141 lines) | V19, P6 | PAC2002 with the four ranges, no warnings |
-| `pac2002_S_ell.tir` | Friction-ellipse selection | S without the 20 R* keys (RBX1 RBX2 RCX1 REX1 REX2 RHX1 RBY1 RBY2 RBY3 RCY1 REY1 REY2 RHY1 RHY2 RVY1 RVY2 RVY3 RVY4 RVY5 RVY6; 113 lines) | P1, P16, AD-07 | PAC2002, friction-ellipse method, one warning (AD-07) |
+| `pac2002_S_ell.tir` | Friction-ellipse selection | S without the 20 R* keys (RBX1 RBX2 RCX1 REX1 REX2 RHX1 RBY1 RBY2 RBY3 RCY1 REY1 REY2 RHY1 RHY2 RVY1 RVY2 RVY3 RVY4 RVY5 RVY6; 113 lines) | P1, P16 | PAC2002, friction-ellipse method, one warning |
 | `pac2002_S_part.tir` | Partial R* set | S without `RHX1` only (132 lines) | V23 | Load error MISSING_KEY naming RHX1 |
-| `mf61_unsupported.tir` | MF-Tyre 6.x is not implemented | `[MDI_HEADER]` + `[MODEL] FITTYP = 61` only | R7 | Load error UNSUPPORTED_MODEL (AD-11) |
+| `mf61_unsupported.tir` | MF-Tyre 6.x is not implemented | `[MDI_HEADER]` + `[MODEL] FITTYP = 61` only | R7 | Load error UNSUPPORTED_MODEL |
 | `lexical_mix.tir` | Every lexical variant, same values as S | Same key/value set as `pac2002_S.tir` (plus an unknown quoted `TIRE_DESCRIPTION` and `[INERTIA] MASS`) | L1-L4, L6, L7, L10, L11 | Coefficients and metadata identical to `pac2002_S.tir`, no warnings |
 
 `lexical_mix.tir` covers: `!` header lines; `$` full-line and trailing comments (with and without a
@@ -43,10 +43,10 @@ Format: see the CLI documentation. Comments (`#`) appear only on their own lines
 |------|---------|------------|-----------|-------|
 | `inputs_s_vectors.csv` | Rows V2, V3, V12, V13, V22 (Fz 0), V22 (Fz -100); header with units | V2, V3, V12, V13, V22, M1, M2, M5 | S, S52 | Data lines 4-9 |
 | `inputs_degrees.txt` | The same six points, angles in degrees, columns reordered (`fz sr sa[deg] ia[DEG] vx`), blank/tab separated, comments and blank lines between rows | as above | S | Results equal the CSV run within 1e-9 |
-| `inputs_pressure.csv` | A `P[Pa]` column | D-25 / AD-09 | S, S52 | One pressure warning |
+| `inputs_pressure.csv` | A `P[Pa]` column | pressure column ignored | S, S52 | One pressure warning |
 | `inputs_ranges.csv` | One row inside and one row beyond each S-rng limit | V19 | `pac2002_S_rng.tir` | See line numbers below |
 | `inputs_low_speed.csv` | Vx = 0.5 and Vx = 0 | M8 | S, S52 | PAC2002: VXLOW warning; MF 5.2: error at line 4 |
-| `inputs_negative_vx.csv` | Negative Vx | AD-02 | S, S52 | Error at line 4 |
+| `inputs_negative_vx.csv` | Negative Vx | negative Vx is rejected | S, S52 | Error at line 4 |
 | `inputs_malformed.csv` | Field-count mismatch | - | S | Error at line 4 |
 
 ### Documented line numbers (1-based, comments and header included)

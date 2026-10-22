@@ -27,7 +27,7 @@ namespace mf {
         {.min_key = "CAMMIN", .max_key = "CAMMAX", .member = &operating_limits::gamma_rad},
     }};
 
-    /// Clamps `value` to `range` when the range exists (AD-15). A value that is outside the range sets `flag`;
+    /// Clamps `value` to `range` when the range exists. A value that is outside the range sets `flag`;
     /// exact limit values are not flagged. Total function: no precondition.
     double clamp_input(double value, const std::optional<interval> &range, bool &flag) noexcept {
       if (!range.has_value()) {
@@ -57,8 +57,8 @@ namespace mf {
       const std::optional<interval> &range = limits.*(entry.member);
       if (range.has_value() && range->lower > range->upper) {
         return make_error(error_code::INVALID_VALUE,
-                          std::format("{} {} > {} {}: lower limit above upper limit (AD-15)", entry.min_key,
-                                      range->lower, entry.max_key, range->upper),
+                          std::format("{} {} > {} {}: lower limit above upper limit", entry.min_key, range->lower,
+                                      entry.max_key, range->upper),
                           key_location(entry.min_key));
       }
     }
@@ -92,7 +92,7 @@ namespace mf {
     }
     if (point.vx_mps < 0.0) {
       return make_error(error_code::INVALID_INPUT,
-                        std::format("Vx = {} m/s is negative; reverse driving is not supported (AD-02)", point.vx_mps),
+                        std::format("Vx = {} m/s is negative; reverse driving is not supported", point.vx_mps),
                         key_location("VX"));
     }
     return {};
@@ -106,7 +106,7 @@ namespace mf {
     input_flags flags{};
     flags.below_vxlow = point.vx_mps < limits_.vxlow_mps;
 
-    // AD-01: decided on the raw Fz, before clamping; -0.0 is included.
+    // Decided on the raw Fz, before clamping; -0.0 is included.
     if (point.fz_n <= 0.0) {
       return tire_outputs{.flags = flags};
     }
@@ -117,7 +117,7 @@ namespace mf {
     clamped.alpha_rad = clamp_input(point.alpha_rad, limits_.alpha_rad, flags.alpha_clamped);
     clamped.gamma_rad = clamp_input(point.gamma_rad, limits_.gamma_rad, flags.gamma_clamped);
 
-    // A validated Fz interval may still end at or below zero; the hook contract (Fz > 0) then gives the AD-01 zeros.
+    // A validated Fz interval may still end at or below zero; the hook contract (Fz > 0) then gives zero outputs.
     if (clamped.fz_n <= 0.0) {
       return tire_outputs{.flags = flags};
     }
@@ -125,7 +125,7 @@ namespace mf {
     tire_outputs out = compute(clamped, mode);
     out.flags = flags;
 
-    // AD-22: a non-finite result is an error, never a printed value.
+    // A non-finite result is an error, never a printed value.
     const std::array<std::pair<std::string_view, double>, 5> results{{
         {"FX", out.fx_n},
         {"FY", out.fy_n},
@@ -135,7 +135,7 @@ namespace mf {
     }};
     for (const auto &[key, value] : results) {
       if (!std::isfinite(value)) {
-        return make_error(error_code::NUMERICAL, std::format("non-finite {} output ({}) (AD-22)", key, value),
+        return make_error(error_code::NUMERICAL, std::format("non-finite {} output ({})", key, value),
                           key_location(key));
       }
     }

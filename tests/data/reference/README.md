@@ -2,8 +2,8 @@
 
 Committed oracle reference data: numbers computed by an independent implementation on **our own synthetic
 fixture**. The label for this data is "agrees with the MFeval 4.0 FITTYP-6 path". It is **not** TNO MF-Tyre
-5.2 validation: our MF 5.2 equations are themselves [impl]-tier and come from the same MFeval source
-(`docs/research/mf52.md` section 1). See `docs/research/validation.md` for the full validation summary.
+5.2 validation: our MF 5.2 equations are themselves implementation-derived and come from the same MFeval
+source.
 
 ## Files
 
@@ -11,11 +11,9 @@ fixture**. The label for this data is "agrees with the MFeval 4.0 FITTYP-6 path"
 |------|-------|--------|---------|------|
 | `mf52_mfeval.csv` | MF 5.2 (FITTYP 6) | MFeval 4.0.0 | `tests/data/mf52_S52.tir` | 190 |
 
-No other oracle contributes data here:
-- **OpenTire** (PAC2002): secondary oracle with known deviations; its outputs are summarised in
-  `docs/research/validation.md` and not committed.
-- **teasit** (GPL-3.0): its code, data and generated numbers must never enter the repository.
-- No third-party `.tir` file is committed. The MFeval example `.tir` (BSD-3) is not in the tree either.
+No other oracle contributes data here. Code, data and generated numbers of GPL-licensed tools must never
+enter the repository. No third-party `.tir` file is committed; the MFeval example `.tir` (BSD-3) is not in the
+tree either.
 
 ## Format
 
@@ -33,14 +31,14 @@ The file has no comment lines (it is a pure data CSV).
   computed are committed; no MFeval code and no adapter package is in the tree.
 - **Mode:** `useMode = 111` (combined slip, `alpha* = alpha`, limit checks on, no turn slip), FITTYP-6 path.
 - **Fixture:** `tests/data/mf52_S52.tir` (project-authored, synthetic; no ranges). MFeval was fed a CRLF copy,
-  because MFeval 4.0 `readTIR.m` silently drops the last character of every LF line (MFE-10).
+  because MFeval 4.0 silently drops the last character of every LF line when it reads a `.tir` file.
 - **Struct overrides** (adapter `make_overrides.py`): `FZMIN = 0`, `FZMAX = Inf`, `KPUMIN/MAX`, `ALPMIN/MAX`,
-  `CAMMIN/MAX = -/+Inf` (the file has no range pairs, and MFeval would otherwise default them; our AD-15 clamps
+  `CAMMIN/MAX = -/+Inf` (the file has no range pairs, and MFeval would otherwise default them; our model clamps
   only when both limits exist), and the MF 6.x keys foreign to MF 5.2 set to the values that give the
-  `mf52.md` section 4 form: `PKY4 = 2`, `LKYC = LKZC = 1`, and 0 for `PKY5, PEY5, RBX3, RBY4, QSX4-14, PPMX1,
+  MF 5.2 form: `PKY4 = 2`, `LKYC = LKZC = 1`, and 0 for `PKY5, PEY5, RBX3, RBY4, QSX4-14, PPMX1,
   QDZ10-11, QSY5-8`. (Pressure and `PP*` keys are absent from the file.)
 - **Adapter scripts** (kept outside the repository): `make_grid.py` (grid), `make_overrides.py`,
-  `run_mfeval.m` (calls `mfeval.readTIR` and `mfeval.Solver.fullSteadyState` directly), `run_ours.py`,
+  `run_mfeval.m` (calls the MFeval reader and steady-state solver directly), `run_ours.py`,
   `compare.py`, and `select_reference.py` (row selection, sha256 `afe32327f22871b6bb4d11c7d0b4d9762be0cb90b9b8cf904ecdda2a30de8a9e`).
   Hashes of the validation adapters: `make_grid.py` `1edbab69...`, `make_overrides.py` `24ce3f6d...`,
   `run_mfeval.m` `3c9fbe33...`, `compare.py` `b27c60dc...`.
@@ -49,30 +47,30 @@ The file has no comment lines (it is a pure data CSV).
   30 edge rows (all admitted rows of the special-case blocks G4 and G5: speed and boundary points); 30 pure
   longitudinal (`SA = 0`, `IA = 0`); 30 pure lateral (`SR = 0`, `IA = 0`); 36 combined slip (`IA = 0`); 36
   with camber; 22 random rows from the Latin-hypercube block G6.
-- **Rows deliberately left out** (known deviations, see `docs/research/validation.md`):
-  rows with `Vx < VXLOW = 1` (MFE-8, MFeval's low-speed model; we do not apply VXLOW), rows with
-  `SR <= VXLOW/|Vx| - 1` (MFE-13, MFeval's My kappa band, not adopted), rows with `Vx <= 0` (rejected, AD-02),
+- **Rows deliberately left out** (known deviations):
+  rows with `Vx < VXLOW = 1` (MFeval's low-speed model; we do not apply VXLOW), rows with
+  `SR <= VXLOW/|Vx| - 1` (MFeval's My kappa band, not adopted), rows with `Vx <= 0` (rejected by our model),
   rows with `Fz < 0`. The fixture has no range pairs, so no clamped rows exist.
-- **Check:** all 190 rows agree with our CLI output within the T1-MFE tolerance
+- **Check:** the validation run required all 190 rows to agree with our CLI output within
   `|o - r| <= 1e-6*scale + 1e-6*max(|o|, |r|)` (`scale = FNOMIN` for forces, `FNOMIN*R0` for moments). On the
   full S52 CORE set the maximum relative error is about 1e-11 (Mz) and 2.5e-15 (Fx, Fy).
+  `tests/module/mfeval_reference_test.cpp` pins every row at the tighter 1e-10.
+  See `docs/research/validation.md` for the full validation summary and the known deviations.
 - **Limits of this evidence:** `QSX1-3 = 0`, so Mx is 0 in every row and carries no evidence; `My = -R0*Fz*QSY1`
   only (QSY2-4 = 0); the fixture has zero curvature and shift coefficients, and all scale factors are 1.
   A stronger MFeval check on the MFeval example `.tir` (4496 CORE rows, all five channels within 1e-6) was run
   during validation but its inputs are third-party and its outputs are not committed.
-- **Licence (decided, kept):** the values are outputs of MFeval 4.0.0. Two licence texts apply to the MFeval
+- **Licence:** the values are outputs of MFeval 4.0.0. Two licence texts apply to the MFeval
   distribution, and they differ:
   1. `mfeval_license.rights` in the MFeval folder: a BSD-3-Clause style notice, Copyright (c) 2020, Marco Furlan
      Tassara. All rights reserved. (reproduced below; the holder name in condition 3 is blank).
   2. `LICENSE.md` of the wrapper repository (mathworks/Simscape-Vehicle-Templates, commit `2c303195`), which
      adds that the content is "licensed to you solely for use in conjunction with MathWorks products".
 
-  **Decision (user, 2026-10-18; Q-07a closed, AD-29):** keep `mf52_mfeval.csv` and
-  `tests/module/mfeval_reference_test.cpp` in the repository. Only numbers that MFeval computed on our own
-  synthetic fixture are committed; no MFeval code, `.tir` file or adapter is in the tree. The BSD-3 notice of
-  `mfeval_license.rights` is retained below as the attribution for those numbers and must stay with the data.
-  The decision is recorded in `docs/research/open-questions.md` (Q-07a) and `docs/research/decisions.md` (AD-29).
-  The other Q-07 items (MSC example values, Chrono data, MF52-EQM) are unaffected and remain out of the tree.
+  `mf52_mfeval.csv` and `tests/module/mfeval_reference_test.cpp` are kept in the repository. Only numbers that
+  MFeval computed on our own synthetic fixture are committed; no MFeval code, `.tir` file or adapter is in the
+  tree. The BSD-3 notice of `mfeval_license.rights` is retained below as the attribution for those numbers and
+  must stay with the data.
 
 ```
 Copyright (c) 2020, Marco Furlan Tassara

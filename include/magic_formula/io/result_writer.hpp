@@ -6,7 +6,7 @@
 #include <string_view>
 
 namespace mf::io {
-  /// CSV header of the CLI output (AD-27): the inputs in SI, then the five outputs.
+  /// CSV header of the CLI output: the inputs in SI, then the five outputs.
   inline constexpr std::string_view RESULTS_HEADER =
       "FZ[N],SA[rad],SR[-],IA[rad],VX[m/s],FX[N],FY[N],MZ[N*m],MX[N*m],MY[N*m]";
 

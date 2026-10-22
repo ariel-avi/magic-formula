@@ -81,7 +81,7 @@ namespace {
       entry("SSZ3", &coeffs::SSZ3), entry("SSZ4", &coeffs::SSZ4),
   };
 
-  /// The keys that MF 5.2 does not have (docs/research/mf52.md section 3), written out independently of the library.
+  /// The keys that MF 5.2 does not have (docs/research/mf52.md), written out independently of the library.
   constexpr std::array<std::string_view, 70> EXPECTED_FOREIGN{
       // 30 PAC2002 / MF-Tyre 6.x coefficient keys
       "LGAX", "LGAY", "LGAZ", "PKY4", "PKY5", "PKY6", "PKY7", "PEY5", "RBX3", "RBY4",
@@ -97,15 +97,15 @@ namespace {
       "Q_FYS1", "Q_FYS2", "Q_FYS3",
   };
 
-  /// The sections of which every key is foreign to MF 5.2 (docs/research/mf52.md section 3).
+  /// The sections of which every key is foreign to MF 5.2.
   constexpr std::array<std::string_view, 3> EXPECTED_FOREIGN_SECTIONS{"STRUCTURAL", "INERTIA", "CONTACT_PATCH"};
 
-  /// The REQUIRED keys of AD-12 (the two required model keys and the seven critical coefficients).
+  /// The REQUIRED keys (the two required model keys and the seven critical coefficients).
   constexpr std::array<std::string_view, 9> EXPECTED_REQUIRED{
       "FNOMIN", "UNLOADED_RADIUS", "PCX1", "PDX1", "PKX1", "PCY1", "PDY1", "PKY1", "PKY2",
   };
 
-  /// The 20 combined-slip R* keys (D-07, docs/research/pac2002.md section 5.5, README.md decision list).
+  /// The 20 combined-slip R* keys.
   constexpr std::array<std::string_view, 20> EXPECTED_COMBINED{
       "RBX1", "RBX2", "RCX1", "REX1", "REX2", "RHX1", "RBY1", "RBY2", "RBY3", "RCY1",
       "REY1", "REY2", "RHY1", "RHY2", "RVY1", "RVY2", "RVY3", "RVY4", "RVY5", "RVY6",
@@ -209,12 +209,12 @@ TEST(mf5x_bindings, Roles_Common_Are9_22_62_20) {
   EXPECT_EQ(keys_with_role(binding_role::COMBINED).size(), 20U);
 }
 
-TEST(mf5x_bindings, Required_EqualsAd12Set) {
+TEST(mf5x_bindings, Required_EqualsRequiredKeySet) {
   const std::set<std::string_view> expected(EXPECTED_REQUIRED.begin(), EXPECTED_REQUIRED.end());
   EXPECT_EQ(keys_with_role(binding_role::REQUIRED), expected);
 }
 
-TEST(mf5x_bindings, Combined_EqualsD07Set) {
+TEST(mf5x_bindings, Combined_EqualsCombinedSlipKeySet) {
   const std::set<std::string_view> expected(EXPECTED_COMBINED.begin(), EXPECTED_COMBINED.end());
   EXPECT_EQ(keys_with_role(binding_role::COMBINED), expected);
 }

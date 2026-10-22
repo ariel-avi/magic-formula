@@ -1,4 +1,4 @@
-# synthetic, authored for magic-formula from docs/research/test-data.md section 3; not derived from any vendor file
+# synthetic, authored for magic-formula from docs/research/test-data.md; not derived from any vendor file
 # same operating points as inputs_s_vectors.csv: angles in degrees, reordered columns, mixed separators
 
 fz	sr  sa[deg]	ia[DEG]  vx[m/s]

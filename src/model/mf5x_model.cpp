@@ -27,14 +27,14 @@ namespace mf {
     return detail::cosine_combined_forces(coefficients_, state, point);
   }
 
-  double mf5x_model::aligning_lateral_force(const operating_point & /*point*/, const detail::slip_state & /*state*/,
-                                            const detail::combined_forces &forces) const noexcept {
+  double mf5x_model::fy_prime(const operating_point & /*point*/, const detail::slip_state & /*state*/,
+                              const detail::combined_forces &forces) const noexcept {
     return forces.fy_n - forces.svyk_n;
   }
 
-  double mf5x_model::rolling_resistance(const operating_point &point, const detail::slip_state & /*state*/,
-                                        double fx_n) const noexcept {
-    return detail::rolling_resistance_moment(coefficients_, point.fz_n, fx_n, point.vx_mps);
+  double mf5x_model::my(const operating_point &point, const detail::slip_state & /*state*/,
+                        double fx_n) const noexcept {
+    return detail::my(coefficients_, point.fz_n, fx_n, point.vx_mps);
   }
 
   tire_outputs mf5x_model::compute(const operating_point &point, slip_mode mode) const noexcept {
@@ -48,27 +48,25 @@ namespace mf {
 
     tire_outputs out;
     if (mode == slip_mode::UNCOMBINED) {
-      // D-26: pure-slip forces and Mz0 = -t(alpha_t)*Fy0 + Mzr(alpha_r).
+      // Pure-slip forces and Mz0 = -t(alpha_t)*Fy0 + Mzr(alpha_r).
       out.fx_n = lon.fx0_n;
       out.fy_n = lat.fy0_n;
-      const double trail_m = detail::trail(aln, aln.alpha_t, cos_trail);
-      out.mz_nm = -(trail_m * out.fy_n) + detail::residual_moment(aln, aln.alpha_r, cos_alpha);
+      const double trail_m = detail::t(aln, aln.alpha_t, cos_trail);
+      out.mz_nm = -(trail_m * out.fy_n) + detail::mzr(aln, aln.alpha_r, cos_alpha);
     } else {
-      // Eq (78) with the equivalent slip angles (84)-(85) (D-05) and the moment arm of Fx (D-08, D-09).
       const detail::combined_forces forces = combine(point, state);
       const double ky_guarded_n = detail::add_epsilon(lat.ky_n);
-      const double ate = detail::equivalent_slip_angle(aln.alpha_t, point.kappa, lon.kx_n, ky_guarded_n);
-      const double are = detail::equivalent_slip_angle(aln.alpha_r, point.kappa, lon.kx_n, ky_guarded_n);
-      const double trail_m = detail::trail(aln, ate, cos_trail);
-      const double fy_aligning_n = aligning_lateral_force(point, state, forces);
-      const double arm_m = detail::moment_arm(c, state.load, forces.fy_n, point.gamma_rad);
+      const double ate = detail::alpha_eq(aln.alpha_t, point.kappa, lon.kx_n, ky_guarded_n);
+      const double are = detail::alpha_eq(aln.alpha_r, point.kappa, lon.kx_n, ky_guarded_n);
+      const double trail_m = detail::t(aln, ate, cos_trail);
+      const double fy_prime_n = fy_prime(point, state, forces);
+      const double arm_m = detail::s(c, state.load, forces.fy_n, point.gamma_rad);
       out.fx_n = forces.fx_n;
       out.fy_n = forces.fy_n;
-      out.mz_nm = -(trail_m * fy_aligning_n) + detail::residual_moment(aln, are, cos_alpha) + (arm_m * forces.fx_n);
+      out.mz_nm = -(trail_m * fy_prime_n) + detail::mzr(aln, are, cos_alpha) + (arm_m * forces.fx_n);
     }
-    // Eq (86) and the rolling-resistance moment of the evaluated mode.
-    out.mx_nm = detail::overturning_moment(c, point.fz_n, out.fy_n, point.gamma_rad);
-    out.my_nm = rolling_resistance(point, state, out.fx_n);
+    out.mx_nm = detail::mx(c, point.fz_n, out.fy_n, point.gamma_rad);
+    out.my_nm = my(point, state, out.fx_n);
     return out;
   }
 } // namespace mf

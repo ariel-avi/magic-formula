@@ -1,13 +1,13 @@
 # Model routing: FITTYP and PROPERTY_FILE_FORMAT
 
-Revision 4. Repo rule: an unknown value gives an explicit error, never a silent fallback.
+Repo rule: an unknown value gives an explicit error, never a silent fallback.
 
 ## Facts
 
 - **SIM20 p.36 [PDF 40]:** FITTYP 5 = MF-Tyre 5.0, 5.1; 6 = MF-Tyre 5.2; 21 = MF-Swift 1.x (based on MF-Tyre 5.2); 51 = MF-MCTyre 1.0; 52 = MF-MCTyre 1.1; 60 = MF-Tyre 6.0; 61 = 6.1; 62 = 6.2; 70 = 6.2 + Temperature & Velocity model.
 - **SIM20 p.37 [PDF 41]:** '2020.2 only accepts' 6, 60, 61, 62, 70, and 'will exit with an error for all other values'. FITTYP is selected in [MODEL] (p.36) and is Required (p.26).
 - **MSC:** FITTYP matters only when it is 5 and QSY1 = QSY2 = 0, which selects eq (88) (p.33). MSC recommends removing FITTYP to avoid that (p.44). The MSC example has no FITTYP (p.49).
-- **PROPERTY_FILE_FORMAT** does not appear among the SIM20 [MODEL] rows, so it is treated as an ADAMS key (Q-13).
+- **PROPERTY_FILE_FORMAT** does not appear among the SIM20 [MODEL] rows, so it is treated as an ADAMS key (open question, open-questions.md).
 - **Implementations [impl]:**
   - MFEVAL accepts FITTYP {6, 61, 62} with the error 'not compatible with Magic Formula 5.2, 6.1 or 6.2' (mfeval.m:130-131). It stores PROPERTY_FILE_FORMAT verbatim and never uses it (readTIR.m:478-480).
   - CHRONO accepts only 'PAC2002' and 'MF_05' and ignores FITTYP.
@@ -38,4 +38,4 @@ Normalisation: strip quotes and whitespace, compare case-insensitively. FITTYP m
 
 Why PAC2002 takes precedence: a file that declares PAC2002 was written for the ADAMS equations, and MSC uses FITTYP only as a sub-flag. A TNO MF 5.2 file is identified by FITTYP, a Required key. Confidence: medium.
 
-Why 'USER' and 'MF-TYRE' are accepted (amendment to AD-11, Q-13): PROPERTY_FILE_FORMAT is an ADAMS dispatch key and not a SIM20 [MODEL] row. 'USER' (with USER_SUB_ID) is the TNO MF-Tyre ADAMS user-tire form, and every MFEVAL 4.0 example file, including the only real MF 5.2 file we hold (FITTYP 6), uses it. 'MF-TYRE' is the other TNO spelling observed. A TNO file is identified by FITTYP (the rationale above), so both values route exactly like an absent PROPERTY_FILE_FORMAT: only the 'not PAC2002' rows apply. Hence 'USER' with FITTYP 5, 21, 51, 52 or absent still errors, and 'USER' with FITTYP 60-70 still gives the MF 6.x error. Accepting every non-PAC2002 string was rejected: a typo would silently route by FITTYP. USER_SUB_ID needs no handling (it loads without a warning). The values stay [impl data]: Q-13 remains open for primary MSC/Altair evidence.
+Why 'USER' and 'MF-TYRE' are accepted (open question, open-questions.md): PROPERTY_FILE_FORMAT is an ADAMS dispatch key and not a SIM20 [MODEL] row. 'USER' (with USER_SUB_ID) is the TNO MF-Tyre ADAMS user-tire form, and every MFEVAL 4.0 example file, including the only real MF 5.2 file we hold (FITTYP 6), uses it. 'MF-TYRE' is the other TNO spelling observed. A TNO file is identified by FITTYP (the rationale above), so both values route exactly like an absent PROPERTY_FILE_FORMAT: only the 'not PAC2002' rows apply. Hence 'USER' with FITTYP 5, 21, 51, 52 or absent still errors, and 'USER' with FITTYP 60-70 still gives the MF 6.x error. Accepting every non-PAC2002 string was rejected: a typo would silently route by FITTYP. USER_SUB_ID needs no handling (it loads without a warning). The values stay [impl data]: the open question remains open for primary MSC/Altair evidence.

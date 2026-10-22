@@ -1,7 +1,7 @@
 ! synthetic header line one (bang comment at the top)
 ! synthetic header line two (bang comment at the top)
-$ synthetic, authored for magic-formula from docs/research/test-data.md section 2/3; not derived from any vendor file
-$ purpose: same key/value set as pac2002_S.tir written with every lexical variant of tir-format.md section 2 / AD-20
+$ synthetic, authored for magic-formula from docs/research/tir-format.md; not derived from any vendor file
+$ purpose: same key/value set as pac2002_S.tir written with every lexical variant of the .tir syntax
 $ 0123456789abcdefghij0123456789abcdefghij0123456789abcdefghij0123456789abcdefghij0123456789abcdefghij0123456789abcdefghij0123456789abcdefghij0123456789abcdefghij0123456789abcdefghij0123456789abcdefghij0123456789abcdefghij0123456789abcdefghij0123456789abcdefghij0123456789abcdefghij0123456789abcdefghij0123456789abcdefghij (long comment line, over 300 characters)
 
 [mdi_header]

@@ -12,10 +12,9 @@
 #include <string>
 #include <string_view>
 
-/// Shared test helpers (header-only, single owner: the kernels packet). Later packets add helpers inside their own test
-/// files only. Reference values come from docs/research/test-data.md.
+/// Shared test helpers (header-only). Reference values come from docs/research/test-data.md.
 namespace mf::test {
-  /// Relative tolerance for closed-form identities (test-data.md section 3).
+  /// Relative tolerance for closed-form identities.
   inline constexpr double REL_TOL_CLOSED_FORM = 1e-12;
   /// Relative tolerance for MF 5.2 vectors, where eps perturbs at the 1e-7 level.
   inline constexpr double REL_TOL_MF52 = 1e-6;
@@ -53,7 +52,7 @@ namespace mf::test {
     return std::filesystem::path{MF_TEST_DATA_DIR} / std::filesystem::path{name};
   }
 
-  /// Fixture S (test-data.md section 2): synthetic PAC2002 set, all L* = 1, no ranges, VXLOW 1, USE_MODE 4, LEFT, no
+  /// Fixture S: synthetic PAC2002 set, all L* = 1, no ranges, VXLOW 1, USE_MODE 4, LEFT, no
   /// FITTYP. Every other coefficient is 0.
   [[nodiscard]] inline mf::mf5x_parameters fixture_s() {
     mf::mf5x_parameters parameters;
@@ -81,15 +80,15 @@ namespace mf::test {
     return parameters;
   }
 
-  /// Fixture S52: fixture S with FITTYP 6 (test-data.md section 2; MF 5.2 forces LGA* = 1 in `create`).
+  /// Fixture S52: fixture S with FITTYP 6 (MF 5.2 forces LGA* = 1 in `create`).
   [[nodiscard]] inline mf::mf5x_parameters fixture_s52() {
     mf::mf5x_parameters parameters = fixture_s();
     parameters.metadata.fittyp = 6;
     return parameters;
   }
 
-  /// Fixture S-rng: fixture S with the synthetic ranges of AD-28: Fz [200, 10000] N, kappa [-1, 1], alpha [-1.5, 1.5]
-  /// rad, gamma [-0.2, 0.2] rad.
+  /// Fixture S-rng: fixture S with synthetic ranges: Fz [200, 10000] N, kappa [-1, 1], alpha [-1.5, 1.5] rad,
+  /// gamma [-0.2, 0.2] rad.
   [[nodiscard]] inline mf::mf5x_parameters fixture_s_rng() {
     mf::mf5x_parameters parameters = fixture_s();
     parameters.limits.fz_n = mf::interval{.lower = 200.0, .upper = 10000.0};

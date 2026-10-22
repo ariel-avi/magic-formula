@@ -1,4 +1,4 @@
-# synthetic, authored for magic-formula from docs/research/test-data.md section 3; not derived from any vendor file
+# synthetic, authored for magic-formula from docs/research/test-data.md; not derived from any vendor file
 FZ[N],SA[rad],SR[-],IA[rad],VX[m/s]
 4000,0,0.1,0,10
 4000,0,0.1,0

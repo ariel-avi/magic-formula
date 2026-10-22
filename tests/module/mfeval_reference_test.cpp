@@ -19,15 +19,15 @@
 
 // Regression test against committed MFeval 4.0 numbers (tests/data/reference/README.md). It states that our MF 5.2
 // model "agrees with the MFeval 4.0 FITTYP-6 path" on the synthetic fixture mf52_S52.tir. It is not a validation
-// against TNO MF-Tyre 5.2: both our equations and MFeval's FITTYP-6 branches are [impl]-tier (docs/research/mf52.md).
+// against TNO MF-Tyre 5.2: both our equations and MFeval's FITTYP-6 branches are implementation-derived.
 namespace {
   using mf::test::data_file;
 
-  /// The documented 1e-10 tier of the T1-MFE form (docs/research/validation.md, tests/data/reference/README.md),
-  /// applied to the scale term and the magnitude term alike. The documented agreement on this fixture is about 1e-11
-  /// relative at worst (Mz) and 2.5e-15 (Fx, Fy), and every committed row passes at 1e-10. The looser 1e-6 T1-MFE
-  /// acceptance bound is deliberately not used: it would let a 1e-7 relative perturbation (for example the AD-03
-  /// epsilon applied twice) pass, so the committed reference would not pin the implementation.
+  /// The 1e-10 relative tolerance documented in tests/data/reference/README.md, applied to the scale term and the
+  /// magnitude term alike. The agreement on this fixture is about 1e-11 relative at worst (Mz) and 2.5e-15 (Fx, Fy),
+  /// and every committed row passes at 1e-10. A looser 1e-6 bound is deliberately not used: it would let a 1e-7
+  /// relative perturbation (for example the denominator epsilon applied twice) pass, so the committed reference would
+  /// not pin the implementation.
   constexpr double MFEVAL_REL_TOL = 1e-10;
 
   /// FNOMIN of mf52_S52.tir [N]: the force scale of the tolerance, an absolute floor for near-zero forces.
@@ -126,7 +126,7 @@ namespace {
     return rows;
   }
 
-  /// T1-MFE form: |ours - reference| <= tol*scale + tol*max(|ours|, |reference|), with `tol` = MFEVAL_REL_TOL (1e-10).
+  /// |ours - reference| <= tol*scale + tol*max(|ours|, |reference|), with `tol` = MFEVAL_REL_TOL (1e-10).
   ::testing::AssertionResult agrees(double ours, double reference, double scale) {
     const double bound = MFEVAL_REL_TOL * (scale + std::max(std::abs(ours), std::abs(reference)));
     if (std::abs(ours - reference) <= bound) {

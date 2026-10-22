@@ -25,7 +25,7 @@
 namespace mf::cli {
   namespace {
     // clang-format off
-    /// The usage text (AD-27). The results header line must equal `io::RESULTS_HEADER` (checked below).
+    /// The usage text. The results header line must equal `io::RESULTS_HEADER` (checked below).
     constexpr std::string_view USAGE_TEXT = R"usage(Usage: mf [options] <inputs-table> <file.tir>
 
 Evaluates the PAC2002 or MF 5.2 tire model of <file.tir> at every row of <inputs-table> and prints
@@ -64,7 +64,7 @@ Exit status:
     /// The names of `tyre_side`, indexed by the enumerator value.
     constexpr std::array<std::string_view, 2> SIDE_NAMES{"LEFT", "RIGHT"};
 
-    /// One `input_flags` member and the words of its warning (AD-05, AD-15).
+    /// One `input_flags` member and the words of its warning.
     struct flag_check {
       /// The flag in `tire_outputs::flags`.
       bool input_flags::*flag;
@@ -82,23 +82,23 @@ Exit status:
         flag_check{.flag = &input_flags::fz_clamped,
                    .key = "FZ",
                    .what = "outside the property-file range",
-                   .consequence = "evaluated at the limit (AD-15)"},
+                   .consequence = "evaluated at the limit"},
         flag_check{.flag = &input_flags::kappa_clamped,
                    .key = "SR",
                    .what = "outside the property-file range",
-                   .consequence = "evaluated at the limit (AD-15)"},
+                   .consequence = "evaluated at the limit"},
         flag_check{.flag = &input_flags::alpha_clamped,
                    .key = "SA",
                    .what = "outside the property-file range",
-                   .consequence = "evaluated at the limit (AD-15)"},
+                   .consequence = "evaluated at the limit"},
         flag_check{.flag = &input_flags::gamma_clamped,
                    .key = "IA",
                    .what = "outside the property-file range",
-                   .consequence = "evaluated at the limit (AD-15)"},
+                   .consequence = "evaluated at the limit"},
         flag_check{.flag = &input_flags::below_vxlow,
                    .key = "VX",
                    .what = "below VXLOW",
-                   .consequence = "VXLOW is not applied (AD-05)"},
+                   .consequence = "VXLOW is not applied"},
     };
     // clang-format on
 
@@ -162,7 +162,7 @@ Exit status:
     }
 
     /// Everything printed to stderr on success, in this order: load warnings, `--verbose` information, the pressure
-    /// column warning (AD-09), and the flag warnings.
+    /// column warning, and the flag warnings.
     void print_diagnostics(std::ostream &err, const options &parsed, const io::loaded_model &loaded,
                            const io::input_table &table, std::span<const tire_outputs> outputs) {
       for (const warning &item : loaded.warnings) {
@@ -172,8 +172,8 @@ Exit status:
         print_info(err, loaded);
       }
       if (table.has_pressure) {
-        print_warning(err, "column P is ignored: PAC2002 and MF 5.2 have no pressure input (AD-09)", parsed.inputs_path,
-                      0, "P");
+        print_warning(err, "column P is ignored: PAC2002 and MF 5.2 have no pressure input", parsed.inputs_path, 0,
+                      "P");
       }
       print_flag_warnings(err, parsed.inputs_path, table.rows, outputs);
     }

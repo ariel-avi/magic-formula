@@ -1,0 +1,67 @@
+# Project policies
+
+These are the project rules for the [policy] items that have no primary MSC/TNO source. Each rule is implemented as stated here. A primary MSC or TNO/Siemens source for any of them would change the rule, and the change is made in this file. Items still open for primary evidence are listed in open-questions.md. The "Tested by" text names the vectors in test-data.md or the test area that pins the rule.
+
+## 1. Evaluation pipeline
+
+- **Fz <= 0 gives zeros.** Fz <= 0 (incl. -0.0): all five outputs exactly 0. Checked on raw Fz before clamping. The same zeros are returned when a validated Fz interval clamps a positive Fz to <= 0 (FZMIN/FZMAX may end at or below zero): the `fz_clamped` flag is set and `compute` is not called (`src/model/tire_model.cpp`, `tire_model::evaluate`, the check after the clamps). Tested by: V22, stub.
+- **Finite inputs and Vx.** Every input must be finite (INVALID_INPUT names the field). Vx < 0 is rejected for both models. PAC2002 accepts Vx = 0. MF 5.2 requires Vx > 0 (-0.0 rejected). Tested by: M8, stub.
+- **VXLOW.** VXLOW is not applied; default 1. Rows with Vx < VXLOW are flagged and the CLI warns once (open question, open-questions.md). Tested by: stub, cli.
+- **Clamping.** Clamp when both limits exist. A single limit gives a warning and is not applied. lower > upper gives INVALID_VALUE. Echoed inputs stay unclamped; flags are per row. If the Fz clamp leaves Fz <= 0 (a validated Fz interval that ends at or below zero), the five outputs are exactly 0 with `fz_clamped` set (plus any other flag already set) and `compute` is not called, as in the Fz <= 0 rule (`src/model/tire_model.cpp`, `tire_model::evaluate`). Tested by: stub, V19.
+- **Slip modes and USE_MODE.** Combined mode by default; uncombined via `slip_mode` or `--uncombined`. USE_MODE is echoed only, with a warning if < 0 or >= 10. Tested by: loader, P15.
+- **Outputs.** Outputs are Fx, Fy, Mz, Mx and My only (no t, Mzr, Kx, Ky). Closed (open-questions.md). Tested by: cli.
+- **Non-finite results.** A non-finite result gives NUMERICAL (output field and row named); NaN or inf is never printed. Tested by: stub, Fz 1e308.
+
+## 2. Numerics
+
+- **sgn+ and epsilon.** sgn+ = +1 for x >= 0 (incl. -0.0). eps = 1e-6, applied as d + eps*sgn+(d) to: Cx*Dx and Cy*Dy (sign of the product; MFeval uses sgn(Dx), :788-791, identical when Cx > 0); Ky in SHf and Kx/Ky; Kx and Ky in the ellipse kappa_c/alpha_c (MSC prints unguarded divisions); Vc in MF 5.2. Tested by: kernel tests.
+- **Moment arm s.** Moment arm s normalised by FNOMIN, raw gamma, combined Fy (pac2002.md section 5.1). Tested by: the `s` kernel tests (`S_*` in `tests/unit/mf5x_kernels_test.cpp`).
+- **My output sign and the shift form.** My_out = -(MSC (87)) and -(88); (88) as printed, without LMY. The MF 5.2 form already carries the minus (pac2002.md section 5.2, conventions.md section 5). Tested by: V5, V10, V21, M4.
+- **MF 5.2 trail normaliser.** MF 5.2 trail uses the shared R0/FNOMIN form, which equals MFeval's R0/F'z0*LFZO [derived] (pac2002.md section 5.6). Tested by: M6.
+- **Gxa and Gyk denominators.** Gxa and Gyk denominators are unguarded, as printed (MSC (66), (77)); pathological sets surface as a non-finite result (section 1). Tested by: -.
+- **Friction ellipse.** The friction ellipse is computed in the Fz-free form (algebraically identical); a 0/0 ratio gives 1 (pac2002.md section 5.4). Tested by: P1, P2, P16.
+- **MF 5.2 F'y.** MF 5.2: F'y = Fy - SVyk0, with mu_y at gamma = 0 and the other terms at the actual gamma (pac2002.md section 5.3; MFeval :1587-1611). PAC2002 uses the actual-camber reading. Tested by: M10.
+
+## 3. Loading a .tir file
+
+- **TYRESIDE.** TYRESIDE LEFT/RIGHT (case-insensitive), absent = LEFT, no mirroring. RIGHT gives a warning. Any other value gives NOT_IMPLEMENTED (open question, open-questions.md). Tested by: loader.
+- **PAC2002 R* keys and FE_METHOD.** PAC2002 R*: all 20 present gives cosine; none gives friction ellipse plus a warning; a partial set gives MISSING_KEY listing the missing keys. A zero value counts as present. FE_METHOD gives a warning and is ignored (both models) (pac2002.md section 5.5). Tested by: loader, V23.
+- **MF 5.2 missing R* keys.** MF 5.2 missing R* keys default to 0 and appear in the defaulted warning. No TNO estimation (open question, open-questions.md). Tested by: M9.
+- **[UNITS].** [UNITS] are SI only, with no aliases: LENGTH 'meter', FORCE 'newton', ANGLE 'radians', MASS 'kg' ([UNITS] only), TIME 'second', PRESSURE 'pascal', compared case-insensitively. Absent = SI. Any other value gives UNSUPPORTED_UNIT. Other [UNITS] keys are ignored. 'RAD' is not accepted, and a missing [UNITS] is not an error. Tested by: U1-U3.
+- **Routing order.** An unknown PROPERTY_FILE_FORMAT errors first; a non-integer FITTYP gives INVALID_VALUE; FITTYP 60/61/62/70 gives UNSUPPORTED_MODEL even with PFF 'PAC2002' (resolves the table overlap); then PAC2002; FITTYP 5 without PFF PAC2002, 21, 51 and 52 give UNSUPPORTED_MODEL (no opt-in). PFF 'USER' and 'MF-TYRE' (the TNO MF-Tyre ADAMS spellings, observed in the MFEVAL, gab-s98 and simscape files) are accepted and route by FITTYP exactly like an absent PFF; the known PFF set is PAC2002, MF_05, USER, MF-TYRE (model-routing.md, open question in open-questions.md). Tested by: routing tests.
+- **Required keys and value checks.** Required keys: PAC2002 {FNOMIN, UNLOADED_RADIUS}; MF 5.2 adds {FITTYP, WIDTH, RIM_RADIUS}. Critical keys: {PCX1, PDX1, PKX1, PCY1, PDY1, PKY1, PKY2}. Value checks: FNOMIN > 0, R0 > 0, LFZO > 0, plus PKY2 != 0, LMUY != 0, LONGVL > 0 (tir-format.md section 3). Tested by: loader, coefficients.
+- **LONGVL.** LONGVL is required iff QSY3 != 0 or QSY4 != 0; when absent and unused, an internal placeholder of 1 m/s (open question, open-questions.md). Tested by: loader.
+- **Defaults.** L* = 1 silently; other P/Q/R/S = 0 with one warning; VXLOW = 1 (tir-format.md section 3). Tested by: loader.
+- **MF 5.2 camber factors and foreign keys.** `mf52_model::create` forces LGA* = 1. Present foreign keys (mf52.md section 3 list) give one warning and count as consumed. Tested by: M3.
+
+## 4. Lexical refinements
+
+Refinements to tir-format.md section 2. Tested by: document tests.
+
+- **Encoding and lines:** the UTF-8 BOM is skipped; a NUL byte gives SYNTAX (this also covers UTF-16).
+- **Sections:** content before the first section gives SYNTAX; a header with junk or an empty name gives SYNTAX.
+- **Keys:** must match `[A-Za-z0-9_]+`.
+- **Values:** unquoted values are allowed for string keys; a quoted value for a numeric key gives INVALID_VALUE.
+- **Numbers:** `from_chars` general format plus one optional leading '+', finite only.
+- **Integers:** FITTYP and USE_MODE accept integral values (6.0).
+- **Tables:** a table section is one whose first content line starts with '{'; '=' inside a table gives SYNTAX; rows are not validated; a duplicate table section gives a warning and the first wins.
+- **Unused keys:** shown only with `--verbose`.
+
+## 5. CLI
+
+- **Pressure column.** Pressure has no library input. A CLI P column is parsed and ignored with one warning (README.md Findings, pressure row). Tested by: cli.
+- **Formats, exit codes, stdout.** CLI: table and CSV formats as documented in the README "CLI" section and the `mf::cli` header; exit codes 0/1/2; stdout is all-or-nothing. Tested by: cli.
+
+## 6. Evidence and test data
+
+- **MF 5.2 implementation-derived tier.** The [impl] evidence tier for MF 5.2 is accepted (user decision; closed in open-questions.md). Tested by: -.
+- **Synthetic fixture ranges.** Fixture range values are synthetic (KPU +/-1.0, ALP +/-1.5, CAM +/-0.2, FZ 200..10000), not the MSC example values, because of the licence constraint. Tested by: V19.
+- **MFeval reference outputs.** The MFeval 4.0.0 outputs computed on our synthetic fixture (`tests/data/reference/mf52_mfeval.csv`, 190 rows) are kept in the repository, with the BSD-3 notice retained (user decision, 2026-10-18). Tested by: `tests/module/mfeval_reference_test.cpp`.
+
+## 7. Open for primary evidence
+
+These items are implemented per the rules above. A primary MSC/TNO source would change them. See open-questions.md for each:
+
+- moment-arm normaliser, VXLOW law, TYRESIDE mirroring, FE_METHOD semantics, PAC2002 My sign, positive camber direction, gamma_x in mu_x, PROPERTY_FILE_FORMAT values, TNO estimation, LONGVL.
+- Licences are for the user to decide. The MFeval outputs on our synthetic fixture are resolved by the reference-output rule in section 6; the other items (MSC example values, Chrono data, MF52-EQM) stay open and out of the tree.
+- The direct MFeval reads (`readTIR.m:200` for the PKY4 default; `Solver.m:648-682` and `:1142-1146` for the SHf line and Vcy definition) should be confirmed by a later researcher pass.
