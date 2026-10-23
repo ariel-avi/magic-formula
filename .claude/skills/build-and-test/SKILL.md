@@ -66,6 +66,8 @@ ctest --preset debug --output-on-failure --no-tests=error -R '<regex>'   # by te
 ctest --preset debug --rerun-failed --output-on-failure # re-run last failures
 ```
 
+Run `per_point_golden` through ctest: it sets `GLIBC_TUNABLES=glibc.cpu.hwcaps=-AVX2,-FMA,-FMA4` (pins glibc libm's non-FMA variants, matching the golden capture); set the same variable when running its binary directly.
+
 Rules: never pass `--gtest_filter` to hide failing tests, never set `GTEST_SKIP`/`DISABLED_` to make a run pass. A skipped or disabled test counts as a FAIL in the report. Every label (`-L`) or regex (`-R`) run passes `--no-tests=error`. A run that selects **0 tests** (for example a regex that matches nothing, or a test file that was never registered) is a FAIL, never a vacuous PASS.
 
 ## Static checks (read-only)

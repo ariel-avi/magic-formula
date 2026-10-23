@@ -97,13 +97,13 @@ TEST(model_failure, Accessors_ReturnCauseAndRow) {
 
 TEST(model_failure, Thrown_CaughtAsRuntimeError) {
   const mf::error cause{.code = mf::error_code::INVALID_ARGUMENT, .message = "wrong size", .where = {}};
+  std::string caught_message = "not caught as std::runtime_error";
   try {
     throw mf::model_failure(cause, std::nullopt);
   } catch (const std::runtime_error &caught) {
-    EXPECT_EQ(std::string(caught.what()), "wrong size");
-    return;
+    caught_message = caught.what();
   }
-  FAIL() << "model_failure was not caught as std::runtime_error";
+  EXPECT_EQ(caught_message, "wrong size");
 }
 
 TEST(error_code, InvalidArgument_DistinctFromNumerical) {

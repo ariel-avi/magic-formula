@@ -82,7 +82,12 @@ are the bit-exactness reference for the single-point evaluation path.
 - **Toolchain:** Ubuntu 24.04.5 LTS, GCC 14.2.0 (`g++-14` 14.2.0-4ubuntu2~24.04.1), x86-64 (a `linux/amd64` container),
   CMake 4.4.4, Debug build, `-std=c++26` ISO mode (no extensions), project warning flags, no `-ffast-math`, no
   `-march` flags. On x86-64 with the default target there is no floating-point contraction, so these values are the
-  baseline for bit-identical comparison.
+  baseline for bit-identical comparison. During capture glibc libm did not select its FMA variants: the container's
+  `/proc/cpuinfo` listed neither `fma`, `avx2` nor `fma4`, and the glibc loader's CPU feature bits (`ld.so --list-diagnostics`)
+  showed neither FMA nor AVX2 active. glibc libm's FMA/AVX2 ifunc variants of its transcendental functions (for example
+  `exp`, `log`, `pow`, `sin`, `cos`, `tan`, `atan`) therefore were not used; the tests pin the same baseline variants with
+  `GLIBC_TUNABLES=glibc.cpu.hwcaps=-AVX2,-FMA,-FMA4`, which disables all of them (see Platform waiver). The mismatches
+  seen in CI without the pin were 1 ulp, in MZ only.
 - **Generation:** the previous library was built from a `git archive` of the base commit, and a throwaway program
   (not committed, because it targets the removed single-point API) loaded each `.tir` file with the loader and called
   `evaluate(point, mode)` for every grid row. Rows the previous implementation rejected were dropped.
@@ -114,5 +119,5 @@ are the bit-exactness reference for the single-point evaluation path.
   (6e4, 1.2e5, 1e6 N); high speed (100, 300 m/s); 40 pseudo-random rows from a fixed-seed `std::mt19937_64`.
 - **Skipped rows:** for `mf52_S52.tir` and `mf52_R52.tir`, the rows with Vx = 0 and Vx = -0.0 (MF 5.2 requires Vx > 0), in both modes.
 - **Platform waiver:** on other platforms (Clang on arm64 with floating-point contraction, a different libm or C
-  runtime) a few-ulp difference from these values is accepted. On any Linux x86-64 build (guard `__linux__ && __x86_64__` in `per_point_golden_test.cpp`) the values must match exactly; they were captured with GCC 14.
+  runtime) a few-ulp difference from these values is accepted. On any Linux x86-64 build (guard `__linux__ && __x86_64__` in `per_point_golden_test.cpp`) the values must match exactly; they were captured with GCC 14. CTest runs `per_point_golden_test` with `GLIBC_TUNABLES=glibc.cpu.hwcaps=-AVX2,-FMA,-FMA4`, so glibc libm selects its baseline variants on any x86-64 CPU (its FMA/AVX2 variants differ in the last bit). When running the binary directly, set the same variable.
   The batch path is checked against the per-point path with a scaled relative tolerance of 1e-12.

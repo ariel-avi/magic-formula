@@ -29,8 +29,10 @@
 // the outputs of the implementation before the index-mapped interface, written as hexfloats.
 //
 // Platform waiver: on Linux x86-64 (the toolchain that produced the golden files) the per-point results are
-// bit-identical. Elsewhere FMA contraction (Clang on arm64) and a different libm or CRT may move a result by a few
-// ULP, so the comparison allows PLATFORM_REL_TOL. The 0/1 flags must match exactly everywhere.
+// bit-identical, provided glibc libm runs its baseline (non-FMA) variants. ctest pins this with
+// GLIBC_TUNABLES=glibc.cpu.hwcaps=-AVX2,-FMA,-FMA4, and the libm_variant_is_pinned guard enforces it. Elsewhere FMA
+// contraction (Clang on arm64) and a different libm or CRT may move a result by a few ULP, so the comparison allows
+// PLATFORM_REL_TOL. The 0/1 flags must match exactly everywhere.
 namespace {
   using mf::test::data_file;
 
@@ -207,11 +209,29 @@ namespace {
     }
   }
 
+  /// On Linux x86-64 the bit-exact comparison needs glibc's baseline libm variants: the FMA/AVX2 variants differ in the
+  /// last bit. The test is registered with GLIBC_TUNABLES set accordingly (cmake/MfTesting.cmake), so a direct run of
+  /// the binary without it fails here. Elsewhere the comparison is tolerance-based and nothing is required.
+  ::testing::AssertionResult libm_variant_is_pinned() {
+#if defined(__linux__) && defined(__x86_64__)
+    constexpr std::string_view required = "glibc.cpu.hwcaps=-AVX2,-FMA,-FMA4";
+    const char *const value = std::getenv("GLIBC_TUNABLES"); // NOLINT(concurrency-mt-unsafe): read-only, single thread
+    if (value == nullptr || !std::string_view{value}.contains(required)) {
+      return ::testing::AssertionFailure()
+             << "GLIBC_TUNABLES must contain '" << required
+             << "': run via ctest: glibc libm's FMA variants differ in the last bit from the baseline variants the "
+                "goldens were captured with";
+    }
+#endif
+    return ::testing::AssertionSuccess();
+  }
+
   /// Evaluates every row of a golden file per point through the Eigen::Ref form and the raw-pointer form, after
   /// checking that the golden columns are not degenerate.
   void check_per_point(std::string_view name, mf::slip_mode mode,
                        const constant_columns &allowed_constant = NO_CONSTANT_COLUMNS,
                        bool require_nonzero_my = false) {
+    ASSERT_TRUE(libm_variant_is_pinned());
     std::vector<golden_row> rows;
     load_golden(name, rows);
     ASSERT_FALSE(rows.empty());
