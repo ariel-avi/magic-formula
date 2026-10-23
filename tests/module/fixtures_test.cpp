@@ -1,6 +1,8 @@
 #include "../support/fixtures.hpp"
 
+#include <Eigen/Core>
 #include <array>
+#include <cmath>
 #include <expected>
 #include <filesystem>
 #include <gtest/gtest.h>
@@ -9,6 +11,7 @@
 #include <magic_formula/io/mf5x_bindings.hpp>
 #include <magic_formula/io/model_loader.hpp>
 #include <magic_formula/mf5x_coefficients.hpp>
+#include <magic_formula/mf5x_layout.hpp>
 #include <magic_formula/mf5x_model.hpp>
 #include <magic_formula/pac2002_model.hpp>
 #include <optional>
@@ -38,12 +41,16 @@ namespace {
 
   // clang-format off
   /// All .tir files of tests/data and their documented outcome (tests/data/README.md).
-  constexpr std::array<expected_file, 8> EXPECTED_FILES{
+  constexpr std::array<expected_file, 12> EXPECTED_FILES{
       expected_file{.name = "pac2002_S.tir", .failure = std::nullopt},
       expected_file{.name = "mf52_S52.tir", .failure = std::nullopt},
       expected_file{.name = "mf52_user_pff.tir", .failure = std::nullopt},
       expected_file{.name = "pac2002_S_rng.tir", .failure = std::nullopt},
       expected_file{.name = "pac2002_S_ell.tir", .failure = std::nullopt},
+      expected_file{.name = "pac2002_R.tir", .failure = std::nullopt},
+      expected_file{.name = "pac2002_R_ell.tir", .failure = std::nullopt},
+      expected_file{.name = "pac2002_R_fit5.tir", .failure = std::nullopt},
+      expected_file{.name = "mf52_R52.tir", .failure = std::nullopt},
       expected_file{.name = "pac2002_S_part.tir", .failure = error_code::MISSING_KEY},
       expected_file{.name = "mf61_unsupported.tir", .failure = error_code::UNSUPPORTED_MODEL},
       expected_file{.name = "lexical_mix.tir", .failure = std::nullopt},
@@ -115,14 +122,6 @@ namespace {
     return dynamic_cast<const mf::pac2002_model *>(loaded.model.get());
   }
 
-  /// True when both intervals are absent, or both are present with bit-equal bounds.
-  bool same_interval(const std::optional<mf::interval> &actual, const std::optional<mf::interval> &expected) {
-    if (!actual.has_value() || !expected.has_value()) {
-      return actual.has_value() == expected.has_value();
-    }
-    return bits(actual->lower) == bits(expected->lower) && bits(actual->upper) == bits(expected->upper);
-  }
-
   /// FITTYP, USE_MODE and TYRESIDE of the model equal those of the code fixture.
   void expect_same_metadata(const mf::model_metadata &actual, const mf::model_metadata &expected) {
     EXPECT_EQ(actual.fittyp, expected.fittyp);
@@ -130,13 +129,12 @@ namespace {
     EXPECT_EQ(actual.side, expected.side);
   }
 
-  /// VXLOW and the four ranges of the model equal those of the code fixture.
-  void expect_same_limits(const mf::operating_limits &actual, const mf::operating_limits &expected) {
-    EXPECT_EQ(bits(actual.vxlow_mps), bits(expected.vxlow_mps));
-    EXPECT_TRUE(same_interval(actual.fz_n, expected.fz_n));
-    EXPECT_TRUE(same_interval(actual.kappa, expected.kappa));
-    EXPECT_TRUE(same_interval(actual.alpha_rad, expected.alpha_rad));
-    EXPECT_TRUE(same_interval(actual.gamma_rad, expected.gamma_rad));
+  /// The limits vectors have the same size and bit-equal elements (infinities and signs match exactly).
+  void expect_same_limits(const Eigen::VectorXd &actual, const Eigen::VectorXd &expected) {
+    ASSERT_EQ(actual.size(), expected.size());
+    for (Eigen::Index i = 0; i < actual.size(); ++i) {
+      EXPECT_EQ(bits(actual(i)), bits(expected(i))) << "limit index " << i;
+    }
   }
 
   /// Names of the .tir files in tests/data.
@@ -218,10 +216,10 @@ TEST(data_fixtures, PacSRng_LimitsEqualFixture) {
   ASSERT_TRUE(loaded.has_value()) << describe(loaded);
   const mf::mf5x_parameters expected = mf::test::fixture_s_rng();
   expect_same_limits(loaded->model->limits(), expected.limits);
-  EXPECT_TRUE(loaded->model->limits().fz_n.has_value());
-  EXPECT_TRUE(loaded->model->limits().kappa.has_value());
-  EXPECT_TRUE(loaded->model->limits().alpha_rad.has_value());
-  EXPECT_TRUE(loaded->model->limits().gamma_rad.has_value());
+  for (const Eigen::Index index : {mf::mf5x::FZMIN, mf::mf5x::KPUMIN, mf::mf5x::ALPMIN, mf::mf5x::CAMMIN}) {
+    EXPECT_TRUE(std::isfinite(loaded->model->limits()(index))) << "lower at " << index;
+    EXPECT_TRUE(std::isfinite(loaded->model->limits()(index + 1))) << "upper at " << index + 1;
+  }
   expect_same_coefficients(coefficients_of(*loaded), expected.coefficients);
   EXPECT_TRUE(loaded->warnings.empty());
 }
@@ -237,6 +235,51 @@ TEST(data_fixtures, PacSEll_SelectsEllipseWithWarning) {
 
   ASSERT_EQ(loaded->warnings.size(), 1U);
   EXPECT_EQ(loaded->warnings[0].message, "no combined-slip R* coefficients: using the friction-ellipse method");
+}
+
+TEST(data_fixtures, PacR_LoadsWithCosineMethodAndNoWarnings) {
+  const load_result loaded = load_fixture("pac2002_R.tir");
+  ASSERT_TRUE(loaded.has_value()) << describe(loaded);
+  EXPECT_EQ(loaded->model->name(), "PAC2002");
+  const mf::pac2002_model *const pac2002 = pac2002_of(*loaded);
+  ASSERT_NE(pac2002, nullptr);
+  EXPECT_EQ(pac2002->method(), mf::combined_method::COSINE);
+  EXPECT_FALSE(pac2002->uses_my_from_shifts());
+  EXPECT_TRUE(loaded->warnings.empty());
+}
+
+TEST(data_fixtures, PacREll_SelectsEllipseWithWarning) {
+  const load_result loaded = load_fixture("pac2002_R_ell.tir");
+  ASSERT_TRUE(loaded.has_value()) << describe(loaded);
+  const mf::pac2002_model *const pac2002 = pac2002_of(*loaded);
+  ASSERT_NE(pac2002, nullptr);
+  EXPECT_EQ(pac2002->method(), mf::combined_method::FRICTION_ELLIPSE);
+  EXPECT_FALSE(pac2002->uses_my_from_shifts());
+  ASSERT_EQ(loaded->warnings.size(), 1U);
+  EXPECT_EQ(loaded->warnings[0].message, "no combined-slip R* coefficients: using the friction-ellipse method");
+}
+
+TEST(data_fixtures, PacRFit5_SelectsShiftFormWithWarning) {
+  const load_result loaded = load_fixture("pac2002_R_fit5.tir");
+  ASSERT_TRUE(loaded.has_value()) << describe(loaded);
+  const mf::pac2002_model *const pac2002 = pac2002_of(*loaded);
+  ASSERT_NE(pac2002, nullptr);
+  EXPECT_EQ(pac2002->method(), mf::combined_method::COSINE);
+  EXPECT_TRUE(pac2002->uses_my_from_shifts());
+  EXPECT_EQ(loaded->model->metadata().fittyp, std::optional<int>{5});
+  ASSERT_EQ(loaded->warnings.size(), 1U);
+  EXPECT_EQ(loaded->warnings[0].message, "FITTYP 5 with QSY1 = QSY2 = 0: My uses the shift form -R0*(SVx + Kx*SHx)");
+  EXPECT_EQ(loaded->warnings[0].where.key, "FITTYP");
+  EXPECT_EQ(loaded->warnings[0].where.file, data_file("pac2002_R_fit5.tir").string());
+}
+
+TEST(data_fixtures, Mf52R52_LoadsAsMf52WithForeignKeyWarning) {
+  const load_result loaded = load_fixture("mf52_R52.tir");
+  ASSERT_TRUE(loaded.has_value()) << describe(loaded);
+  EXPECT_EQ(loaded->model->name(), "MF 5.2");
+  EXPECT_EQ(loaded->model->metadata().fittyp, std::optional<int>{6});
+  ASSERT_EQ(loaded->warnings.size(), 1U);
+  EXPECT_EQ(loaded->warnings[0].message, "MF 5.2 ignores parameters that are not part of MF 5.2: LGAX, LGAY, LGAZ");
 }
 
 TEST(data_fixtures, PacSPart_FailsNamingRhx1) {

@@ -1,6 +1,8 @@
 #include <cstddef>
 #include <gtest/gtest.h>
 #include <magic_formula/error.hpp>
+#include <optional>
+#include <stdexcept>
 #include <string>
 
 namespace {
@@ -56,6 +58,58 @@ TEST(error, MakeError_AllFields_StoresCodeMessageLocation) {
   EXPECT_EQ(result.error().where.file, "c.tir");
   EXPECT_EQ(result.error().where.line, 4U);
   EXPECT_EQ(result.error().where.key, "FNOMIN");
+}
+
+TEST(model_failure, What_WithoutRow_EqualsToStringOfCause) {
+  const mf::error cause{
+      .code = mf::error_code::INVALID_INPUT, .message = "VX is not finite (nan)", .where = make_location("", 0, "VX")};
+  const mf::model_failure failure(cause, std::nullopt);
+  EXPECT_EQ(std::string(failure.what()), mf::to_string(cause));
+}
+
+TEST(model_failure, What_WithRow_PrefixesRowIndex) {
+  const mf::error cause{
+      .code = mf::error_code::INVALID_INPUT, .message = "VX is not finite (nan)", .where = make_location("", 0, "VX")};
+  const mf::model_failure failure(cause, std::size_t{3});
+  EXPECT_EQ(std::string(failure.what()), "row 3: " + mf::to_string(cause));
+}
+
+TEST(model_failure, What_WithRowAndLocatedCause_KeepsLocation) {
+  const mf::error cause{
+      .code = mf::error_code::INVALID_INPUT, .message = "bad value", .where = make_location("a.csv", 7, "FZ")};
+  const mf::model_failure failure(cause, std::size_t{0});
+  EXPECT_EQ(std::string(failure.what()), "row 0: a.csv:7: bad value");
+}
+
+TEST(model_failure, Accessors_ReturnCauseAndRow) {
+  const mf::error cause{
+      .code = mf::error_code::NUMERICAL, .message = "non-finite FX output (inf)", .where = make_location("", 0, "FX")};
+  const mf::model_failure with_row(cause, std::size_t{5});
+  EXPECT_EQ(with_row.cause().code, mf::error_code::NUMERICAL);
+  EXPECT_EQ(with_row.cause().message, "non-finite FX output (inf)");
+  EXPECT_EQ(with_row.cause().where.key, "FX");
+  ASSERT_TRUE(with_row.row().has_value());
+  EXPECT_EQ(*with_row.row(), 5U);
+
+  const mf::model_failure without_row(cause, std::nullopt);
+  EXPECT_FALSE(without_row.row().has_value());
+}
+
+TEST(model_failure, Thrown_CaughtAsRuntimeError) {
+  const mf::error cause{.code = mf::error_code::INVALID_ARGUMENT, .message = "wrong size", .where = {}};
+  try {
+    throw mf::model_failure(cause, std::nullopt);
+  } catch (const std::runtime_error &caught) {
+    EXPECT_EQ(std::string(caught.what()), "wrong size");
+    return;
+  }
+  FAIL() << "model_failure was not caught as std::runtime_error";
+}
+
+TEST(error_code, InvalidArgument_DistinctFromNumerical) {
+  EXPECT_NE(mf::error_code::INVALID_ARGUMENT, mf::error_code::NUMERICAL);
+  const auto result = mf::make_error(mf::error_code::INVALID_ARGUMENT, "size");
+  EXPECT_EQ(result.error().code, mf::error_code::INVALID_ARGUMENT);
 }
 
 TEST(error, MakeError_DefaultLocation_IsEmpty) {

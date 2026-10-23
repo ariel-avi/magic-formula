@@ -87,6 +87,8 @@ Tolerances (unless a row states otherwise):
 | V22 | S | Fz 0 and -100 | every output exactly 0 | conventions.md section 8 |
 | V23 | S + RHX1 omitted | load | error naming RHX1 | pac2002.md section 5.5 |
 
+Code pointers: the conditioning vectors (V19, V20, V22) are exercised by the pipeline tests (`tests/unit/mf5x_pipeline_test.cpp`, `detail::mf5x_pipeline` in `include/magic_formula/detail/mf5x_kernels.hpp`). The Fz 1e308 row, whose result overflows and is rejected by `mf::check_outputs`, is `tests/data/inputs_overflow.csv`.
+
 MF 5.2 vectors ([impl] equations, mf52.md section 4):
 
 | ID | Fixture | Input | Expected | Basis |

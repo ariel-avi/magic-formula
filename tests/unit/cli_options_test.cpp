@@ -5,6 +5,7 @@
 #include <magic_formula/cli/cli.hpp>
 #include <magic_formula/evaluation_types.hpp>
 #include <magic_formula/io/result_writer.hpp>
+#include <magic_formula/mf5x_layout.hpp>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -164,8 +165,15 @@ TEST(cli_options, Usage_Text_DocumentsSynopsisColumnsHeaderAndExitCodes) {
   EXPECT_TRUE(text.contains("IA[rad|deg]"));
   EXPECT_TRUE(text.contains("VX[m/s]"));
   EXPECT_TRUE(text.contains("P[Pa]"));
-  EXPECT_TRUE(text.contains(mf::io::RESULTS_HEADER));
   EXPECT_TRUE(text.contains("Exit status"));
   ASSERT_FALSE(text.empty());
   EXPECT_EQ(text.back(), '\n');
+}
+
+TEST(cli_options, Usage_ContainsPac2002ResultsHeader) {
+  EXPECT_TRUE(mf::cli::usage().contains(mf::io::results_header(mf::mf5x::PAC2002_LAYOUT)));
+}
+
+TEST(cli_options, Usage_ContainsMf52ResultsHeader) {
+  EXPECT_TRUE(mf::cli::usage().contains(mf::io::results_header(mf::mf5x::MF52_LAYOUT)));
 }

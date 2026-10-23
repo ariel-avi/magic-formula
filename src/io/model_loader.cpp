@@ -1,3 +1,4 @@
+#include <Eigen/Core>
 #include <array>
 #include <cstddef>
 #include <expected>
@@ -14,6 +15,8 @@
 #include <magic_formula/io/units.hpp>
 #include <magic_formula/mf52_model.hpp>
 #include <magic_formula/mf5x_coefficients.hpp>
+#include <magic_formula/mf5x_layout.hpp>
+#include <magic_formula/model_layout.hpp>
 #include <magic_formula/pac2002_model.hpp>
 #include <magic_formula/tire_model.hpp>
 #include <memory>
@@ -36,23 +39,6 @@ namespace mf::io {
     /// USE_MODE values from 0 up to (excluding) this limit are the documented ones; others only warn.
     constexpr int USE_MODE_LIMIT = 10;
 
-    /// The two keys of a validity range and the interval of `operating_limits` they fill.
-    struct range_spec {
-      std::string_view min_key;
-      std::string_view max_key;
-      std::optional<interval> operating_limits::*member;
-    };
-
-    // clang-format off
-    /// The four validity ranges of the .tir file.
-    constexpr std::array<range_spec, 4> RANGES{
-        range_spec{.min_key = "FZMIN", .max_key = "FZMAX", .member = &operating_limits::fz_n},
-        range_spec{.min_key = "KPUMIN", .max_key = "KPUMAX", .member = &operating_limits::kappa},
-        range_spec{.min_key = "ALPMIN", .max_key = "ALPMAX", .member = &operating_limits::alpha_rad},
-        range_spec{.min_key = "CAMMIN", .max_key = "CAMMAX", .member = &operating_limits::gamma_rad},
-    };
-    // clang-format on
-
     /// Keys that MF 5.2 files must carry although the model does not use their values.
     constexpr std::array<std::string_view, 2> MF52_DIMENSION_KEYS{"WIDTH", "RIM_RADIUS"};
 
@@ -66,8 +52,8 @@ namespace mf::io {
 
     /// Everything the loading steps read and write.
     struct load_state {
-      explicit load_state(const tir_document &document)
-          : reader(document), warnings(document.warnings().begin(), document.warnings().end()) {}
+      load_state(const tir_document &document, const model_options &model_opts)
+          : reader(document), warnings(document.warnings().begin(), document.warnings().end()), options(model_opts) {}
 
       /// Typed, consumption-tracking access to the document.
       tir_reader reader;
@@ -83,6 +69,8 @@ namespace mf::io {
       std::vector<std::string> missing_r;
       /// PAC2002 combined-slip method; always COSINE for MF 5.2.
       combined_method method = combined_method::COSINE;
+      /// Options forwarded to the model's `create`.
+      model_options options;
     };
 
     /// A model together with the facts that the final warnings need.
@@ -210,45 +198,50 @@ namespace mf::io {
       return {};
     }
 
-    /// Step: VXLOW, default 1 m/s.
-    status read_vxlow(load_state &state) {
-      const std::expected<std::optional<double>, error> result = state.reader.number("VXLOW");
-      if (!result.has_value()) {
-        return std::unexpected<error>(result.error());
-      }
-      double &vxlow = state.parameters.limits.vxlow_mps;
-      vxlow = result->value_or(vxlow);
-      return {};
-    }
-
-    /// Reads the two keys of one validity range: both give an interval, one gives a warning.
-    status read_range(load_state &state, const range_spec &spec) {
-      const std::expected<std::optional<double>, error> lower_result = state.reader.number(spec.min_key);
+    /// Reads the LOWER/UPPER keys of the pair that starts at limit index `first`: both give the two bounds, one gives
+    /// a warning and both bounds keep their defaults.
+    status read_limit_pair(load_state &state, Eigen::Index first) {
+      const std::span<const limit_channel> channels = mf5x::LIMITS;
+      const std::string_view lower_key = channels[static_cast<std::size_t>(first)].key;
+      const std::string_view upper_key = channels[static_cast<std::size_t>(first) + 1].key;
+      const std::expected<std::optional<double>, error> lower_result = state.reader.number(lower_key);
       if (!lower_result.has_value()) {
         return std::unexpected<error>(lower_result.error());
       }
-      const std::expected<std::optional<double>, error> upper_result = state.reader.number(spec.max_key);
+      const std::expected<std::optional<double>, error> upper_result = state.reader.number(upper_key);
       if (!upper_result.has_value()) {
         return std::unexpected<error>(upper_result.error());
       }
       const std::optional<double> lower = *lower_result;
       const std::optional<double> upper = *upper_result;
       if (lower.has_value() && upper.has_value()) {
-        operating_limits &limits = state.parameters.limits;
-        limits.*spec.member = interval{.lower = *lower, .upper = *upper};
+        state.parameters.limits(first) = *lower;
+        state.parameters.limits(first + 1) = *upper;
       } else if (lower.has_value() != upper.has_value()) {
-        const std::string_view given = lower.has_value() ? spec.min_key : spec.max_key;
-        std::string message = std::format(ONLY_ONE_BOUND_MESSAGE, spec.min_key, spec.max_key);
+        const std::string_view given = lower.has_value() ? lower_key : upper_key;
+        std::string message = std::format(ONLY_ONE_BOUND_MESSAGE, lower_key, upper_key);
         add_warning(state, std::move(message), state.reader.locate(given));
       }
       return {};
     }
 
-    /// Step: the four validity ranges.
-    status read_ranges(load_state &state) {
-      for (const range_spec &spec : RANGES) {
-        if (const status result = read_range(state, spec); !result.has_value()) {
-          return result;
+    /// Step: the limits vector, driven by `mf5x::LIMITS` in index order: a VALUE (VXLOW) overrides its default, a
+    /// LOWER starts a range pair (see `read_limit_pair`), an UPPER is handled with its LOWER.
+    status read_limits(load_state &state) {
+      const std::span<const limit_channel> channels = mf5x::LIMITS;
+      for (std::size_t i = 0; i < channels.size(); ++i) {
+        const auto index = static_cast<Eigen::Index>(i);
+        if (channels[i].role == limit_role::VALUE) {
+          const std::expected<std::optional<double>, error> result = state.reader.number(channels[i].key);
+          if (!result.has_value()) {
+            return std::unexpected<error>(result.error());
+          }
+          double &value = state.parameters.limits(index);
+          value = result->value_or(value);
+        } else if (channels[i].role == limit_role::LOWER) {
+          if (const status pair = read_limit_pair(state, index); !pair.has_value()) {
+            return pair;
+          }
         }
       }
       return {};
@@ -326,12 +319,11 @@ namespace mf::io {
 
     // clang-format off
     /// The steps after model identification, in the order of `load_tire_model`.
-    constexpr std::array<load_step, 9> STEPS{
+    constexpr std::array<load_step, 8> STEPS{
         bind_coefficients,
         select_combined_method,
         read_longvl,
-        read_vxlow,
-        read_ranges,
+        read_limits,
         read_metadata,
         read_tyreside,
         warn_fe_method,
@@ -346,7 +338,8 @@ namespace mf::io {
     }
 
     std::expected<built_model, error> create_pac2002(const load_state &state) {
-      std::expected<pac2002_model, error> created = pac2002_model::create(state.parameters, state.method);
+      std::expected<pac2002_model, error> created =
+          pac2002_model::create(state.parameters, state.method, state.options);
       if (!created.has_value()) {
         return std::unexpected<error>(with_source_location(state.reader, created.error()));
       }
@@ -356,7 +349,7 @@ namespace mf::io {
     }
 
     std::expected<built_model, error> create_mf52(const load_state &state) {
-      std::expected<mf52_model, error> created = mf52_model::create(state.parameters);
+      std::expected<mf52_model, error> created = mf52_model::create(state.parameters, state.options);
       if (!created.has_value()) {
         return std::unexpected<error>(with_source_location(state.reader, created.error()));
       }
@@ -390,8 +383,8 @@ namespace mf::io {
     }
   } // namespace
 
-  std::expected<loaded_model, error> load_tire_model(const tir_document &document) {
-    load_state state(document);
+  std::expected<loaded_model, error> load_tire_model(const tir_document &document, const model_options &options) {
+    load_state state(document, options);
     if (const status units = check_units(state.reader); !units.has_value()) {
       return std::unexpected<error>(units.error());
     }
@@ -418,11 +411,12 @@ namespace mf::io {
     return result;
   }
 
-  std::expected<loaded_model, error> load_tire_model_file(const std::filesystem::path &path) {
+  std::expected<loaded_model, error> load_tire_model_file(const std::filesystem::path &path,
+                                                          const model_options &options) {
     const std::expected<tir_document, error> document = read_tir_file(path);
     if (!document.has_value()) {
       return std::unexpected<error>(document.error());
     }
-    return load_tire_model(*document);
+    return load_tire_model(*document, options);
   }
 } // namespace mf::io

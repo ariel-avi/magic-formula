@@ -30,6 +30,8 @@ Aligned with the lab `.clang-tidy` (`readability-identifier-naming`). Class/stru
 
 Small enums need an explicit underlying type (`enum class status : std::uint8_t`) because of `performance-enum-size`.
 
+Exception to `enum class`: the index enums of a model family are unscoped (`enum input_index : std::uint8_t { FZ, SA, ... }`), because an enumerator is a vector position and is used directly as an index without a cast. The family namespace `mf::<family>` (for example `mf::mf5x`) scopes them, the enumerator names must be unique within that namespace, and the declaration carries a `NOLINTBEGIN/END(cppcoreguidelines-use-enum-class)` with the reason.
+
 A qualifier is added only to tell variants apart (`my_from_shifts`). A single-letter symbol is used as is (`t` for the pneumatic trail, `s` for the moment arm of Fx); locals and parameters in the same namespace then take descriptive names (`terms`, `state`). Functions that return several quantities or are generic helpers keep descriptive names (`vertical_load`, `aligning`, `trail_cosine`, `evaluate_slip_state`, `friction_ellipse_ratios`, `sgn_plus`).
 
 No local variable or parameter reuses the name of a function visible in the same namespace or class (for example a parameter `mu_y` inside `mf::detail`). It reads ambiguously, and MSVC /W4 name-hiding warnings (C4456-C4459) may fire.
@@ -47,7 +49,7 @@ A per-line `// NOLINT(readability-identifier-naming): <reason>` is also allowed.
 
 ## Namespaces and layout
 
-- Everything lives in `namespace mf { ... }`. Sub-namespaces by layer: `mf::io` (parsing / file formats), `mf::detail` (internal helpers, not part of the API). The CLI driver lives in `mf::cli`.
+- Everything lives in `namespace mf { ... }`. Sub-namespaces by layer: `mf::io` (parsing / file formats), `mf::detail` (internal helpers, not part of the API). The CLI driver lives in `mf::cli`. The index map of a model family (index enums and channel tables) lives in its own layout namespace `mf::<family>`, for example `mf::mf5x`; a new family (MF 6.x) gets `mf::mf6x`.
 - Public headers: `include/magic_formula/<name>.hpp`, included as `#include <magic_formula/<name>.hpp>`. They may live in sub-directories that mirror the sub-namespaces: `include/magic_formula/{io,cli,detail}/` (`mf::io`, `mf::cli`, `mf::detail`). `detail/` headers are internal (not API) but stay under `include/` so unit tests can include them. Private headers stay in `src/`. Sources mirror this in `src/{model,io,detail,cli}/`; `src/app/` holds only `main.cpp`.
 - Every header starts with `#pragma once`. No include guards and no `using namespace` in headers.
 - Include order: clang-format (lab config: LLVM categories, `IncludeBlocks: Regroup`) puts quoted includes first, then ALL `<...>` includes (std, third-party, `<magic_formula/...>`) in one alphabetically sorted block; never hand-order.
@@ -57,7 +59,7 @@ A per-line `// NOLINT(readability-identifier-naming): <reason>` is also allowed.
 ## Error handling
 
 - Recoverable errors (parse failures, missing/invalid `.tir` keys, malformed input rows, unsupported model version): return `std::expected<T, mf::error>`, where `mf::error` carries a code, a message and a source location (file, line, key). Check every result; never call `.value()` without checking first.
-- Exceptions only at the application boundary `mf::cli::run` (`src/cli/cli.cpp`), which catches `std::exception`, converts errors into a non-zero exit code and a message on stderr. `src/app/main.cpp` is one call with no branches and no `try`. The library throws nothing on its own except for allocation failures.
+- Exceptions only at the application boundary `mf::cli::run` (`src/cli/cli.cpp`), which catches `std::exception`, converts errors into a non-zero exit code and a message on stderr. `src/app/main.cpp` is one call with no branches and no `try`. The library throws `mf::model_failure` only from the `evaluate*` functions of a model built with `model_options::throw_if_model_failure`, and otherwise nothing except `std::bad_alloc`. The free check functions (`validate_input(s)`, `check_output(s)`, `check_buffers`, `check_batch_buffers`) return `std::expected`. The evaluation path of a model without the flag performs no checks.
 - No `assert` in `src/` or `include/` (its failure branch is never taken, so branch coverage stays below 100%). Invariants come from validated `create()` named constructors and total functions. Never use `[[assume]]` on data that comes from the user or a file.
 - Numerical guards (division by near-zero, `Vx -> 0`, `Fz <= 0`) are explicit, named (file-scope `EPSILON_V`, `EPSILON_X`, ...; function-local ones are lower_case, e.g. `epsilon_v`) and tested on both branches.
 
@@ -80,7 +82,7 @@ The 100% line + branch gate (`coverage` skill) runs with `--exclude-unreachable-
 - `const` everything that can be const: locals, parameters by `const&` for non-trivial types, member functions. `constexpr` for pure math helpers and constants.
 - `[[nodiscard]]` on every function that returns a value the caller must use (all `std::expected` returns, factories, evaluators).
 - `noexcept` on functions that cannot throw (pure math on scalars, getters).
-- Use `std::span` for non-owning views, `std::string_view` for read-only strings (never keep one beyond the owner's lifetime), and `enum class` only.
+- Use `std::span` for non-owning views, `std::string_view` for read-only strings (never keep one beyond the owner's lifetime), and `enum class` (except the family index enums, see Naming).
 - `std::mdspan` is **conditional**: libstdc++ 14 (the GCC 14 minimum) does not ship `<mdspan>` (it arrived in GCC 15). By default use `Eigen::Map` or `std::span` plus explicit strides for multi-dimensional views. Use `std::mdspan` only where the architect asks for it, behind the feature-test macro (`#include <version>`, then `#if defined(__cpp_lib_mdspan)`), with a fallback that compiles on GCC 14, and only if CI builds both paths.
 - Use `override` / `final` explicitly. No `virtual` without a reason.
 - Undefined behaviour is never allowed: no signed overflow, no uninitialised reads, no out-of-bounds access, no type-punning through `reinterpret_cast`.
@@ -93,12 +95,13 @@ The 100% line + branch gate (`coverage` skill) runs with `--exclude-unreachable-
 
 ## Eigen
 
-- Batch evaluation uses `Eigen::ArrayXd` (element-wise math) over all input rows. Use `Eigen::Matrix` only for real linear algebra.
+- Kernels are lane-templated and header-defined (`template <typename Lane_T>`), instantiated on `detail::point_lane` (one point, scalar) and `detail::block_lane` (a block of up to `BLOCK_ROWS` points, SIMD). Use `Eigen::Array` for element-wise math and `Eigen::Matrix` only for real linear algebra.
+- No dynamic-size Eigen objects (heap allocation) in `compute`, `compute_batch` or the kernels: lanes have a fixed maximum size and raw buffers are viewed with `Eigen::Map`.
 - **Never** bind an Eigen expression to `auto`; that keeps dangling temporaries / lazy expressions. Assign to a concrete type (`const Eigen::ArrayXd dfz = (fz - fz0) / fz0;`) or call `.eval()`.
 - Watch aliasing: `a = a.transpose()`-style statements need `.eval()`. Matrix products assigned to an operand need `.noalias()` only when provably safe.
-- Pass Eigen objects by `const Eigen::Ref<const Eigen::ArrayXd>&` or `const Eigen::ArrayXd&`; never by value.
-- Branch-free vector code: use `.select()`, `.min()`, `.max()`, `.cwiseMin()` instead of per-element `if`. Still test both sides of every `select` (branch coverage counts the predicate's outcomes via tests, not via gcov).
-- The scalar path and the batch path must agree, and a test asserts it (`EXPECT_NEAR` per element).
+- Pass Eigen objects by `const Eigen::Ref<const Eigen::ArrayXd>&` or `const Eigen::ArrayXd&`; never by value. The documented exception: a writable `Eigen::Ref<...>` parameter is passed BY VALUE (the Eigen idiom; it lets an `Eigen::Map` temporary bind).
+- Branch-free vector code: use `.select()`, `.min()`, `.max()`, `.cwiseMin()` instead of per-element `if`. Every select predicate is driven both ways by tests, and every form branch is tested on both lane types (branch coverage counts the predicate's outcomes via tests, not via gcov).
+- The per-point path and the batch path must agree, and a test asserts it at a 1e-12 scaled relative tolerance (batch results differ from per-point results by a few ULP). Per-point results are bit-identical to the previous implementation on Linux x86-64 (`tests/module/per_point_golden_test.cpp`); few-ULP differences are accepted on other platforms (Clang arm64 FMA contraction, other libm/CRT).
 - Do not use Eigen's `unsupported/` modules without architect approval.
 
 ## Testing (GoogleTest)
@@ -110,7 +113,7 @@ The 100% line + branch gate (`coverage` skill) runs with `--exclude-unreachable-
 - Test helpers live header-only in `tests/support/` (`fixtures.hpp`, namespace `mf::test`) and are included as `"../support/fixtures.hpp"`. `tests/support/` is not globbed as a test.
 - Test every error path of every `std::expected` function, and both sides of every numerical guard.
 - Never disable or skip tests (`DISABLED_`, `GTEST_SKIP`) to get green; that is a blocker in review.
-- Benchmarks (`bench/`): Google Benchmark, `BM_<Unit>_<Scenario>`, use `benchmark::DoNotOptimize`, and parameterise the batch size with `->Range(...)`.
+- Benchmarks (`bench/`): Google Benchmark, `BM_<Unit>_<Scenario>`, use `benchmark::DoNotOptimize` and `benchmark::ClobberMemory`, and parameterise the point/batch count with `->Range(...)`, or with an explicit `->Arg(...)` list when the sizes are not geometric. Pass only non-const lvalues to `DoNotOptimize`: its const-reference overload is deprecated, and `-Werror` rejects the warning. `mf_bench` links `benchmark_main` (no `BENCHMARK_MAIN()`), loads data through `MF_TEST_DATA_DIR`, is formatted by `clang-format_all` and is not checked by `clang-tidy_all`.
 
 ## Formatting and static analysis
 

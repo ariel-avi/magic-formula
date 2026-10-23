@@ -3,6 +3,7 @@
 #include <expected>
 #include <filesystem>
 #include <magic_formula/error.hpp>
+#include <magic_formula/evaluation_types.hpp>
 #include <magic_formula/io/tir_document.hpp>
 #include <magic_formula/tire_model.hpp>
 #include <memory>
@@ -37,8 +38,9 @@ namespace mf::io {
   ///     ellipse (with a warning), a partial set is MISSING_KEY. MF 5.2: absent R* keys default to 0 and join the
   ///     warning of step 3.
   ///  5. LONGVL is required only when QSY3 or QSY4 is non-zero; otherwise it defaults to 1 m/s.
-  ///  6. VXLOW (default 1 m/s) and the four validity ranges: both bounds give an interval, one bound
-  ///     gives a warning and no interval.
+  ///  6. The limits vector, in the index order of `mf5x::LIMITS`: FZMIN/FZMAX, KPUMIN/KPUMAX, ALPMIN/ALPMAX,
+  ///     CAMMIN/CAMMAX (both bounds of a pair are stored; one bound gives a warning and both keep their defaults of
+  ///     -inf/+inf), then VXLOW (default 1 m/s). A key error is reported in that order.
   ///  7. [MODEL] metadata: FITTYP, USE_MODE (echoed only; a warning when outside 0..9) and TYRESIDE (LEFT,
   ///     RIGHT with a warning, anything else NOT_IMPLEMENTED). An FE_METHOD key gives a warning.
   ///  8. MF 5.2 only: WIDTH and RIM_RADIUS must be present; their values are not used.
@@ -47,12 +49,16 @@ namespace mf::io {
   ///
   /// The document is only read; the result does not refer to it.
   /// @param document parsed .tir file
+  /// @param options slip mode and the throw-on-failure flag of the created model
   /// @return the model with its warnings and ignored keys, or the first error (with file, 1-based line when the key
   ///         exists, and key)
-  [[nodiscard]] std::expected<loaded_model, error> load_tire_model(const tir_document &document);
+  [[nodiscard]] std::expected<loaded_model, error> load_tire_model(const tir_document &document,
+                                                                   const model_options &options = {});
 
   /// `read_tir_file` followed by `load_tire_model`.
   /// @param path .tir file
+  /// @param options slip mode and the throw-on-failure flag of the created model
   /// @return the loaded model, or an IO, SYNTAX, DUPLICATE_KEY or any `load_tire_model` error
-  [[nodiscard]] std::expected<loaded_model, error> load_tire_model_file(const std::filesystem::path &path);
+  [[nodiscard]] std::expected<loaded_model, error> load_tire_model_file(const std::filesystem::path &path,
+                                                                        const model_options &options = {});
 } // namespace mf::io

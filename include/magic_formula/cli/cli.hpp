@@ -54,9 +54,11 @@ namespace mf::cli {
   [[nodiscard]] std::string_view usage() noexcept;
 
   /// The application: parses the command line, loads the .tir file, reads the input table, evaluates every row and
-  /// writes the results as CSV (`io::write_results`) to `out`. Diagnostics go to `err`: load warnings,
-  /// optional `--verbose` information, the pressure-column warning, and one clamp / VXLOW warning per variable
-  /// naming the first table line and the number of rows. Nothing is written to `out` for a usage, file, model,
+  /// writes the results as CSV (`io::write_results`) to `out`: 15 columns, the five inputs, the five outputs and the
+  /// five 0/1 flag columns (FZ_CLAMPED, SR_CLAMPED, SA_CLAMPED, IA_CLAMPED, BELOW_VXLOW). Diagnostics go to `err`:
+  /// load warnings, optional `--verbose` information, one warning per table column that the model has no input for
+  /// (for example P), and one clamp / VXLOW warning per flag naming the first table line and the number of rows.
+  /// Nothing is written to `out` for a usage, file, model,
   /// input-table or evaluation error, because the results are written only after every row has been evaluated. The
   /// results are then streamed to `out` row by row, so if `out` fails or throws while they are written, the rows
   /// already written remain and the call returns `EXIT_ERROR` ("mf: error: cannot write results" for a failed stream).

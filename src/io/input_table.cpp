@@ -1,3 +1,4 @@
+#include <Eigen/Core>
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -6,10 +7,10 @@
 #include <format>
 #include <magic_formula/detail/text.hpp>
 #include <magic_formula/error.hpp>
-#include <magic_formula/evaluation_types.hpp>
 #include <magic_formula/io/input_table.hpp>
 #include <magic_formula/io/number.hpp>
 #include <magic_formula/io/text_file.hpp>
+#include <magic_formula/model_layout.hpp>
 #include <numbers>
 #include <optional>
 #include <ranges>
@@ -21,27 +22,15 @@
 
 namespace mf::io {
   namespace {
-    /// The values of one data row, one member per column, already in SI units.
-    struct row_values {
-      double fz = 0.0;
-      double sa = 0.0;
-      double sr = 0.0;
-      double ia = 0.0;
-      double vx = 0.0;
-      double p = 0.0;
-    };
-
-    /// A known column: its upper-case name and the `row_values` member that receives its value.
+    /// A known column: its upper-case name.
     struct column_def {
       std::string_view name;
-      double row_values::*target;
     };
 
     /// All columns. The first `REQUIRED_COLUMNS` are required, the rest are optional.
     constexpr std::array<column_def, 6> COLUMNS{
-        column_def{.name = "FZ", .target = &row_values::fz}, column_def{.name = "SA", .target = &row_values::sa},
-        column_def{.name = "SR", .target = &row_values::sr}, column_def{.name = "IA", .target = &row_values::ia},
-        column_def{.name = "VX", .target = &row_values::vx}, column_def{.name = "P", .target = &row_values::p},
+        column_def{.name = "FZ"}, column_def{.name = "SA"}, column_def{.name = "SR"},
+        column_def{.name = "IA"}, column_def{.name = "VX"}, column_def{.name = "P"},
     };
 
     /// Number of leading `COLUMNS` entries that every table must have (FZ, SA, SR, IA, VX).
@@ -78,13 +67,14 @@ namespace mf::io {
     /// The parsed header line.
     struct header {
       std::vector<column_spec> columns;
-      bool has_pressure = false;
     };
 
-    /// Parse state: the file name for diagnostics, the header (once seen) and the table being built.
+    /// Parse state: the file name for diagnostics, the header (once seen), the row-major values read so far and the
+    /// table being built (columns, header line and row lines).
     struct parse_state {
       std::string file;
       std::optional<header> head;
+      std::vector<double> values;
       input_table table;
     };
 
@@ -195,19 +185,19 @@ namespace mf::io {
         message += "(expected FZ, SA, SR, IA, VX; optional P)";
         return table_error(error_code::MISSING_KEY, std::move(message), file, line, missing->name);
       }
-      result.has_pressure = has_column(result.columns, &COLUMNS.back());
       return result;
     }
 
-    /// One data row: exactly as many numbers as the header has columns, converted to SI.
-    std::expected<input_row, error> parse_row(const header &head, std::span<const std::string_view> fields,
-                                              const std::string &file, std::size_t line) {
+    /// One data row: exactly as many numbers as the header has columns, converted to SI and appended to `values` in
+    /// header order. `values` is an out-parameter so that no named return value is destroyed only on an exception
+    /// path; on an error it may hold a partial row, which the caller discards.
+    std::expected<void, error> parse_row(const header &head, std::span<const std::string_view> fields,
+                                         const std::string &file, std::size_t line, std::vector<double> &values) {
       if (fields.size() != head.columns.size()) {
         return table_error(error_code::SYNTAX,
                            std::format("expected {} fields, got {}", head.columns.size(), fields.size()), file, line,
                            {});
       }
-      row_values values;
       for (const auto [spec, field] : std::views::zip(head.columns, fields)) {
         const std::optional<double> parsed = parse_number(field);
         if (!parsed.has_value()) {
@@ -215,15 +205,9 @@ namespace mf::io {
                              std::format("invalid number '{}' in column {}", field, spec.def->name), file, line,
                              spec.def->name);
         }
-        values.*(spec.def->target) = *parsed * spec.factor;
+        values.push_back(*parsed * spec.factor);
       }
-      return input_row{.point = operating_point{.fz_n = values.fz,
-                                                .kappa = values.sr,
-                                                .alpha_rad = values.sa,
-                                                .gamma_rad = values.ia,
-                                                .vx_mps = values.vx},
-                       .pressure_pa = head.has_pressure ? std::optional<double>(values.p) : std::nullopt,
-                       .line = line};
+      return {};
     }
 
     /// One content line (not blank, not a comment): the header when none was seen yet, otherwise a data row.
@@ -235,15 +219,18 @@ namespace mf::io {
         if (!parsed.has_value()) {
           return std::unexpected<error>(std::move(parsed.error()));
         }
-        state.table.has_pressure = parsed->has_pressure;
+        for (const column_spec &spec : parsed->columns) {
+          state.table.columns.emplace_back(spec.def->name);
+        }
+        state.table.header_line = line;
         state.head = std::move(*parsed);
         return {};
       }
-      const auto row = parse_row(*state.head, fields, state.file, line);
+      const auto row = parse_row(*state.head, fields, state.file, line, state.values);
       if (!row.has_value()) {
         return std::unexpected<error>(row.error());
       }
-      state.table.rows.push_back(*row);
+      state.table.lines.push_back(line);
       return {};
     }
 
@@ -269,7 +256,7 @@ namespace mf::io {
   } // namespace
 
   std::expected<input_table, error> parse_input_table(std::string_view text, std::string file_name) {
-    parse_state state{.file = std::move(file_name), .head = std::nullopt, .table = {}};
+    parse_state state{.file = std::move(file_name), .head = std::nullopt, .values = {}, .table = {}};
     if (text.starts_with(UTF8_BOM)) {
       text.remove_prefix(UTF8_BOM.size());
     }
@@ -280,6 +267,11 @@ namespace mf::io {
     if (!state.head.has_value()) {
       return table_error(error_code::SYNTAX, "missing header line", state.file, 0, {});
     }
+    using row_major_matrix = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+    const auto rows = static_cast<Eigen::Index>(state.table.lines.size());
+    const auto cols = static_cast<Eigen::Index>(state.table.columns.size());
+    state.table.file = state.file;
+    state.table.values = Eigen::Map<const row_major_matrix>(state.values.data(), rows, cols);
     return std::move(state.table);
   }
 
@@ -289,5 +281,38 @@ namespace mf::io {
       return std::unexpected<error>(text.error());
     }
     return parse_input_table(*text, path.string());
+  }
+
+  std::expected<model_inputs, error> map_inputs(const input_table &table, std::span<const input_channel> channels) {
+    model_inputs result;
+    result.values.resize(table.values.rows(), static_cast<Eigen::Index>(channels.size()));
+    for (std::size_t k = 0; k < channels.size(); ++k) {
+      const std::string_view name = channels[k].name;
+      const auto is_named = [name](const std::string &column) { return column == name; };
+      const auto column = std::ranges::find_if(table.columns, is_named);
+      if (column == table.columns.end()) {
+        return table_error(error_code::MISSING_KEY, std::format("missing required column {}", name), table.file,
+                           table.header_line, name);
+      }
+      const Eigen::Index source = column - table.columns.begin();
+      result.values.col(static_cast<Eigen::Index>(k)) = table.values.col(source);
+    }
+    for (const std::string &column : table.columns) {
+      const auto is_used = [&column](const input_channel &channel) { return channel.name == column; };
+      if (std::ranges::none_of(channels, is_used)) {
+        result.ignored_columns.push_back(column);
+      }
+    }
+    result.lines = table.lines;
+    return result;
+  }
+
+  std::expected<model_inputs, error> read_model_inputs(const std::filesystem::path &path,
+                                                       std::span<const input_channel> channels) {
+    const std::expected<input_table, error> table = read_input_table(path);
+    if (!table.has_value()) {
+      return std::unexpected<error>(table.error());
+    }
+    return map_inputs(*table, channels);
   }
 } // namespace mf::io

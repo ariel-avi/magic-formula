@@ -33,7 +33,7 @@ First-time Conan setup (once per machine): `conan profile detect --force`.
 ```bash
 # Debug (used by the debug and coverage presets)
 conan install . --build=missing -s build_type=Debug -s compiler.cppstd=26
-# Release (used by the release preset and benchmarks)
+# Release (used by the release preset; Google Benchmark is a default requirement for Release only; -o with_benchmark=True|False overrides)
 conan install . --build=missing -s build_type=Release -s compiler.cppstd=26
 ```
 
@@ -53,6 +53,8 @@ cmake --build --preset debug
 ```
 
 Replace `debug` with `release` or `coverage` as needed. Build errors are a FAIL; report the first compiler error per translation unit (file:line + message), not the whole log.
+
+`mf_configure_target` (`cmake/MfCompileOptions.cmake`) defines `EIGEN_RUNTIME_NO_MALLOC` on every target in every configuration without `NDEBUG` (the `debug` and `coverage` presets, and an empty `CMAKE_BUILD_TYPE`), never in Release, RelWithDebInfo or MinSizeRel, so tests can assert that code does not use Eigen's heap.
 
 ## Tests (CTest)
 
@@ -101,14 +103,18 @@ ctest --test-dir build/pkt-<packet-id> --output-on-failure --no-tests=error -R '
 
 ## Benchmarks
 
+`bench/` builds one executable, `mf_bench` (Google Benchmark, linked with `benchmark_main`), when `MF_BUILD_BENCH` is ON. The `release` preset sets it; `debug` and `coverage` leave it OFF (any preset can opt in with `-DMF_BUILD_BENCH=ON`). `mf_bench` is not a CTest test, is not part of the coverage gate and is not checked by `clang-tidy_all`; `clang-format_all` does format `bench/`.
+
 ```bash
 conan install . --build=missing -s build_type=Release -s compiler.cppstd=26
-cmake --preset release && cmake --build --preset release
+cmake --preset release && cmake --build --preset release --target mf_bench
 ./build/release/bench/mf_bench --benchmark_format=console
 ./build/release/bench/mf_bench --benchmark_filter='<regex>'
+./build/release/bench/mf_bench --benchmark_list_tests=true          # names only
+./build/release/bench/mf_bench --benchmark_min_time=0.01s           # quick smoke run (Google Benchmark >= 1.8 needs the "s" suffix)
 ```
 
-Benchmarks are informational unless the caller gives a threshold; report name, time/iteration and items/s only.
+Benchmarks are informational unless the caller gives a threshold; report name, time/iteration and items/s only. A benchmark that prints `ERROR OCCURRED` (SkipWithError) or a non-zero exit is a FAIL.
 
 ## test-runner report template (exact)
 

@@ -1,8 +1,11 @@
 #pragma once
 
+#include <Eigen/Core>
 #include <expected>
 #include <magic_formula/error.hpp>
 #include <magic_formula/evaluation_types.hpp>
+#include <magic_formula/mf5x_layout.hpp>
+#include <magic_formula/model_layout.hpp>
 
 namespace mf {
   /// The MF 5.x-family coefficient set shared by PAC2002 and MF 5.2 (docs/research/mf52.md). Exactly 117 doubles and
@@ -259,8 +262,8 @@ namespace mf {
   /// Everything an MF 5.x-family model is built from (by `mf::io` from a .tir file, or by code).
   struct mf5x_parameters {
     mf5x_coefficients coefficients;
-    /// Validity ranges and VXLOW.
-    operating_limits limits;
+    /// Validity ranges and VXLOW, indexed by `mf5x::limit_index`; an absent bound is +-inf, VXLOW defaults to 1 m/s.
+    Eigen::VectorXd limits = default_limits(mf5x::LIMITS);
     /// Echoed [MODEL] values (FITTYP also selects the PAC2002 shift form of My).
     model_metadata metadata;
   };

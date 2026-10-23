@@ -20,7 +20,7 @@
       "displayName": "Release",
       "inherits": "base",
       "toolchainFile": "${sourceDir}/build/conan/release/conan_toolchain.cmake",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "MF_BUILD_BENCH": "ON" }
     },
     {
       "name": "coverage",
