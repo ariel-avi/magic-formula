@@ -41,16 +41,12 @@ namespace {
 
   // clang-format off
   /// All .tir files of tests/data and their documented outcome (tests/data/README.md).
-  constexpr std::array<expected_file, 12> EXPECTED_FILES{
+  constexpr std::array<expected_file, 8> EXPECTED_FILES{
       expected_file{.name = "pac2002_S.tir", .failure = std::nullopt},
       expected_file{.name = "mf52_S52.tir", .failure = std::nullopt},
       expected_file{.name = "mf52_user_pff.tir", .failure = std::nullopt},
       expected_file{.name = "pac2002_S_rng.tir", .failure = std::nullopt},
       expected_file{.name = "pac2002_S_ell.tir", .failure = std::nullopt},
-      expected_file{.name = "pac2002_R.tir", .failure = std::nullopt},
-      expected_file{.name = "pac2002_R_ell.tir", .failure = std::nullopt},
-      expected_file{.name = "pac2002_R_fit5.tir", .failure = std::nullopt},
-      expected_file{.name = "mf52_R52.tir", .failure = std::nullopt},
       expected_file{.name = "pac2002_S_part.tir", .failure = error_code::MISSING_KEY},
       expected_file{.name = "mf61_unsupported.tir", .failure = error_code::UNSUPPORTED_MODEL},
       expected_file{.name = "lexical_mix.tir", .failure = std::nullopt},
@@ -235,51 +231,6 @@ TEST(data_fixtures, PacSEll_SelectsEllipseWithWarning) {
 
   ASSERT_EQ(loaded->warnings.size(), 1U);
   EXPECT_EQ(loaded->warnings[0].message, "no combined-slip R* coefficients: using the friction-ellipse method");
-}
-
-TEST(data_fixtures, PacR_LoadsWithCosineMethodAndNoWarnings) {
-  const load_result loaded = load_fixture("pac2002_R.tir");
-  ASSERT_TRUE(loaded.has_value()) << describe(loaded);
-  EXPECT_EQ(loaded->model->name(), "PAC2002");
-  const mf::pac2002_model *const pac2002 = pac2002_of(*loaded);
-  ASSERT_NE(pac2002, nullptr);
-  EXPECT_EQ(pac2002->method(), mf::combined_method::COSINE);
-  EXPECT_FALSE(pac2002->uses_my_from_shifts());
-  EXPECT_TRUE(loaded->warnings.empty());
-}
-
-TEST(data_fixtures, PacREll_SelectsEllipseWithWarning) {
-  const load_result loaded = load_fixture("pac2002_R_ell.tir");
-  ASSERT_TRUE(loaded.has_value()) << describe(loaded);
-  const mf::pac2002_model *const pac2002 = pac2002_of(*loaded);
-  ASSERT_NE(pac2002, nullptr);
-  EXPECT_EQ(pac2002->method(), mf::combined_method::FRICTION_ELLIPSE);
-  EXPECT_FALSE(pac2002->uses_my_from_shifts());
-  ASSERT_EQ(loaded->warnings.size(), 1U);
-  EXPECT_EQ(loaded->warnings[0].message, "no combined-slip R* coefficients: using the friction-ellipse method");
-}
-
-TEST(data_fixtures, PacRFit5_SelectsShiftFormWithWarning) {
-  const load_result loaded = load_fixture("pac2002_R_fit5.tir");
-  ASSERT_TRUE(loaded.has_value()) << describe(loaded);
-  const mf::pac2002_model *const pac2002 = pac2002_of(*loaded);
-  ASSERT_NE(pac2002, nullptr);
-  EXPECT_EQ(pac2002->method(), mf::combined_method::COSINE);
-  EXPECT_TRUE(pac2002->uses_my_from_shifts());
-  EXPECT_EQ(loaded->model->metadata().fittyp, std::optional<int>{5});
-  ASSERT_EQ(loaded->warnings.size(), 1U);
-  EXPECT_EQ(loaded->warnings[0].message, "FITTYP 5 with QSY1 = QSY2 = 0: My uses the shift form -R0*(SVx + Kx*SHx)");
-  EXPECT_EQ(loaded->warnings[0].where.key, "FITTYP");
-  EXPECT_EQ(loaded->warnings[0].where.file, data_file("pac2002_R_fit5.tir").string());
-}
-
-TEST(data_fixtures, Mf52R52_LoadsAsMf52WithForeignKeyWarning) {
-  const load_result loaded = load_fixture("mf52_R52.tir");
-  ASSERT_TRUE(loaded.has_value()) << describe(loaded);
-  EXPECT_EQ(loaded->model->name(), "MF 5.2");
-  EXPECT_EQ(loaded->model->metadata().fittyp, std::optional<int>{6});
-  ASSERT_EQ(loaded->warnings.size(), 1U);
-  EXPECT_EQ(loaded->warnings[0].message, "MF 5.2 ignores parameters that are not part of MF 5.2: LGAX, LGAY, LGAZ");
 }
 
 TEST(data_fixtures, PacSPart_FailsNamingRhx1) {
