@@ -117,7 +117,7 @@ The PAC2002 / MF 5.2 differences are the closed set `mf5x_forms` (`mf5x_forms.hp
 
 The kernels are templates over a lane type, defined in headers (`detail/lanes.hpp`, `detail/mf5x_kernels.hpp`) and instantiated on two lanes:
 
-- `detail::point_lane`: a 1x1 array. Scalar code with the libm functions, so one point gives the same numbers as the original scalar implementation up to floating-point contraction (not verified bit-for-bit across toolchains).
+- `detail::point_lane`: a 1x1 array. Scalar code with the libm functions; it is the reference the batch path is compared against (1e-12 scaled relative tolerance).
 - `detail::block_lane`: a column of up to `BLOCK_ROWS` = 32 points with a fixed maximum size, so it lives on the stack and `compute_batch` never allocates. It is the SIMD path.
 
 `compute_batch` walks the rows in blocks of `BLOCK_ROWS`. Each input and output column of a block is a structure-of-arrays lane, so the arithmetic runs on contiguous data. Eigen 5.0.1 vectorises these functions for double: `atan`, `exp`, and `sin` / `cos` (the latter two with `EIGEN_FAST_MATH`). `tan` and `hypot` stay scalar (element-wise loops). A batch result therefore differs from the per-point result by a few ULP; the tests compare them at a 1e-12 scaled relative tolerance and the CLI reference outputs at their printed precision. Consumers that instantiate the kernels must compile with the same SIMD flags as `mflib`.
