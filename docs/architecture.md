@@ -8,84 +8,154 @@ Dependencies point downwards only. The core model knows nothing about files or t
 
 | Layer | Headers (`include/magic_formula/`) | Sources (`src/`) | Namespace | Role |
 |-------|------|------|-----------|------|
-| core model | `tire_model.hpp`, `mf5x_model.hpp`, `pac2002_model.hpp`, `mf52_model.hpp`, `mf5x_coefficients.hpp`, `evaluation_types.hpp`, `error.hpp`, `detail/mf5x_kernels.hpp` | `model/`, `error.cpp` | `mf`, `mf::detail` | Abstract formulation, the two concrete models, the pure equation kernels. No I/O, no printing. |
-| io | `io/*.hpp` | `io/`, `detail/text.cpp` | `mf::io` | `.tir` lexing (`tir_document`, `tir_reader`), unit check, model routing, key-to-coefficient bindings, the model loader (factory), the input-table parser, the CSV result writer. |
+| core model | `tire_model.hpp`, `model_layout.hpp`, `mf5x_layout.hpp`, `model_checks.hpp`, `mf5x_model.hpp`, `pac2002_model.hpp`, `mf52_model.hpp`, `mf5x_forms.hpp`, `mf5x_coefficients.hpp`, `evaluation_types.hpp`, `error.hpp` | `model/`, `error.cpp` | `mf`, `mf::mf5x` | Abstract formulation, the index maps, the two concrete models, the free check functions. No I/O, no printing. |
+| detail | `detail/lanes.hpp`, `detail/mf5x_kernels.hpp`, `detail/text.hpp` | `detail/` | `mf::detail` | Internal, lane-templated equation kernels and helpers. Under `include/` so tests can include them; production code includes `detail/mf5x_kernels.hpp` only from `src/model/mf5x_model.cpp`. |
+| io | `io/*.hpp` | `io/` | `mf::io` | `.tir` lexing (`tir_document`, `tir_reader`), unit check, model routing, key-to-coefficient bindings, the model loader (factory), the input-table parser and its mapping onto a model's input channels, the CSV result writer. |
 | cli | `cli/cli.hpp` | `cli/cli.cpp` | `mf::cli` | Command-line parsing and the `run` driver. Compiled into `mflib` so module tests can run it in-process. |
 | app | none | `app/main.cpp` | none | One call into `mf::cli::run`. Builds the executable `mf`. |
 
-The library target is `mflib` (alias `mf::mflib`, every `src/**/*.cpp` except `src/app/`). Errors are values (see "Error model"); only `mf::cli::run` catches exceptions.
+The library target is `mflib` (alias `mf::mflib`, every `src/**/*.cpp` except `src/app/`). Eigen 5.0.1 is a PUBLIC dependency of `mflib`: it appears in the public signatures, so every consumer links it through `mflib`. Errors are values (see "Options and error model"); only `mf::cli::run` catches exceptions.
 
 ## Class hierarchy
 
 ```
-tire_model                  abstract; non-virtual Template Method evaluate()
-  `-- mf5x_model            abstract; shared MF 5.x evaluation order (compute() is final)
+tire_model                  abstract; non-virtual interface (NVI) with 4 evaluate forms
+  `-- mf5x_model            abstract; owns coefficients and forms; compute / compute_batch are final
         |-- pac2002_model   final; PAC2002
         `-- mf52_model      final; MF 5.2 (FITTYP 6)
 ```
 
-- **`tire_model`** owns the `operating_limits` and `model_metadata` and exposes `evaluate`, `evaluate_batch`, `name`, `limits`, `metadata`. Derived classes supply `compute` (private pure virtual, called only with validated, clamped inputs and Fz > 0) and may refine `validate_input` (protected virtual). A model is immutable after construction, so concurrent `evaluate` calls are safe. Models are built through static `create` functions that return `std::expected`, not through public constructors.
-- **`mf5x_model`** holds an `mf5x_coefficients` (117 doubles named like the `.tir` keys) and implements `compute` once, from the kernels in `mf::detail`, in the PAC2002 / MF 5.2 evaluation order. The differences between the two formulations are protected virtual hooks (see `research/pac2002-vs-mf52.md`):
+- **`tire_model`** is abstract. Its four public `evaluate` forms are non-virtual and own the error policy. Pure virtual: `name`, `input_length`, `output_length`, `layout`, and the private hooks `compute` (one point) and `compute_batch` (a block of points). It stores the limits vector, the `model_metadata`, the `model_options` and the per-point input and output lengths given to its protected constructor (they size the evaluate views without a virtual call), exposes `limits`, `metadata` and `options`, and is immutable after construction, so concurrent `evaluate` calls are safe. Models are built through static `create` functions that return `std::expected`, not through public constructors.
+- **`mf5x_model`** is abstract. It owns an `mf5x_coefficients` (117 doubles named like the `.tir` keys) and an `mf5x_forms`. `input_length`, `output_length`, `compute` and `compute_batch` are final: the evaluation order is fixed and runs `detail::mf5x_pipeline` on lanes. It aliases `input_index`, `output_index` and `limit_index` from `mf::mf5x`.
+- **`pac2002_model`** and **`mf52_model`** are final. They differ only in `name`, `layout` (the Vx domain), `create` and the `mf5x_forms` they pass up (see "MF 5.x pipeline").
+- **`mf5x_parameters`** = coefficients + limits vector + `model_metadata`. `mf5x_model::validate_parameters` runs `validate_coefficients` and then `validate_limits(limits, mf5x::LIMITS)` and returns the first error unchanged.
 
-  | Hook | Default (also MF 5.2 where noted) | `pac2002_model` | `mf52_model` |
-  |------|-----------------------------------|-----------------|--------------|
-  | `trail_cosine` (pure virtual) | none | cos(alpha) | cos'(alpha) = Vx/(Vc + eps) |
-  | `combine` | cosine method (MF 5.2 uses it) | friction ellipse when the file has no R* keys | inherited |
-  | `fy_prime` | F'y = Fy - SVyk | inherited | F'y = Fy - SVyk0 (mu_y at zero camber) |
-  | `my` | the QSY1-QSY4 form, ISO sign (MF 5.2 uses it) | shift form -R0*(SVx + Kx*SHx) when FITTYP 5 and QSY1 = QSY2 = 0 | inherited |
-  | `validate_input` | finite inputs, Vx >= 0 | inherited (accepts Vx = 0) | adds Vx > 0 |
-  | `create` | | takes the `combined_method` chosen by the loader | forces LGAX = LGAY = LGAZ = 1 |
+Free functions (all in `mf`):
 
-- **`mf5x_parameters`** = coefficients + `operating_limits` + `model_metadata`. `mf5x_model::validate_parameters` runs `validate_coefficients` and then `validate_limits` and returns the first error unchanged.
+| Function | Header | Role |
+|----------|--------|------|
+| `validate_input`, `validate_inputs` | `model_checks.hpp` | size, finite, domain of every input channel (one point, a matrix) |
+| `check_output`, `check_outputs` | `model_checks.hpp` | size, finite results (one point, a matrix) |
+| `check_buffers`, `check_batch_buffers` | `model_checks.hpp` | null pointers and lengths of the raw forms |
+| `checked_evaluate_batch` | `model_checks.hpp` | `validate_inputs`, `evaluate_batch`, `check_outputs`; used by the CLI |
+| `default_limits`, `validate_limits`, `limit_pairs_well_formed` | `model_layout.hpp` | limits vector from a layout; LOWER <= UPPER check; layout well-formedness |
+| `make_error`, `to_string` | `error.hpp` | error construction and formatting |
 
-## Evaluation pipeline
+## Index-mapped inputs, outputs and limits
 
-`tire_model::evaluate` (`src/model/tire_model.cpp`) is the same for every model:
+A model does not return a struct. It maps an input vector to an output vector, and the position of every value is named by an index enum of the model family. The MF 5.x family (PAC2002 and MF 5.2) uses the unscoped enums of `mf::mf5x` (`include/magic_formula/mf5x_layout.hpp`), exposed on the model classes as `pac2002_model::input_index`, `output_index` and `limit_index`:
 
-1. `validate_input`: every field finite (checked in the order FZ, SR, SA, IA, VX), Vx >= 0, plus the model's own rule. Failure: `INVALID_INPUT` naming the field.
-2. `flags.below_vxlow = Vx < VXLOW`. The row is flagged, never modified.
-3. Raw Fz <= 0 (including -0.0): return exactly zero outputs, `compute` is not called.
-4. Clamp Fz, SR, SA and IA to their ranges when both bounds exist; each variable that actually moved sets its `*_clamped` flag.
-5. Clamped Fz <= 0 (a validated Fz interval may end at or below zero): the same zero outputs are returned, with the flags set so far (including `fz_clamped`), and `compute` is not called (`src/model/tire_model.cpp`, "A validated Fz interval may still end at or below zero").
-6. `compute(clamped_point, mode)`. For `mf5x_model`: pure-slip terms (`evaluate_slip_state`), then for combined mode `combine`, the equivalent slip angles alpha_eq, Mz, Mx, and `my` for My; for uncombined mode Fx0, Fy0 and Mz0.
-7. Every output must be finite, otherwise `NUMERICAL` naming the first offending output. NaN or inf is never returned.
+| Enum | Positions (index 0 first) |
+|------|---------------------------|
+| `input_index` | FZ, SA, SR, IA, VX (5) |
+| `output_index` | FX, FY, MZ, MX, MY, FZ_CLAMPED, SR_CLAMPED, SA_CLAMPED, IA_CLAMPED, BELOW_VXLOW (10) |
+| `limit_index` | FZMIN, FZMAX, KPUMIN, KPUMAX, ALPMIN, ALPMAX, CAMMIN, CAMMAX, VXLOW (9) |
 
-`evaluate_batch` loops over `evaluate` in input order and stops at the first failure, reporting its index (`batch_error`). It is the seam for a later vectorised (Eigen) path.
+The five flag outputs hold 0.0 or 1.0. The enums are unscoped on purpose: an enumerator is the vector position and is usable directly as an index (`y(output_index::FX)`, `data[FX]`) with no cast. The family namespace scopes the names, and every enumerator name is unique across the three enums.
 
-The outputs are Fx, Fy, Mz, Mx and My in the ISO W-axis system, plus the `input_flags`. The echoed inputs are never clamped; only the model's internal copy is.
+The descriptor tables of `model_layout.hpp` give the same positions as data, so generic code (checks, the CLI, the writer) needs no per-model knowledge. `model_layout` holds three spans:
+
+- `input_channel`: `name` (also the table column), `unit`, and the domain `minimum` with `minimum_inclusive` (PAC2002 VX >= 0, MF 5.2 VX > 0, everything else unrestricted).
+- `output_channel`: `name` and `unit` (flags use "-").
+- `limit_channel`: the `.tir` `key`, a `limit_role` (`LOWER`, `UPPER` or `VALUE`; a LOWER is always directly followed by its UPPER) and the `default_value` (-inf for LOWER, +inf for UPPER, 1 m/s for VXLOW).
+
+The CSV result header has 15 columns, the input channels then the output channels:
+
+```
+FZ[N],SA[rad],SR[-],IA[rad],VX[m/s],FX[N],FY[N],MZ[N*m],MX[N*m],MY[N*m],FZ_CLAMPED[-],SR_CLAMPED[-],SA_CLAMPED[-],IA_CLAMPED[-],BELOW_VXLOW[-]
+```
+
+## The four evaluate forms
+
+All four are members of `tire_model`. Inputs are in the model's `input_index` order, outputs in its `output_index` order. A batch has one row per point and one column per input index.
+
+| Form | Signature | Allocates |
+|------|-----------|-----------|
+| per point, Ref | `Eigen::VectorXd evaluate(const Eigen::Ref<const Eigen::VectorXd> &input)` | the returned vector |
+| per point, raw | `void evaluate(const double *input, int input_len, double *data, int len)` | never |
+| batch, Ref | `Eigen::MatrixXd evaluate_batch(const Eigen::Ref<const Eigen::MatrixXd> &inputs)` | the returned matrix |
+| batch, raw | `void evaluate_batch(const double *inputs, int rows, double *data, int len)` | never |
+
+The raw batch buffers are column-major (the layout of an `Eigen::MatrixXd`): `inputs[c*rows + r]` is input `c` of point `r`, `data[c*rows + r]` is output `c` of point `r`, and `len` is `rows * output_length()`. The raw forms never allocate (the hooks work on `Eigen::Map` views and stack-only lanes), so they are safe in real-time loops. Buffers must not overlap. Numerics contract: the batch results use vectorised math and agree with the per-point results within a 1e-12 scaled relative tolerance.
+
+## Options and error model
+
+`model_options{mode, throw_if_model_failure}` is fixed at construction (the loader and the `create` functions take it):
+
+- `mode` is the `slip_mode`: `COMBINED` (default) or `UNCOMBINED` (pure-slip Fx0, Fy0, Mz0). The evaluate signatures carry no mode argument.
+- `throw_if_model_failure` is false by default. Off, the evaluation path performs no check at all: no size test, no finite test, no domain test. On, each form runs, in order, `check_buffers` (raw forms), `validate_input(s)`, `compute`, `check_output(s)`, and throws `mf::model_failure{cause, row}` on the first failure (`row` is empty for a single point).
+
+The free checks of `model_checks.hpp` are public and return `std::expected`, so a caller can validate explicitly with a model built without the flag. `checked_evaluate_batch` combines them around `evaluate_batch` and is what the CLI uses; input errors are reported before numerical errors.
+
+- Recoverable problems are values: `std::expected<T, mf::error>`, or `std::expected<T, mf::batch_error>` (row index + error) for batches. `mf::error` = `error_code` + message + `location` (file, 1-based line, key). Codes: `IO`, `SYNTAX`, `INVALID_NUMBER`, `DUPLICATE_KEY`, `MISSING_KEY`, `INVALID_VALUE`, `UNSUPPORTED_UNIT`, `UNSUPPORTED_MODEL`, `NOT_IMPLEMENTED`, `INVALID_ARGUMENT` (wrong size, null buffer, bad limits vector), `INVALID_INPUT` (non-finite or out-of-domain input, naming the channel), `NUMERICAL` (non-finite output, naming the channel).
+- Warnings are data (`mf::warning`), returned by the loader; the library never prints. The CLI prints them as `mf: warning: ...`.
+- Kernels, `compute` and `compute_batch` are total and `noexcept`; bad numerics surface through `check_output(s)`.
+- `mf::model_failure` is the one library exception besides `std::bad_alloc`, and only the `evaluate*` functions of a model built with the flag throw it. `mf::cli::run` is the single place that catches exceptions.
+
+## MF 5.x pipeline
+
+`mf5x_model::compute` / `compute_batch` run `detail::mf5x_pipeline` (`include/magic_formula/detail/mf5x_kernels.hpp`), the same for every MF 5.x model:
+
+1. `mf5x_condition`: the VXLOW flag (`Vx < VXLOW`, Vx is never modified); the contact mask (raw Fz > 0 and clamped Fz > 0); branch-free clamps of Fz, SR, SA and IA to their limits (an infinite bound never moves a value); the clamp flags, masked by raw contact (a point with raw Fz <= 0 reports 0.0).
+2. `mf5x_evaluate`: the slip state (`evaluate_slip_state`), then the forms. Combined mode: the combined forces, the equivalent slip angles, Mz, Mx and My. Uncombined mode: Fx0, Fy0 and Mz0, with Mx and My.
+3. `contact.select(force, +0.0)` for Fx, Fy, Mz, Mx and My: a point without contact has exactly +0.0 forces and moments. The flags are copied from the conditioning.
+
+The echoed inputs are never clamped; only the model's internal copy is. Clamping, the Fz <= 0 zero rule and the flags stay on the hot path as selects, with no branch.
+
+The PAC2002 / MF 5.2 differences are the closed set `mf5x_forms` (`mf5x_forms.hpp`), chosen at construction (see `research/pac2002-vs-mf52.md`):
+
+| Form | PAC2002 | MF 5.2 |
+|------|---------|--------|
+| `trail_cosine` | `COS_ALPHA`: cos(alpha) | `COS_PRIME`: cos'(alpha) = Vx/(Vc + eps) |
+| `combined` | `COSINE`, or `FRICTION_ELLIPSE` when the file has no R* keys (chosen by the loader) | `COSINE` |
+| `fy_prime` | `SVYK`: F'y = Fy - SVyk | `SVYK0`: F'y = Fy - SVyk0 (mu_y at zero camber) |
+| `rolling_resistance` | `QSY`, or `SHIFTS` iff FITTYP is 5 and QSY1 = QSY2 = 0 | `QSY` |
+| Vx domain | Vx >= 0 | Vx > 0 |
+| `create` | takes the `combined_method` | forces LGAX = LGAY = LGAZ = 1 |
+
+## Lanes and performance
+
+The kernels are templates over a lane type, defined in headers (`detail/lanes.hpp`, `detail/mf5x_kernels.hpp`) and instantiated on two lanes:
+
+- `detail::point_lane`: a 1x1 array. Scalar code with the libm functions; it is the reference the batch path is compared against (1e-12 scaled relative tolerance).
+- `detail::block_lane`: a column of up to `BLOCK_ROWS` = 32 points with a fixed maximum size, so it lives on the stack and `compute_batch` never allocates. It is the SIMD path.
+
+`compute_batch` walks the rows in blocks of `BLOCK_ROWS`. Each input and output column of a block is a structure-of-arrays lane, so the arithmetic runs on contiguous data. Eigen 5.0.1 vectorises these functions for double: `atan`, `exp`, and `sin` / `cos` (the latter two with `EIGEN_FAST_MATH`). `tan` and `hypot` stay scalar (element-wise loops). A batch result therefore differs from the per-point result by a few ULP; the tests compare them at a 1e-12 scaled relative tolerance and the CLI reference outputs at their printed precision. Consumers that instantiate the kernels must compile with the same SIMD flags as `mflib`.
 
 ## Loading a `.tir` file
 
-`io::load_tire_model` (`include/magic_formula/io/model_loader.hpp`) is the factory. In order: `check_units` (SI only) -> `identify_model` (routing) -> bind the coefficient keys of `mf5x_common_bindings()` (plus the camber factors for PAC2002) with their `binding_role` (REQUIRED, SCALING, COEFFICIENT, COMBINED) -> R* rule -> LONGVL -> VXLOW and the four ranges -> `[MODEL]` metadata -> MF 5.2 dimension keys -> `pac2002_model::create` or `mf52_model::create` -> warnings. The result is a `loaded_model`: `std::unique_ptr<const tire_model>`, warnings as data, and the ignored keys.
+`io::load_tire_model` (`include/magic_formula/io/model_loader.hpp`) is the factory. In order: `check_units` (SI only) -> `identify_model` (routing) -> bind the coefficient keys of `mf5x_common_bindings()` (plus the camber factors for PAC2002) with their `binding_role` (REQUIRED, SCALING, COEFFICIENT, COMBINED) -> R* rule -> LONGVL -> the limits vector in the index order of `mf5x::LIMITS` (FZ, KPU, ALP, CAM ranges, then VXLOW) -> `[MODEL]` metadata -> MF 5.2 dimension keys -> `pac2002_model::create` or `mf52_model::create` with the `model_options` -> warnings. The result is a `loaded_model`: `std::unique_ptr<const tire_model>`, warnings as data, and the ignored keys.
 
 Routing (`io::identify_model`) maps PROPERTY_FILE_FORMAT and FITTYP to `io::model_kind` (`PAC2002`, `MF52`); see `research/model-routing.md` for the table.
 
 ## CLI flow
 
-`mf::cli::run` parses the command line, loads the `.tir` file, reads the input table (`io::read_input_table`, units converted to SI once), evaluates every row, and only then writes the CSV (`io::write_results`). Diagnostics go to `err`, results to `out`; the P column is read and ignored with one warning. Exit codes 0 / 1 / 2.
+`mf::cli::run`:
 
-## Error model
+1. parses the command line;
+2. loads the `.tir` file unchecked (`throw_if_model_failure` off);
+3. `io::read_model_inputs`: reads the table (units converted to SI once) and arranges its columns in the model's `input_index` order; a table column that the model has no input for (P for MF 5.x) goes to `ignored_columns`;
+4. `checked_evaluate_batch`: input validation, the batch evaluation and the output check, on the whole table;
+5. diagnostics on `err`: load warnings, `--verbose` information, one warning per ignored column, then one warning per flag output that is set (first table line and row count);
+6. `io::write_results`: the 15-column CSV on `out`.
 
-- Recoverable problems are values: `std::expected<T, mf::error>`. `mf::error` = `error_code` + message + `location` (file, 1-based line, key). Codes: `IO`, `SYNTAX`, `INVALID_NUMBER`, `DUPLICATE_KEY`, `MISSING_KEY`, `INVALID_VALUE`, `UNSUPPORTED_UNIT`, `UNSUPPORTED_MODEL`, `NOT_IMPLEMENTED`, `INVALID_INPUT`, `NUMERICAL`.
-- Warnings are data (`mf::warning`), returned by the loader; the library never prints. The CLI prints them as `mf: warning: ...`.
-- Kernels and `compute` are total and `noexcept`; bad numerics surface through the finite check in `evaluate`.
-- Exceptions are only for resource exhaustion and stream failures; `mf::cli::run` is the single place that catches them.
+Output is all-or-nothing: nothing reaches stdout unless every row evaluated successfully. Exit codes 0 / 1 / 2.
 
 ## Extending to MF 6.x
 
-MF 6.0 / 6.1 / 6.2 (FITTYP 60 / 61 / 62) are currently rejected with `UNSUPPORTED_MODEL` (`model-routing.md`, routing table row "any / 60, 61, 62, 70"). Adding one of them touches these places and nothing in the pipeline of `tire_model::evaluate`:
+MF 6.0 / 6.1 / 6.2 (FITTYP 60 / 61 / 62) are currently rejected with `UNSUPPORTED_MODEL` (`model-routing.md`, routing table row "any / 60, 61, 62, 70"). Thanks to the index-mapped interface, adding one touches the layout, one model class, the bindings and the routing. `tire_model`, the checks, the CLI column mapping and the result writer need no change.
 
-1. **Research first (rule 4 in `CLAUDE.md`).** Have the researcher add a cited note (for example `docs/research/mf61.md`) with the equations, the coefficient list, and a row-by-row difference table against MF 5.2, in the style of `pac2002-vs-mf52.md`. Record new project rules (items where the sources are silent) in `policies.md`. Primary sources for 6.x are not in the repository yet, so the provenance of every equation must be stated.
-2. **Coefficients.** MF 6.1 has many more coefficients than the 117 of `mf5x_coefficients`. Add a new struct (for example `mf61_coefficients` plus `mf61_parameters`) in its own header instead of growing `mf5x_coefficients`; add its `validate_coefficients`-style checks (the required-key and value-check pattern of `mf5x_coefficients`: values the equations divide by). `operating_limits` and `model_metadata` are reused as they are. 6.x adds the pressure range (`PRESMIN`/`PRESMAX`), so `operating_limits` gets a pressure interval and a clamp flag for it.
-3. **Model class.** Add `mf61_model final : public tire_model` (or a new abstract `mf6x_model` if 6.0, 6.1 and 6.2 share an evaluation order). Implement the private `compute` hook (called with validated, clamped inputs and Fz > 0) and `name()`; add a static `create` returning `std::expected<mf61_model, error>`. Reuse the kernels in `mf::detail` where the equations are unchanged, and add new kernels next to them. New kernels that compute one Magic Formula quantity are named after its symbol (cpp-conventions). If the model derives from `mf5x_model` instead, it can only override the existing hooks; that is the case only if the 6.x equations are expressed as differences from MF 5.2. `mf5x_model::compute` is final.
-4. **Pressure input.** Pressure is not an input today: `operating_point` has no pressure field and the CLI ignores the P column. Add `pressure_pa` to `operating_point`, extend `tire_model::validate_input` (finite check) and the field table, and give `io::input_row` and the CLI an effective P column (the parser already reads it into `input_row` and sets `input_table::has_pressure`). Models that have no pressure input must keep ignoring it; the CLI warning is then limited to those models. Revisit the rule that pressure is not an input.
-5. **Binding table.** Add a binding table in `io/` next to `mf5x_bindings` (for example `mf61_bindings.hpp/.cpp`) with the key, the member pointer and the `binding_role` for every key. The loader's binding step is table-driven, so it should only need to select the table by `model_kind`. Give 6.x its own "foreign keys" list if needed (compare `mf52_foreign_keys()`).
-6. **Routing.** Add `MF61` (and `MF60`, `MF62` as they are implemented) to `io::model_kind`. In `identify_model`, remove the FITTYP rows 60 / 61 / 62 from the rule that returns "not implemented" (rule 3 in `model_routing.hpp`) and route them to the new kinds. FITTYP 70 (6.2 plus temperature and velocity) stays unsupported until the T&V model exists. Keep the order of the rules: an unknown PFF first, a non-integer FITTYP second. Update `model-routing.md`, the routing-order rule in `research/policies.md` section 3 and the README "Models" section in the same PR. Add the new kind to the model-creation step of `model_loader.cpp`, which today chooses between `create_pac2002` and `create_mf52` from `kind`.
-7. **Tests to add.** Following the rules of this repository (100% line and branch on core, nothing skipped):
-   - unit tests for each new kernel and for the coefficient validation (every branch);
-   - unit tests for the new model with reference vectors whose origin is noted in `tests/data/` and `docs/research/test-data.md` (no licensed vendor data, see `policies.md` section 6);
-   - the pipeline tests that already exist for `tire_model` (flags, Fz <= 0, clamping, finite check) instantiated for the new model;
-   - routing tests: FITTYP 61 (and 60, 62) now route to the new model, FITTYP 70 still gives `UNSUPPORTED_MODEL`, PROPERTY_FILE_FORMAT precedence is unchanged;
-   - loader tests for the binding table (required, defaulted, foreign keys) and for the pressure range;
+1. **Research first (rule 4 in `CLAUDE.md`).** Have the researcher add a cited note (for example `docs/research/mf61.md`) with the equations, the coefficient list, and a row-by-row difference table against MF 5.2, in the style of `pac2002-vs-mf52.md`. Record new project rules in `policies.md`. Primary sources for 6.x are not in the repository yet, so the provenance of every equation must be stated.
+2. **Layout namespace.** Add `mf::mf6x` (`mf6x_layout.hpp`) next to `mf::mf5x` with its own unscoped `input_index`, `output_index` and `limit_index` enums and the matching channel tables. The inputs append P (pressure) as input 5 after FZ, SA, SR, IA, VX; the limits add PRESMIN / PRESMAX (a LOWER / UPPER pair); the outputs add a P_CLAMPED flag. Enumerator names stay unique within the namespace.
+3. **Coefficients.** MF 6.1 has many more coefficients than the 117 of `mf5x_coefficients`. Add a new struct (for example `mf61_coefficients` plus `mf61_parameters`) in its own header, with `validate_coefficients`-style checks (required keys, values the equations divide by). `model_metadata` and the limits machinery are reused.
+4. **Model class.** Add `mf61_model final : public tire_model` (or an abstract `mf6x_model` if 6.0, 6.1 and 6.2 share an evaluation order). Implement `name`, `input_length`, `output_length`, `layout`, and the private `compute` and `compute_batch` with lane-templated kernels instantiated on `point_lane` and `block_lane`, reusing the `detail/lanes.hpp` primitives (`clamp_to_limits`, `sgn_plus`, `add_epsilon`, `to_flag`). Pass `INPUT_LENGTH` and `OUTPUT_LENGTH` to the protected `tire_model` constructor; they must equal `input_length()`, `output_length()` and the sizes of the layout (`model_contract_test` checks this). Add a static `create` returning `std::expected`. Reuse the existing kernels where the equations are unchanged. New kernels that compute one Magic Formula quantity are named after its symbol (cpp-conventions).
+5. **CLI wording.** Add a flag wording row for P_CLAMPED to the CLI's flag-warning table. The column mapping and the writer follow the layout automatically, and the "column P is ignored" warning disappears for models whose layout has a P input.
+6. **Binding table.** Add a binding table in `io/` next to `mf5x_bindings` (for example `mf61_bindings.hpp/.cpp`) with the key, the member pointer and the `binding_role` for every key, and a "foreign keys" list if needed (compare `mf52_foreign_keys()`).
+7. **Routing.** Add `MF61` (and `MF60`, `MF62` as they are implemented) to `io::model_kind`, remove FITTYP 60 / 61 / 62 from the "not implemented" rule in `io::model_routing`, and add the new kind to the model-creation step of `model_loader.cpp`. FITTYP 70 stays unsupported until the temperature-and-velocity model exists. Keep the rule order: an unknown PFF first, a non-integer FITTYP second. Update `model-routing.md`, the routing-order rule in `research/policies.md` section 3 and the README "Models" section in the same PR.
+8. **Open items (to be resolved by research before implementation).** The pressure unit and name (the input table reads `P` in Pa today), whether and how pressure is clamped to PRESMIN / PRESMAX, and the value to use when the table has no P column.
+9. **Tests to add.** 100% line and branch on core, nothing skipped:
+   - unit tests for each new kernel and for the coefficient validation (every branch), on both lane types, with every `select` predicate driven both ways;
+   - the batch-vs-point agreement test at the 1e-12 scaled tolerance, and the pipeline tests (flags, Fz <= 0, clamping, finite checks) for the new model;
+   - layout tests (enum positions match the channel tables), routing tests (FITTYP 61 routes to the new model, 70 still gives `UNSUPPORTED_MODEL`), loader tests for the binding table and the pressure range;
    - a module test and a CLI test with a 6.x `.tir` file and a P column that is used; update the existing test that expects 6.x to be rejected.
-8. **Docs.** Update this file, `CLAUDE.md` and the README "Models" section in the same PR.
+10. **Docs.** Update this file, `CLAUDE.md` and the README "Models" section in the same PR.

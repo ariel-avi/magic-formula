@@ -9,8 +9,18 @@ class MagicFormulaConan(ConanFile):
 
     settings = "os", "arch", "compiler", "build_type"
 
+    # "auto" = Google Benchmark for Release only; True/False force it on/off for any build type.
+    options = {"with_benchmark": ["auto", True, False]}
+    default_options = {"with_benchmark": "auto"}
+
+    def requirements(self):
+        self.requires("eigen/5.0.1")
+
     def build_requirements(self):
         self.test_requires("gtest/1.17.0")
+        want = str(self.options.with_benchmark)
+        if want == "True" or (want == "auto" and str(self.settings.build_type) == "Release"):
+            self.test_requires("benchmark/1.9.5")
 
     def layout(self):
         # build/conan/<build_type>/conan_toolchain.cmake, referenced by CMakePresets.json

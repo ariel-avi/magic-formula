@@ -26,6 +26,7 @@ endif ()
 option(MF_BUILD_TESTS "Build the unit and module tests" ON)
 option(MF_ENABLE_COVERAGE "Instrument project targets for gcov coverage and add the 'coverage' target" OFF)
 option(MF_WARNINGS_AS_ERRORS "Treat compiler warnings as errors on project targets" ON)
+option(MF_BUILD_BENCH "Build the Google Benchmark executable mf_bench from bench/ (not a CTest test, not coverage-gated)" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(ClangFormat)
@@ -33,12 +34,16 @@ include(ClangTidy)
 include(Coverage)
 include(MfCompileOptions)
 
+# Eigen (header-only, from Conan): vectorised model evaluation; a PUBLIC usage requirement of mflib.
+find_package(Eigen3 CONFIG REQUIRED)
+
 # Library: every src/**/*.cpp except the CLI under src/app/.
 file(GLOB_RECURSE MF_LIB_SOURCES CONFIGURE_DEPENDS RELATIVE "${PROJECT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/src/*.cpp")
 list(FILTER MF_LIB_SOURCES EXCLUDE REGEX "^src/app/")
 add_library(mflib STATIC ${MF_LIB_SOURCES})
 add_library(mf::mflib ALIAS mflib)
 target_include_directories(mflib PUBLIC "${PROJECT_SOURCE_DIR}/include")
+target_link_libraries(mflib PUBLIC Eigen3::Eigen)
 target_compile_definitions(mflib PRIVATE "MF_VERSION_STRING=\"${PROJECT_VERSION}\"")
 mf_configure_target(mflib)
 
@@ -53,7 +58,8 @@ mf_configure_target(mf)
 file(GLOB_RECURSE MF_FORMAT_FILES CONFIGURE_DEPENDS
         "${PROJECT_SOURCE_DIR}/include/*.hpp"
         "${PROJECT_SOURCE_DIR}/src/*.hpp" "${PROJECT_SOURCE_DIR}/src/*.cpp"
-        "${PROJECT_SOURCE_DIR}/tests/*.hpp" "${PROJECT_SOURCE_DIR}/tests/*.cpp")
+        "${PROJECT_SOURCE_DIR}/tests/*.hpp" "${PROJECT_SOURCE_DIR}/tests/*.cpp"
+        "${PROJECT_SOURCE_DIR}/bench/*.hpp" "${PROJECT_SOURCE_DIR}/bench/*.cpp")
 add_clang_format_for(magic_formula FILES ${MF_FORMAT_FILES})
 add_clang_tidy_for(mflib)
 add_clang_tidy_for(mf)
@@ -61,6 +67,11 @@ add_clang_tidy_for(mf)
 if (MF_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif ()
+
+# Google Benchmark (bench/mf_bench): ON in the release preset; never a CTest test and never coverage-gated.
+if (MF_BUILD_BENCH)
+    add_subdirectory(bench)
 endif ()
 
 if (MF_ENABLE_COVERAGE)

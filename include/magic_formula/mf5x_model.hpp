@@ -1,52 +1,68 @@
 #pragma once
 
+#include <Eigen/Core>
 #include <expected>
-#include <magic_formula/detail/mf5x_kernels.hpp>
 #include <magic_formula/error.hpp>
 #include <magic_formula/evaluation_types.hpp>
 #include <magic_formula/mf5x_coefficients.hpp>
+#include <magic_formula/mf5x_forms.hpp>
+#include <magic_formula/mf5x_layout.hpp>
 #include <magic_formula/tire_model.hpp>
 
 namespace mf {
   /// Abstract MF 5.x-family formulation: the shared steady-state evaluation order of PAC2002 and MF 5.2, built from
-  /// the kernels of `mf::detail`. The evaluation order is fixed (`compute` is final); the protected hooks sit at
-  /// exactly the PAC2002 / MF 5.2 differences. Equations: docs/research/pac2002-vs-mf52.md.
+  /// the kernels of `mf::detail`. The evaluation order is fixed (`compute` and `compute_batch` are final); the
+  /// PAC2002 / MF 5.2 differences are the closed set of `mf5x_forms` chosen at construction. Equations:
+  /// docs/research/pac2002-vs-mf52.md.
+  ///
+  /// The vectors are indexed by the unscoped enums of `mf::mf5x`, exposed here as class aliases. Because the enums
+  /// are unscoped (`enum : std::uint8_t`), an enumerator is a position: `output(output_index::FX)`.
+  ///
+  /// Each point is conditioned without branches: Vx < VXLOW sets the BELOW_VXLOW flag (Vx is never modified); Fz, SR,
+  /// SA and IA are clamped to their limits (an infinite bound never moves a value) and the flags FZ_CLAMPED,
+  /// SR_CLAMPED, SA_CLAMPED and IA_CLAMPED hold 1.0 where a value moved; a point whose raw or clamped Fz is <= 0
+  /// has exactly zero forces and moments, and its clamp flags are 0.0 when its raw Fz was <= 0. The evaluation runs
+  /// on blocks of points with vectorised math and allocates nothing.
   class mf5x_model : public tire_model {
   public:
+    /// Positions of the input vector (aliases of `mf5x::input_index`).
+    using input_index = mf5x::input_index;
+    /// Positions of the output vector (aliases of `mf5x::output_index`).
+    using output_index = mf5x::output_index;
+    /// Positions of the limits vector (aliases of `mf5x::limit_index`).
+    using limit_index = mf5x::limit_index;
+
+    /// `mf5x::INPUT_LENGTH`.
+    [[nodiscard]] int input_length() const noexcept final;
+
+    /// `mf5x::OUTPUT_LENGTH`.
+    [[nodiscard]] int output_length() const noexcept final;
+
     /// The coefficient set this model was built from.
     [[nodiscard]] const mf5x_coefficients &coefficients() const noexcept;
 
-  protected:
-    /// Stores the coefficients, the limits and the metadata. `parameters` has already passed `validate_parameters`.
-    explicit mf5x_model(const mf5x_parameters &parameters);
+    /// The formulation forms this model was built with.
+    [[nodiscard]] const mf5x_forms &forms() const noexcept;
 
-    /// `validate_coefficients` followed by `validate_limits`. The first error is returned unchanged,
-    /// including its `where.key`. Used by the `create` functions of the derived classes.
+  protected:
+    /// Stores the coefficients, the forms, the limits, the metadata and the options. `parameters` has already passed
+    /// `validate_parameters`.
+    mf5x_model(const mf5x_parameters &parameters, const mf5x_forms &forms, const model_options &options);
+
+    /// `validate_coefficients` followed by `validate_limits(parameters.limits, mf5x::LIMITS)`. The first error is
+    /// returned unchanged, including its `where.key`. Used by the `create` functions of the derived classes.
     [[nodiscard]] static std::expected<void, error> validate_parameters(const mf5x_parameters &parameters);
 
-    /// Cosine factor of the pneumatic trail t: cos(alpha) for PAC2002, cos'(alpha) for MF 5.2.
-    [[nodiscard]] virtual double trail_cosine(const operating_point &point) const noexcept = 0;
-
-    /// Combined forces Fx and Fy (and the SVyk contained in Fy). Default: the cosine method
-    /// (`detail::cosine_combined_forces`), also the MF 5.2 form.
-    [[nodiscard]] virtual detail::combined_forces combine(const operating_point &point,
-                                                          const detail::slip_state &state) const noexcept;
-
-    /// F'y, the force that multiplies the trail in Mz. Default: Fy - SVyk (zero SVyk for the friction ellipse).
-    [[nodiscard]] virtual double fy_prime(const operating_point &point, const detail::slip_state &state,
-                                          const detail::combined_forces &forces) const noexcept;
-
-    /// Output rolling-resistance moment My. Default: `detail::my`, also the MF 5.2 form. `fx_n` is the Fx of the
-    /// evaluated mode.
-    [[nodiscard]] virtual double my(const operating_point &point, const detail::slip_state &state,
-                                    double fx_n) const noexcept;
-
   private:
-    /// Evaluation order: pure-slip terms first, then, for the combined mode, `combine`, the equivalent slip angles,
-    /// Mz with the moment arm of Fx, then Mx and My. Uncombined mode: Fx0, Fy0 and Mz0 = -t(alpha_t)*Fy0 +
-    /// Mzr(alpha_r).
-    [[nodiscard]] tire_outputs compute(const operating_point &point, slip_mode mode) const noexcept final;
+    /// Runs `detail::mf5x_pipeline` on one-point lanes.
+    void compute(const Eigen::Ref<const Eigen::VectorXd> &input,
+                 Eigen::Ref<Eigen::VectorXd> output) const noexcept final;
+
+    /// Runs `detail::mf5x_pipeline` on blocks of `detail::BLOCK_ROWS` points.
+    void compute_batch(const Eigen::Ref<const Eigen::MatrixXd> &inputs,
+                       Eigen::Ref<Eigen::MatrixXd> outputs) const noexcept final;
 
     mf5x_coefficients coefficients_;
+    mf5x_forms forms_;
   };
 } // namespace mf

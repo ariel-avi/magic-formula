@@ -1,74 +1,36 @@
-#include <array>
-#include <cmath>
-#include <cstddef>
+#include <Eigen/Core>
 #include <expected>
-#include <format>
+#include <magic_formula/error.hpp>
+#include <magic_formula/evaluation_types.hpp>
+#include <magic_formula/model_checks.hpp>
+#include <magic_formula/model_layout.hpp>
 #include <magic_formula/tire_model.hpp>
 #include <optional>
-#include <span>
-#include <string>
-#include <string_view>
 #include <utility>
-#include <vector>
 
 namespace mf {
   namespace {
-    /// One validity range: the .tir keys of its bounds and the member of `operating_limits` that holds it.
-    struct limit_entry {
-      std::string_view min_key;
-      std::string_view max_key;
-      std::optional<interval> operating_limits::*member;
-    };
-
-    constexpr std::array<limit_entry, 4> LIMIT_TABLE{{
-        {.min_key = "FZMIN", .max_key = "FZMAX", .member = &operating_limits::fz_n},
-        {.min_key = "KPUMIN", .max_key = "KPUMAX", .member = &operating_limits::kappa},
-        {.min_key = "ALPMIN", .max_key = "ALPMAX", .member = &operating_limits::alpha_rad},
-        {.min_key = "CAMMIN", .max_key = "CAMMAX", .member = &operating_limits::gamma_rad},
-    }};
-
-    /// Clamps `value` to `range` when the range exists. A value that is outside the range sets `flag`;
-    /// exact limit values are not flagged. Total function: no precondition.
-    double clamp_input(double value, const std::optional<interval> &range, bool &flag) noexcept {
-      if (!range.has_value()) {
-        return value;
+    /// Throws `model_failure` for a failed one-point check.
+    void require(const std::expected<void, error> &result) {
+      if (!result.has_value()) {
+        throw model_failure(result.error(), std::nullopt);
       }
-      if (value < range->lower) {
-        flag = true;
-        return range->lower;
-      }
-      if (value > range->upper) {
-        flag = true;
-        return range->upper;
-      }
-      return value;
     }
 
-    /// Location that names only a key. Built through a named local and a move so that the `make_error` call sites
-    /// carry no exception-cleanup branches of their own.
-    location key_location(std::string_view key) {
-      std::string text(key);
-      return location{.file = {}, .line = 0, .key = std::move(text)};
+    /// Throws `model_failure` carrying the row of a failed batch check.
+    void require(const std::expected<void, batch_error> &result) {
+      if (!result.has_value()) {
+        throw model_failure(result.error().cause, result.error().index);
+      }
     }
   } // namespace
 
-  std::expected<void, error> validate_limits(const operating_limits &limits) {
-    for (const limit_entry &entry : LIMIT_TABLE) {
-      const std::optional<interval> &range = limits.*(entry.member);
-      if (range.has_value() && range->lower > range->upper) {
-        return make_error(error_code::INVALID_VALUE,
-                          std::format("{} {} > {} {}: lower limit above upper limit", entry.min_key, range->lower,
-                                      entry.max_key, range->upper),
-                          key_location(entry.min_key));
-      }
-    }
-    return {};
-  }
+  tire_model::tire_model(int input_len, int output_len, Eigen::VectorXd limits, const model_metadata &metadata,
+                         const model_options &options)
+      : input_length_(input_len), output_length_(output_len), limits_(std::move(limits)), metadata_(metadata),
+        options_(options) {}
 
-  tire_model::tire_model(const operating_limits &limits, const model_metadata &metadata)
-      : limits_(limits), metadata_(metadata) {}
-
-  const operating_limits &tire_model::limits() const noexcept {
+  const Eigen::VectorXd &tire_model::limits() const noexcept {
     return limits_;
   }
 
@@ -76,83 +38,62 @@ namespace mf {
     return metadata_;
   }
 
-  std::expected<void, error> tire_model::validate_input(const operating_point &point) const {
-    const std::array<std::pair<std::string_view, double>, 5> fields{{
-        {"FZ", point.fz_n},
-        {"SR", point.kappa},
-        {"SA", point.alpha_rad},
-        {"IA", point.gamma_rad},
-        {"VX", point.vx_mps},
-    }};
-    for (const auto &[key, value] : fields) {
-      if (!std::isfinite(value)) {
-        return make_error(error_code::INVALID_INPUT, std::format("{} is not finite ({})", key, value),
-                          key_location(key));
-      }
-    }
-    if (point.vx_mps < 0.0) {
-      return make_error(error_code::INVALID_INPUT,
-                        std::format("Vx = {} m/s is negative; reverse driving is not supported", point.vx_mps),
-                        key_location("VX"));
-    }
-    return {};
+  const model_options &tire_model::options() const noexcept {
+    return options_;
   }
 
-  std::expected<tire_outputs, error> tire_model::evaluate(const operating_point &point, slip_mode mode) const {
-    if (const std::expected<void, error> valid = validate_input(point); !valid.has_value()) {
-      return std::unexpected<error>(valid.error());
+  // NOLINTBEGIN(performance-unnecessary-value-param): a writable Eigen::Ref is taken by value so that it binds Map
+  // temporaries (the Eigen idiom); a const reference to it would not bind the writable hook parameter.
+  void tire_model::evaluate_into(const Eigen::Ref<const Eigen::VectorXd> &input,
+                                 Eigen::Ref<Eigen::VectorXd> output) const {
+    if (options_.throw_if_model_failure) {
+      require(validate_input(*this, input));
     }
-
-    input_flags flags{};
-    flags.below_vxlow = point.vx_mps < limits_.vxlow_mps;
-
-    // Decided on the raw Fz, before clamping; -0.0 is included.
-    if (point.fz_n <= 0.0) {
-      return tire_outputs{.flags = flags};
+    compute(input, output);
+    if (options_.throw_if_model_failure) {
+      require(check_output(*this, output));
     }
-
-    operating_point clamped = point;
-    clamped.fz_n = clamp_input(point.fz_n, limits_.fz_n, flags.fz_clamped);
-    clamped.kappa = clamp_input(point.kappa, limits_.kappa, flags.kappa_clamped);
-    clamped.alpha_rad = clamp_input(point.alpha_rad, limits_.alpha_rad, flags.alpha_clamped);
-    clamped.gamma_rad = clamp_input(point.gamma_rad, limits_.gamma_rad, flags.gamma_clamped);
-
-    // A validated Fz interval may still end at or below zero; the hook contract (Fz > 0) then gives zero outputs.
-    if (clamped.fz_n <= 0.0) {
-      return tire_outputs{.flags = flags};
-    }
-
-    tire_outputs out = compute(clamped, mode);
-    out.flags = flags;
-
-    // A non-finite result is an error, never a printed value.
-    const std::array<std::pair<std::string_view, double>, 5> results{{
-        {"FX", out.fx_n},
-        {"FY", out.fy_n},
-        {"MZ", out.mz_nm},
-        {"MX", out.mx_nm},
-        {"MY", out.my_nm},
-    }};
-    for (const auto &[key, value] : results) {
-      if (!std::isfinite(value)) {
-        return make_error(error_code::NUMERICAL, std::format("non-finite {} output ({})", key, value),
-                          key_location(key));
-      }
-    }
-    return out;
   }
 
-  std::expected<std::vector<tire_outputs>, batch_error>
-  tire_model::evaluate_batch(std::span<const operating_point> points, slip_mode mode) const {
-    std::vector<tire_outputs> results;
-    results.reserve(points.size());
-    for (std::size_t index = 0; index < points.size(); ++index) {
-      std::expected<tire_outputs, error> evaluated = evaluate(points[index], mode);
-      if (!evaluated.has_value()) {
-        return std::unexpected<batch_error>(batch_error{.index = index, .cause = std::move(evaluated.error())});
-      }
-      results.push_back(*evaluated);
+  void tire_model::evaluate_batch_into(const Eigen::Ref<const Eigen::MatrixXd> &inputs,
+                                       Eigen::Ref<Eigen::MatrixXd> outputs) const {
+    if (options_.throw_if_model_failure) {
+      require(validate_inputs(*this, inputs));
     }
-    return results;
+    compute_batch(inputs, outputs);
+    if (options_.throw_if_model_failure) {
+      require(check_outputs(*this, outputs));
+    }
+  }
+  // NOLINTEND(performance-unnecessary-value-param)
+
+  Eigen::VectorXd tire_model::evaluate(const Eigen::Ref<const Eigen::VectorXd> &input) const {
+    Eigen::VectorXd output(static_cast<Eigen::Index>(output_length_));
+    evaluate_into(input, output);
+    return output;
+  }
+
+  void tire_model::evaluate(const double *input, int input_len, double *data, int len) const {
+    if (options_.throw_if_model_failure) {
+      require(check_buffers(*this, input, input_len, data, len));
+    }
+    const Eigen::Map<const Eigen::VectorXd> in(input, input_length_);
+    Eigen::Map<Eigen::VectorXd> out(data, output_length_);
+    evaluate_into(in, out);
+  }
+
+  Eigen::MatrixXd tire_model::evaluate_batch(const Eigen::Ref<const Eigen::MatrixXd> &inputs) const {
+    Eigen::MatrixXd outputs(inputs.rows(), static_cast<Eigen::Index>(output_length_));
+    evaluate_batch_into(inputs, outputs);
+    return outputs;
+  }
+
+  void tire_model::evaluate_batch(const double *inputs, int rows, double *data, int len) const {
+    if (options_.throw_if_model_failure) {
+      require(check_batch_buffers(*this, inputs, rows, data, len));
+    }
+    const Eigen::Map<const Eigen::MatrixXd> in(inputs, rows, input_length_);
+    Eigen::Map<Eigen::MatrixXd> out(data, rows, output_length_);
+    evaluate_batch_into(in, out);
   }
 } // namespace mf

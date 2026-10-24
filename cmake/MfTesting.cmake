@@ -16,6 +16,7 @@ function(mf_add_test TEST_SOURCE LABEL)
     mf_configure_target(${_name})
     # DISCOVERY_TIMEOUT: the default 5 s is too short on Windows, where real-time AV scanning delays the first launch of
     # every freshly linked test executable (POST_BUILD discovery runs it).
-    gtest_discover_tests(${_name} DISCOVERY_TIMEOUT 60 PROPERTIES LABELS "${LABEL}")
+    set(_props LABELS "${LABEL}")
+    gtest_discover_tests(${_name} DISCOVERY_TIMEOUT 60 PROPERTIES ${_props})
     set_property(GLOBAL APPEND PROPERTY MF_TEST_TARGETS ${_name})
 endfunction()

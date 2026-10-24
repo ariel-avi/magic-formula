@@ -1,5 +1,6 @@
 #include "../support/fixtures.hpp"
 
+#include <Eigen/Core>
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -15,6 +16,7 @@
 #include <magic_formula/io/text_file.hpp>
 #include <magic_formula/io/tir_document.hpp>
 #include <magic_formula/mf5x_coefficients.hpp>
+#include <magic_formula/mf5x_layout.hpp>
 #include <magic_formula/mf5x_model.hpp>
 #include <magic_formula/pac2002_model.hpp>
 #include <optional>
@@ -90,6 +92,55 @@ namespace {
                   .expected = 0.0},
   };
   // clang-format on
+
+  /// One LOWER/UPPER pair of the limits vector and the .tir section that holds it.
+  struct limit_pair {
+    /// Section header line.
+    std::string_view section;
+    /// Key of the lower bound.
+    std::string_view lower_key;
+    /// Key of the upper bound.
+    std::string_view upper_key;
+    /// Position of the lower bound in the limits vector.
+    Eigen::Index lower_index;
+    /// Position of the upper bound in the limits vector.
+    Eigen::Index upper_index;
+    /// A lower bound that is valid below `upper_value`.
+    double lower_value;
+    /// An upper bound above `lower_value`.
+    double upper_value;
+  };
+
+  constexpr std::array<limit_pair, 4> LIMIT_PAIRS{
+      limit_pair{.section = "[VERTICAL_FORCE_RANGE]",
+                 .lower_key = "FZMIN",
+                 .upper_key = "FZMAX",
+                 .lower_index = mf::mf5x::FZMIN,
+                 .upper_index = mf::mf5x::FZMAX,
+                 .lower_value = 200.0,
+                 .upper_value = 10000.0},
+      limit_pair{.section = "[LONG_SLIP_RANGE]",
+                 .lower_key = "KPUMIN",
+                 .upper_key = "KPUMAX",
+                 .lower_index = mf::mf5x::KPUMIN,
+                 .upper_index = mf::mf5x::KPUMAX,
+                 .lower_value = -0.5,
+                 .upper_value = 0.75},
+      limit_pair{.section = "[SLIP_ANGLE_RANGE]",
+                 .lower_key = "ALPMIN",
+                 .upper_key = "ALPMAX",
+                 .lower_index = mf::mf5x::ALPMIN,
+                 .upper_index = mf::mf5x::ALPMAX,
+                 .lower_value = -1.25,
+                 .upper_value = 1.5},
+      limit_pair{.section = "[INCLINATION_ANGLE_RANGE]",
+                 .lower_key = "CAMMIN",
+                 .upper_key = "CAMMAX",
+                 .lower_index = mf::mf5x::CAMMIN,
+                 .upper_index = mf::mf5x::CAMMAX,
+                 .lower_value = -0.2,
+                 .upper_value = 0.25},
+  };
 
   class model_loader_required : public ::testing::TestWithParam<std::string_view> {};
 
@@ -209,14 +260,14 @@ namespace {
     return text;
   }
 
-  /// Parses `text` under the name "variant.tir" and loads it. A parse failure is a test failure.
-  load_result load_text(std::string_view text) {
+  /// Parses `text` under the name "variant.tir" and loads it with `options`. A parse failure is a test failure.
+  load_result load_text(std::string_view text, const mf::model_options &options = {}) {
     const std::expected<tir_document, mf::error> document = tir_document::parse(text, std::string(VARIANT_NAME));
     if (!document.has_value()) {
       ADD_FAILURE() << mf::to_string(document.error());
       return mf::make_error(error_code::SYNTAX, "test variant does not parse");
     }
-    return load_tire_model(*document);
+    return load_tire_model(*document, options);
   }
 
   /// "loaded" or the error text, for assertion messages.
@@ -256,12 +307,30 @@ namespace {
     return dynamic_cast<const mf::pac2002_model *>(loaded.model.get());
   }
 
-  /// True when both intervals are absent, or both are present with bit-equal bounds.
-  bool same_interval(const std::optional<mf::interval> &actual, const std::optional<mf::interval> &expected) {
-    if (!actual.has_value() || !expected.has_value()) {
-      return actual.has_value() == expected.has_value();
+  /// Both vectors have the same size and bit-equal elements (infinities and signs match exactly).
+  void expect_same_limits(const Eigen::VectorXd &actual, const Eigen::VectorXd &expected) {
+    ASSERT_EQ(actual.size(), expected.size());
+    for (Eigen::Index i = 0; i < actual.size(); ++i) {
+      EXPECT_EQ(bits(actual(i)), bits(expected(i))) << "limit index " << i;
     }
-    return bits(actual->lower) == bits(expected->lower) && bits(actual->upper) == bits(expected->upper);
+  }
+
+  /// The pair at `lower_index` holds -inf and +inf (bit-equal).
+  void expect_pair_unbounded(const Eigen::VectorXd &limits, Eigen::Index lower_index) {
+    EXPECT_EQ(bits(limits(lower_index)), bits(-mf::mf5x::INF)) << "lower at " << lower_index;
+    EXPECT_EQ(bits(limits(lower_index + 1)), bits(mf::mf5x::INF)) << "upper at " << lower_index + 1;
+  }
+
+  /// Every pair of the limits vector is unbounded.
+  void expect_all_pairs_unbounded(const Eigen::VectorXd &limits) {
+    for (const limit_pair &pair : LIMIT_PAIRS) {
+      expect_pair_unbounded(limits, pair.lower_index);
+    }
+  }
+
+  /// Fixture S with the section of `pair` and the given key lines appended.
+  std::string with_range_lines(const limit_pair &pair, std::string_view lines) {
+    return append(s_text(), std::format("{}\n{}", pair.section, lines));
   }
 
   /// Checks code, key, line and file of an error.
@@ -338,12 +407,10 @@ TEST(model_loader, Load_FixtureS_Pac2002CosineNoWarnings) {
   EXPECT_EQ(metadata.use_mode, std::optional<int>{4});
   EXPECT_EQ(metadata.side, mf::tyre_side::LEFT);
 
-  const mf::operating_limits &limits = loaded->model->limits();
-  EXPECT_EQ(bits(limits.vxlow_mps), bits(1.0));
-  EXPECT_TRUE(same_interval(limits.fz_n, std::nullopt));
-  EXPECT_TRUE(same_interval(limits.kappa, std::nullopt));
-  EXPECT_TRUE(same_interval(limits.alpha_rad, std::nullopt));
-  EXPECT_TRUE(same_interval(limits.gamma_rad, std::nullopt));
+  const Eigen::VectorXd &limits = loaded->model->limits();
+  ASSERT_EQ(limits.size(), mf::mf5x::LIMITS_LENGTH);
+  EXPECT_EQ(bits(limits(mf::mf5x::VXLOW)), bits(1.0));
+  expect_all_pairs_unbounded(limits);
 
   const mf::pac2002_model *const pac2002 = pac2002_of(*loaded);
   ASSERT_NE(pac2002, nullptr);
@@ -629,11 +696,25 @@ TEST(model_loader, Load_LongvlBadNumber_ReturnsInvalidNumber) {
 TEST(model_loader, Load_Vxlow_DefaultAndExplicit) {
   const load_result absent = load_text(remove_key(s_text(), "VXLOW"));
   ASSERT_TRUE(absent.has_value()) << describe(absent);
-  EXPECT_EQ(bits(absent->model->limits().vxlow_mps), bits(1.0));
+  EXPECT_EQ(bits(absent->model->limits()(mf::mf5x::VXLOW)), bits(1.0));
 
   const load_result explicit_value = load_text(set_value(s_text(), "VXLOW", "2.5"));
   ASSERT_TRUE(explicit_value.has_value()) << describe(explicit_value);
-  EXPECT_EQ(bits(explicit_value->model->limits().vxlow_mps), bits(2.5));
+  EXPECT_EQ(bits(explicit_value->model->limits()(mf::mf5x::VXLOW)), bits(2.5));
+}
+
+TEST(model_loader, Vxlow_Absent_DefaultsToOne) {
+  const load_result loaded = load_text(remove_key(s_text(), "VXLOW"));
+  ASSERT_TRUE(loaded.has_value()) << describe(loaded);
+  EXPECT_EQ(bits(loaded->model->limits()(mf::mf5x::VXLOW)), bits(1.0));
+  EXPECT_TRUE(loaded->warnings.empty());
+}
+
+TEST(model_loader, Vxlow_Explicit_Stored) {
+  const load_result loaded = load_text(set_value(s_text(), "VXLOW", "3.25"));
+  ASSERT_TRUE(loaded.has_value()) << describe(loaded);
+  EXPECT_EQ(bits(loaded->model->limits()(mf::mf5x::VXLOW)), bits(3.25));
+  expect_all_pairs_unbounded(loaded->model->limits());
 }
 
 TEST(model_loader, Load_VxlowBadNumber_ReturnsInvalidNumber) {
@@ -646,13 +727,11 @@ TEST(model_loader, Load_VxlowBadNumber_ReturnsInvalidNumber) {
 TEST(model_loader, Load_Ranges_BothBoundsApplied) {
   const load_result loaded = load_tire_model_file(data_file("pac2002_S_rng.tir"));
   ASSERT_TRUE(loaded.has_value()) << describe(loaded);
-  const mf::operating_limits expected = mf::test::fixture_s_rng().limits;
-  const mf::operating_limits &limits = loaded->model->limits();
-  EXPECT_TRUE(same_interval(limits.fz_n, expected.fz_n));
-  EXPECT_TRUE(same_interval(limits.kappa, expected.kappa));
-  EXPECT_TRUE(same_interval(limits.alpha_rad, expected.alpha_rad));
-  EXPECT_TRUE(same_interval(limits.gamma_rad, expected.gamma_rad));
-  EXPECT_TRUE(limits.fz_n.has_value());
+  const Eigen::VectorXd expected = mf::test::fixture_s_rng().limits;
+  const Eigen::VectorXd &limits = loaded->model->limits();
+  expect_same_limits(limits, expected);
+  EXPECT_EQ(bits(limits(mf::mf5x::FZMIN)), bits(200.0));
+  EXPECT_EQ(bits(limits(mf::mf5x::FZMAX)), bits(10000.0));
   EXPECT_TRUE(loaded->warnings.empty());
 }
 
@@ -660,14 +739,14 @@ TEST(model_loader, Load_Ranges_SingleBound_WarnsNotApplied) {
   const std::string lower_only = append(s_text(), "[VERTICAL_FORCE_RANGE]\nFZMIN = 200\n");
   const load_result lower = load_text(lower_only);
   ASSERT_TRUE(lower.has_value()) << describe(lower);
-  EXPECT_FALSE(lower->model->limits().fz_n.has_value());
+  expect_pair_unbounded(lower->model->limits(), mf::mf5x::FZMIN);
   const std::size_t min_line = line_of(lower_only, "FZMIN");
   expect_single_warning(*lower, "only one of FZMIN/FZMAX given; the range is not applied", "FZMIN", min_line);
 
   const std::string upper_only = append(s_text(), "[VERTICAL_FORCE_RANGE]\nFZMAX = 10000\n");
   const load_result upper = load_text(upper_only);
   ASSERT_TRUE(upper.has_value()) << describe(upper);
-  EXPECT_FALSE(upper->model->limits().fz_n.has_value());
+  expect_pair_unbounded(upper->model->limits(), mf::mf5x::FZMIN);
   const std::size_t max_line = line_of(upper_only, "FZMAX");
   expect_single_warning(*upper, "only one of FZMIN/FZMAX given; the range is not applied", "FZMAX", max_line);
 }
@@ -676,12 +755,12 @@ TEST(model_loader, Load_Ranges_OtherRangesFillTheirOwnInterval) {
   const std::string text = append(s_text(), "[LONG_SLIP_RANGE]\nKPUMIN = -0.5\nKPUMAX = 0.75\n");
   const load_result loaded = load_text(text);
   ASSERT_TRUE(loaded.has_value()) << describe(loaded);
-  const mf::operating_limits &limits = loaded->model->limits();
-  const std::optional<mf::interval> expected = mf::interval{.lower = -0.5, .upper = 0.75};
-  EXPECT_TRUE(same_interval(limits.kappa, expected));
-  EXPECT_FALSE(limits.fz_n.has_value());
-  EXPECT_FALSE(limits.alpha_rad.has_value());
-  EXPECT_FALSE(limits.gamma_rad.has_value());
+  const Eigen::VectorXd &limits = loaded->model->limits();
+  EXPECT_EQ(bits(limits(mf::mf5x::KPUMIN)), bits(-0.5));
+  EXPECT_EQ(bits(limits(mf::mf5x::KPUMAX)), bits(0.75));
+  expect_pair_unbounded(limits, mf::mf5x::FZMIN);
+  expect_pair_unbounded(limits, mf::mf5x::ALPMIN);
+  expect_pair_unbounded(limits, mf::mf5x::CAMMIN);
   EXPECT_TRUE(loaded->warnings.empty());
 }
 
@@ -704,6 +783,105 @@ TEST(model_loader, Load_RangeUpperBadNumber_ReturnsInvalidNumber) {
   const load_result result = load_text(text);
   ASSERT_FALSE(result.has_value());
   expect_error(result, error_code::INVALID_NUMBER, "FZMAX", line_of(text, "FZMAX"));
+}
+
+TEST(model_loader, Limits_BothBoundsEachPair_Stored) {
+  for (const limit_pair &pair : LIMIT_PAIRS) {
+    const std::string lower_line = std::format("{} = {}\n", pair.lower_key, pair.lower_value);
+    const std::string upper_line = std::format("{} = {}\n", pair.upper_key, pair.upper_value);
+    const load_result loaded = load_text(with_range_lines(pair, lower_line + upper_line));
+    ASSERT_TRUE(loaded.has_value()) << pair.lower_key << ": " << describe(loaded);
+    const Eigen::VectorXd &limits = loaded->model->limits();
+    EXPECT_EQ(bits(limits(pair.lower_index)), bits(pair.lower_value)) << pair.lower_key;
+    EXPECT_EQ(bits(limits(pair.upper_index)), bits(pair.upper_value)) << pair.upper_key;
+    EXPECT_EQ(bits(limits(mf::mf5x::VXLOW)), bits(1.0)) << pair.lower_key;
+    for (const limit_pair &other : LIMIT_PAIRS) {
+      if (other.lower_index != pair.lower_index) {
+        expect_pair_unbounded(limits, other.lower_index);
+      }
+    }
+    EXPECT_TRUE(loaded->warnings.empty()) << pair.lower_key;
+  }
+}
+
+TEST(model_loader, Limits_OnlyLowerBound_WarningAndBothInfinite) {
+  for (const limit_pair &pair : LIMIT_PAIRS) {
+    const std::string text = with_range_lines(pair, std::format("{} = {}\n", pair.lower_key, pair.lower_value));
+    const load_result loaded = load_text(text);
+    ASSERT_TRUE(loaded.has_value()) << pair.lower_key << ": " << describe(loaded);
+    expect_all_pairs_unbounded(loaded->model->limits());
+    const std::string message =
+        std::format("only one of {}/{} given; the range is not applied", pair.lower_key, pair.upper_key);
+    expect_single_warning(*loaded, message, pair.lower_key, line_of(text, pair.lower_key));
+  }
+}
+
+TEST(model_loader, Limits_OnlyUpperBound_WarningAndBothInfinite) {
+  for (const limit_pair &pair : LIMIT_PAIRS) {
+    const std::string text = with_range_lines(pair, std::format("{} = {}\n", pair.upper_key, pair.upper_value));
+    const load_result loaded = load_text(text);
+    ASSERT_TRUE(loaded.has_value()) << pair.upper_key << ": " << describe(loaded);
+    expect_all_pairs_unbounded(loaded->model->limits());
+    const std::string message =
+        std::format("only one of {}/{} given; the range is not applied", pair.lower_key, pair.upper_key);
+    expect_single_warning(*loaded, message, pair.upper_key, line_of(text, pair.upper_key));
+  }
+}
+
+TEST(model_loader, Limits_NoRanges_AllInfinite) {
+  const load_result loaded = load_text(s_text());
+  ASSERT_TRUE(loaded.has_value()) << describe(loaded);
+  const Eigen::VectorXd &limits = loaded->model->limits();
+  ASSERT_EQ(limits.size(), mf::mf5x::LIMITS_LENGTH);
+  expect_all_pairs_unbounded(limits);
+  EXPECT_EQ(bits(limits(mf::mf5x::VXLOW)), bits(1.0));
+  EXPECT_TRUE(loaded->warnings.empty());
+}
+
+TEST(model_loader, Limits_InvalidFzminAndInvalidVxlow_ReportsFzminFirst) {
+  const std::string text = append(set_value(s_text(), "VXLOW", "slow"), "[VERTICAL_FORCE_RANGE]\nFZMIN = low\n");
+  const load_result result = load_text(text);
+  ASSERT_FALSE(result.has_value());
+  expect_error(result, error_code::INVALID_NUMBER, "FZMIN", line_of(text, "FZMIN"));
+}
+
+TEST(model_loader, Limits_InvalidUpperNumber_ReturnsError) {
+  const std::string text = append(s_text(), "[INCLINATION_ANGLE_RANGE]\nCAMMIN = -0.2\nCAMMAX = high\n");
+  const load_result result = load_text(text);
+  ASSERT_FALSE(result.has_value());
+  expect_error(result, error_code::INVALID_NUMBER, "CAMMAX", line_of(text, "CAMMAX"));
+}
+
+TEST(model_loader, Limits_LowerAboveUpper_InvalidValueLocatedAtLowerKey) {
+  const std::string text = append(s_text(), "[SLIP_ANGLE_RANGE]\nALPMIN = 1\nALPMAX = -1\n");
+  const load_result result = load_text(text);
+  ASSERT_FALSE(result.has_value());
+  expect_error(result, error_code::INVALID_VALUE, "ALPMIN", line_of(text, "ALPMIN"));
+}
+
+TEST(model_loader, Options_ForwardedToPac2002) {
+  const mf::model_options options{.mode = mf::slip_mode::UNCOMBINED, .throw_if_model_failure = true};
+  const load_result loaded = load_text(s_text(), options);
+  ASSERT_TRUE(loaded.has_value()) << describe(loaded);
+  EXPECT_EQ(loaded->model->name(), "PAC2002");
+  EXPECT_EQ(loaded->model->options().mode, mf::slip_mode::UNCOMBINED);
+  EXPECT_TRUE(loaded->model->options().throw_if_model_failure);
+}
+
+TEST(model_loader, Options_ForwardedToMf52) {
+  const mf::model_options options{.mode = mf::slip_mode::UNCOMBINED, .throw_if_model_failure = true};
+  const load_result loaded = load_text(mf52_clean_text(), options);
+  ASSERT_TRUE(loaded.has_value()) << describe(loaded);
+  EXPECT_EQ(loaded->model->name(), "MF 5.2");
+  EXPECT_EQ(loaded->model->options().mode, mf::slip_mode::UNCOMBINED);
+  EXPECT_TRUE(loaded->model->options().throw_if_model_failure);
+}
+
+TEST(model_loader, Options_DefaultCombinedUnchecked) {
+  const load_result loaded = load_text(s_text());
+  ASSERT_TRUE(loaded.has_value()) << describe(loaded);
+  EXPECT_EQ(loaded->model->options().mode, mf::slip_mode::COMBINED);
+  EXPECT_FALSE(loaded->model->options().throw_if_model_failure);
 }
 
 TEST(model_loader, Load_Tyreside_AbsentLeft) {
@@ -912,6 +1090,14 @@ TEST(model_loader, LoadFile_SyntaxError_Propagated) {
   EXPECT_EQ(result.error().code, error_code::SYNTAX);
   EXPECT_EQ(result.error().where.file, path.string());
   EXPECT_EQ(result.error().where.line, 1U);
+}
+
+TEST(model_loader, LoadFile_ForwardsOptions) {
+  const mf::model_options options{.mode = mf::slip_mode::UNCOMBINED, .throw_if_model_failure = true};
+  const load_result loaded = load_tire_model_file(data_file("pac2002_S.tir"), options);
+  ASSERT_TRUE(loaded.has_value()) << describe(loaded);
+  EXPECT_EQ(loaded->model->options().mode, mf::slip_mode::UNCOMBINED);
+  EXPECT_TRUE(loaded->model->options().throw_if_model_failure);
 }
 
 TEST(model_loader, LoadFile_FixtureS_Succeeds) {
