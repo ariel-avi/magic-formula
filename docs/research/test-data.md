@@ -1,20 +1,14 @@
 # Test data and vectors
 
-## 1. Data candidates and licence status
+## 1. Data policy
 
-| Data | Status | Use |
-|---|---|---|
-| MSC example (p.48-52) | 'Copyright MSC.Software ... 2004', no licence | values may be cited; not a fixture until the licence question is settled (open question, open-questions.md) |
-| CHRONO bundled .tir files (@39393e3) | headers say 'from passenger car template' or MSC copyright (pactest.tir l.18); feda files are Goodyear-derived | do not copy. Recreate synthetically the cases they show: 'MF_05' with FITTYP 5, and a duplicate [DEFLECTION_LOAD_CURVE] |
-| TEASIT fsaettc_obfuscated*.tir | GPL-3 repo, FSAE TTC terms, values rounded by num2str. The _v52 file is an MF 6.1 key set relabelled FITTYP 6 | do not copy |
-| MFEVAL sample files and outputs | MFeval 4.0.0 was executed in GNU Octave 10.3 during validation (validation.md). The MFeval example `.tir` is not in the tree. Outputs for the synthetic fixture S52 are committed as `tests/data/reference/mf52_mfeval.csv` (190 rows) | kept (policies.md section 6). BSD-3 notice retained; the wrapper repo's 'solely for use in conjunction with MathWorks products' clause was weighed and the numbers kept; see `tests/data/reference/README.md` |
-| Reference outputs | `tests/data/reference/mf52_mfeval.csv` (MFeval, our own fixture S52); no other oracle output is committed (OpenTire summarised only in validation.md; teasit GPL-3, never) | used by `tests/module/mfeval_reference_test.cpp`; kept (policies.md section 6) |
-
-[policy] Use synthetic `.tir` files in `tests/data/` with an origin note ('synthetic, authored for magic-formula'). Hand-derived expectations below. The validation step against independent references has been done (validation.md). Reference-output tests use MFeval-derived numbers on our own synthetic fixture only; they are kept with the BSD-3 notice retained (policies.md section 6). No third-party `.tir` file and no teasit-derived number is committed.
+- Property files in `tests/data/` are synthetic, authored for magic-formula, each with an origin note. Expectations below are hand-derived.
+- Reference outputs: `tests/data/reference/mf52_mfeval.csv` (190 rows, computed on fixture S52 by an independent MF 5.2 implementation), used by `tests/module/mfeval_reference_test.cpp`; origin and licence notice in `tests/data/reference/README.md` (policies.md section 6). The validation is summarised in validation.md.
+- No property file from outside the project and no other oracle output is committed.
 
 ## 2. Fixture S (synthetic PAC2002)
 
-Values are [derived] from the REV2 vectors and were cross-checked against the REV2 fixture S: every numeric coefficient value matches, and V1-V22 and M1-M8 recompute by hand. Every key is listed; a key not listed is absent (no FITTYP, no range sections).
+All values are synthetic; V1-V22 and M1-M8 recompute by hand from them. Every key is listed; a key not listed is absent (no FITTYP, no range sections).
 
 ```
 [MDI_HEADER]  FILE_TYPE = 'tir'  FILE_VERSION = 3.0  FILE_FORMAT = 'ASCII'
@@ -40,7 +34,7 @@ Repository files (synthetic; each carries an origin note):
 |---|---|
 | `tests/data/pac2002_S.tir` | fixture S as listed above |
 | `tests/data/mf52_S52.tir` | S + FITTYP = 6 + WIDTH 0.2 + RIM_RADIUS 0.2, with no PROPERTY_FILE_FORMAT |
-| `tests/data/pac2002_S_rng.tir` | S + synthetic ranges (policies.md section 6): KPUMIN/KPUMAX -1.0 / 1.0, ALPMIN/ALPMAX -1.5 / 1.5, CAMMIN/CAMMAX -0.2 / 0.2, FZMIN/FZMAX 200 / 10000. These are not the MSC example values (licence; open question, open-questions.md). |
+| `tests/data/pac2002_S_rng.tir` | S + synthetic ranges (policies.md section 6): KPUMIN/KPUMAX -1.0 / 1.0, ALPMIN/ALPMAX -1.5 / 1.5, CAMMIN/CAMMAX -0.2 / 0.2, FZMIN/FZMAX 200 / 10000. |
 | `tests/data/pac2002_S_ell.tir` | S without any R* key: the friction-ellipse method is selected, with a warning (policies.md section 3, PAC2002 R* keys; pac2002.md section 5.5). |
 | `tests/data/pac2002_S_part.tir` | S without RHX1 (V23): loading fails naming RHX1. A key written with value 0 counts as present (policies.md section 3, PAC2002 R* keys; pac2002.md section 5.5). |
 
@@ -58,40 +52,40 @@ Input column order: Fz, kappa, alpha, gamma, Vx (Vx = 10 unless given).
 Tolerances (unless a row states otherwise):
 
 - Closed forms: relative 1e-12 (1e-6 for MF 5.2 vectors, where eps perturbs at the 1e-7 level).
-- Printed values: half a unit of the last printed digit.
+- Values given to a few digits: half a unit of the last digit shown.
 - Identity and bit-equal vectors (V15, V19, P6, the E clamps): compared with `std::bit_cast<std::uint64_t>` on both sides, with the vector id in a comment. This is the documented exception to 'no EXPECT_EQ on doubles'.
 
-| ID | Fixture | Input | Expected | Basis |
+| ID | Fixture | Input | Expected | Equations / rule |
 |---|---|---|---|---|
-| V1 | S | Fz 4000 | dfz = 0 | (16) |
-| V2 | S | 4000, 0.1 | Fx0 = 4000*sin(1.5*atan(4/3)) = 3935.48 N | (18)-(28) |
-| V3 | S | 4000, 0, 0.05 | Ky0 = -55384.615 N/rad; By = -10.650888; Fy0 = -2376.40 N | (30)-(39) |
-| V4 | S + PVX1 0.01 | 4000, 0 | Fx0 = 40 N (the as-printed S_Vx inside the sine would give 2980.45) | pac2002.md section 4 |
-| V5 | S | 4000, any, Vx 10 | My_out = -12 N m (eq 87 value +12) | (87), conventions.md section 4 |
-| V6 | S | sweeps | Fx0 odd in kappa; Fy0 and Mz0 odd in alpha | [derived] |
-| V7 | S | dFx0/dkappa at 0, h = 1e-7 | 80000 (rel 1e-6) | (25) |
-| V8 | S + LMUX 0.5 | 4000, 0.1 | Dx = 2000; Bx = 80/3 | (23), (26) |
-| V9 | S + QSX1 0.01, QSX2 0.5, QSX3 0.1 | 4000, 0, 0, 0.05 | Fy = 0; Mx = -18 N m | (86) |
-| V10 | S + FITTYP 5, QSY1 0, PHX1 0.001, PVX1 0.01 | 4000 | My_out = -36 N m (eq 88 value +36) | (88), conventions.md section 4 |
-| V11 | S, uncombined | 4000, 0, 0.05 | t = 0.0254434 m; Mz0 = +60.46 N m | (43)-(56) |
-| V12 | S | 4000, 0.1, 0.1 | Fx = Fx0(V2)*cos(pi/4) = 2782.80 N | (58)-(66) |
-| V13 | S | 4000, 0.1, 0.05 | Fy = -1680.37 N | (67)-(77) |
-| V14 | S + RBY1 0, RVY1 0.1, RVY5 1, RVY6 10 | 4000, 0.1, 0.05 | SVyk = 400*sin(atan(1)) = 282.843 N; Fy = -2093.56 N | (75): sin(RVY5*atan(RVY6*kappa)) |
-| V15 | S + PEX1 1.5 | 4000, 0.1 | bit-equal to PEX1 = 1.0; 3603.08 N | pac2002.md section 3 (E <= 1) |
+| V1 | S | Fz 4000 | dfz = 0 | load normalisation |
+| V2 | S | 4000, 0.1 | Fx0 = 4000*sin(1.5*atan(4/3)) = 3935.48 N | pure Fx0 |
+| V3 | S | 4000, 0, 0.05 | Ky0 = -55384.615 N/rad; By = -10.650888; Fy0 = -2376.40 N | pure Fy0 (Ky0, By, Fy0) |
+| V4 | S + PVX1 0.01 | 4000, 0 | Fx0 = 40 N (with SVx inside the sine it would be 2980.45) | pac2002.md section 4 |
+| V5 | S | 4000, any, Vx 10 | My_out = -12 N m (QSY-form value +12) | My, QSY form; conventions.md section 4 |
+| V6 | S | sweeps | Fx0 odd in kappa; Fy0 and Mz0 odd in alpha | odd symmetry of the zero-shift fixture |
+| V7 | S | dFx0/dkappa at 0, h = 1e-7 | 80000 (rel 1e-6) | Kx |
+| V8 | S + LMUX 0.5 | 4000, 0.1 | Dx = 2000; Bx = 80/3 | mu_x, Bx |
+| V9 | S + QSX1 0.01, QSX2 0.5, QSX3 0.1 | 4000, 0, 0, 0.05 | Fy = 0; Mx = -18 N m | Mx equation |
+| V10 | S + FITTYP 5, QSY1 0, PHX1 0.001, PVX1 0.01 | 4000 | My_out = -36 N m (SHIFTS-form value +36) | My, SHIFTS form; conventions.md section 4 |
+| V11 | S, uncombined | 4000, 0, 0.05 | t = 0.0254434 m; Mz0 = +60.46 N m | pure Mz0 |
+| V12 | S | 4000, 0.1, 0.1 | Fx = Fx0(V2)*cos(pi/4) = 2782.80 N | combined Fx (cosine) |
+| V13 | S | 4000, 0.1, 0.05 | Fy = -1680.37 N | combined Fy (cosine) |
+| V14 | S + RBY1 0, RVY1 0.1, RVY5 1, RVY6 10 | 4000, 0.1, 0.05 | SVyk = 400*sin(atan(1)) = 282.843 N; Fy = -2093.56 N | SVyk: sin(RVY5*atan(RVY6*kappa)) |
+| V15 | S + PEX1 1.5 | 4000, 0.1 | bit-equal to PEX1 = 1.0; 3603.08 N | pac2002.md section 4 (E limit) |
 | V16 | S + PDX3 10, LGAX 0.5 | 4000, 0.1, 0, 0.1 | Dx = 3900 (PAC2002, gamma_x) | pac2002.md section 4 |
 | V17 | S + PHY3 0.1 | 4000, 0, 0, 0.1 | Fy0 = -550.02 N; Mz0 = +16.50 N m | pac2002.md section 5.3 (actual-camber reading) |
-| V18 | S + LFZO 1.2 | 4000, 0, 0.05 | dfz = -1/6; Ky0 = -61132.08 N/rad; Dt = 0.03 m | (37), (52), pac2002.md section 5.6 |
+| V18 | S + LFZO 1.2 | 4000, 0, 0.05 | dfz = -1/6; Ky0 = -61132.08 N/rad; Dt = 0.03 m | Ky0, Dt; pac2002.md section 5.6 |
 | V19 | S-rng (limits kappa 1.0, alpha 1.5, gamma 0.2, Fz 10000, Fz 200) | kappa 10; alpha 2; gamma 0.5; Fz 20000; Fz 1e-9 | bit-equal to evaluating at the limit (kappa 1.0, alpha 1.5, gamma 0.2, Fz 10000, Fz 200 respectively); one warning per variable | conventions.md section 8; policies.md section 6 |
-| V20 | S | Fz 1e-9 | all outputs finite; abs(Fx0) <= 1e-9 N | [derived] |
-| V21 | S + QSY3 0.1, QSY4 0.01 | 4000, Vx 10 | My_out = -1200*(0.01 + 0.1*(10/16.6) + 0.01*(10/16.6)^4) = -85.87 N m | (87) |
+| V20 | S | Fz 1e-9 | all outputs finite; abs(Fx0) <= 1e-9 N | Fz -> 0+ limit |
+| V21 | S + QSY3 0.1, QSY4 0.01 | 4000, Vx 10 | My_out = -1200*(0.01 + 0.1*(10/16.6) + 0.01*(10/16.6)^4) = -85.87 N m | My, QSY form |
 | V22 | S | Fz 0 and -100 | every output exactly 0 | conventions.md section 8 |
 | V23 | S + RHX1 omitted | load | error naming RHX1 | pac2002.md section 5.5 |
 
 Code pointers: the conditioning vectors (V19, V20, V22) are exercised by the pipeline tests (`tests/unit/mf5x_pipeline_test.cpp`, `detail::mf5x_pipeline` in `include/magic_formula/detail/mf5x_kernels.hpp`). The Fz 1e308 row, whose result overflows and is rejected by `mf::check_outputs`, is `tests/data/inputs_overflow.csv`.
 
-MF 5.2 vectors ([impl] equations, mf52.md section 4):
+MF 5.2 vectors (mf52.md section 4):
 
-| ID | Fixture | Input | Expected | Basis |
+| ID | Fixture | Input | Expected | Equations / rule |
 |---|---|---|---|---|
 | M1 | S52 | 4000, 0.1 | Fx0 = 3935.48 N (eps effect < 1e-9 relative) | step 4 |
 | M2 | S52 | 4000, 0, 0.05 | Fy0 = -2376.40 N | step 5 |
@@ -102,23 +96,23 @@ MF 5.2 vectors ([impl] equations, mf52.md section 4):
 | M7 | S52 + PHY3 0.1 | 4000, 0, 0, 0.1 | Fy0 = -550.02 N; Mz = +16.50 N m | steps 5, 8 |
 | M8 | S52 | Vx 0 | row rejected | conventions.md section 5 |
 | M9 | S52 with RBX1 removed | load | warning; RBX1 = 0, so Gxa = 1 | tir-format.md section 3 |
-| M10 | S52 and S, each + PDY3 1, RVY1 0.1, RVY5 1, RVY6 10, QCZ1 0 [derived] | 4000, 0.1, 0, 0.1, Vx 10 | PAC2002: Mz = 0. MF 5.2: Mz = 0.03*400*(1 - 0.99)*sin(pi/4) = 0.0848528 N m (relative 1e-6). Pins SVyk0 vs SVyk in F'y | policies.md section 2 |
-| M11 | S52 + QCZ1 0 [derived] | 4000, 0, 0.05, 0, Vx 1e-3 | t = Dt*cos(0.05)*Vc/(Vc + 1e-6) with Vc = 1e-3/cos(0.05) and Dt = 0.03 m; observed as t = -Mz/Fy. Pins cos'(alpha) and the Vx -> 0+ behaviour | mf52.md section 4, conventions.md section 5 |
+| M10 | S52 and S, each + PDY3 1, RVY1 0.1, RVY5 1, RVY6 10, QCZ1 0 | 4000, 0.1, 0, 0.1, Vx 10 | PAC2002: Mz = 0. MF 5.2: Mz = 0.03*400*(1 - 0.99)*sin(pi/4) = 0.0848528 N m (relative 1e-6). Pins SVyk0 vs SVyk in F'y | policies.md section 2 |
+| M11 | S52 + QCZ1 0 | 4000, 0, 0.05, 0, Vx 1e-3 | t = Dt*cos(0.05)*Vc/(Vc + 1e-6) with Vc = 1e-3/cos(0.05) and Dt = 0.03 m; observed as t = -Mz/Fy. Pins cos'(alpha) and the Vx -> 0+ behaviour | mf52.md section 4, conventions.md section 5 |
 
 ## 4. Property tests
 
 Relative tolerance 1e-12 for identities and 1e-9 for continuity, unless stated. LFZO = 1 except where a test varies it.
 
 - P1 (ellipse): over the 4 quadrants of kappa, alpha = +/-0.05: sgn(Fx) = sgn(Fx0), sgn(Fy) = sgn(Fy0), and |Fx| <= |Fx0|, |Fy| <= |Fy0|.
-- P2 (ellipse): the rewrite equals the printed form with |mu_act| at 1000 random non-degenerate points.
+- P2 (ellipse): the ratio form equals the mu form (pac2002.md section 5.4) at 1000 random non-degenerate points.
 - P3 (both models): at kappa = 0, combined Mz - s*Fx equals Mz0 = -t*Fy0(actual gamma) + Mzr.
 - P4: with kappa = 0.1, Mz is continuous across alpha_t = -1e-9, 0, +1e-9 (relies on pac2002.md section 5.2).
 - P5: the t(x) and Mzr(x) kernels are even.
 - P6: inputs beyond the limits give outputs equal to those at the limit, with one warning.
-- P8: Kx at Fz = FNOMIN equals PKX1*FNOMIN*LKX (SIM20 p.25).
-- P9: Ky(Fz) reaches its maximum PKY1*FNOMIN*LKY at Fz = PKY2*FNOMIN (SIM20 p.25).
+- P8: Kx at Fz = FNOMIN equals PKX1*FNOMIN*LKX (dfz = 0, LFZO = 1).
+- P9: Ky0(Fz) reaches its maximum PKY1*FNOMIN*LKY at Fz = PKY2*FNOMIN (LFZO = 1).
 - P10: max |Fx0 - SVx| over kappa equals PDX1*FNOMIN*LMUX when C > 1.
-- P11: Mx follows eq (86) exactly.
+- P11: Mx follows the Mx equation (pac2002.md section 3) exactly.
 - P12: My is linear in Fx with slope R0*Fz*QSY2*LMY/FNOMIN.
 - P15: in uncombined mode, Fx = Fx0 and Fy = Fy0.
 - P16: at the ellipse degenerate points (kappa_c = 0 and/or alpha* = 0) outputs are finite.

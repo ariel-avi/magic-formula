@@ -28,9 +28,10 @@ compile_commands.json
 .idea/
 *.swp
 .DS_Store
-
+`
 # Claude Code local overrides
 .claude/settings.local.json
+.claude/worktrees
 
 # Python
 __pycache__/
