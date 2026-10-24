@@ -28,12 +28,20 @@
       "inherits": "base",
       "toolchainFile": "${sourceDir}/build/conan/debug/conan_toolchain.cmake",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "MF_ENABLE_COVERAGE": "ON" }
+    },
+    {
+      "name": "wasm",
+      "displayName": "WebAssembly (Emscripten 5.0.7, Release)",
+      "inherits": "base",
+      "toolchainFile": "${sourceDir}/build/conan/wasm/conan_toolchain.cmake",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "MF_BUILD_TESTS": "OFF", "MF_BUILD_WASM": "ON" }
     }
   ],
   "buildPresets": [
     { "name": "debug", "configurePreset": "debug" },
     { "name": "release", "configurePreset": "release" },
-    { "name": "coverage", "configurePreset": "coverage" }
+    { "name": "coverage", "configurePreset": "coverage" },
+    { "name": "wasm", "configurePreset": "wasm", "targets": ["mf_wasm"] }
   ],
   "testPresets": [
     {

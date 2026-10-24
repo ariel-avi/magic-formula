@@ -57,7 +57,9 @@ argument-hint: "[feature <request> | review [scope]]"
 | Turn the architecture into ordered work packets and dispatch them | `planner` |
 | C++ in `include/`, `src/` (incl. `src/app/`), `tests/`, `bench/` (never build files during Implement; new files are auto-registered, see "Build-file ownership") | `cpp-developer` |
 | CMake/Conan glue (incl. the wave-1 skeleton with auto-registration), scripts, GitHub Actions, hooks, PR template, docs, research notes, git/PR mechanics | `general-developer` (exception: minimal build-file changes inside Verify-phase / test-failure fixes belong to `cpp-developer`, see below) |
-| Build, ctest, coverage gate, benchmarks, clang-format/tidy checks | `test-runner` |
+| C++ in `wasm/` (`mf_wasm.cpp`, the embind adapter) | `cpp-developer` |
+| TypeScript/React under `web/`; wasm/web build files (`wasm/CMakeLists.txt`, `wasm/*.sh`, `conan/profiles/wasm`, `web/package.json` and configs) | `general-developer` |
+| Build, ctest, coverage gate, benchmarks, clang-format/tidy checks; `npm install`/`npm ci`, Vitest, `wasm/setup-emsdk.sh`, `wasm/build.sh` | `test-runner` |
 | Find files, map classes/inheritance/patterns/call sites; all reading for the researcher (papers/PDFs/web pages, repo files, `docs/research/`) | `project-explorer` |
 | Literature questions: equations, coefficients, version differences, sign conventions | `researcher` |
 | Code review: bugs, numerics, plan conformance, missing tests/coverage | `reviewer` |

@@ -32,6 +32,23 @@ cmake --preset release && cmake --build --preset release
 ./build/release/bench/mf_bench
 ```
 
+## Web frontend (WebAssembly)
+
+`web/` is a Vite + React + TypeScript + Tailwind + shadcn/ui + Recharts app that runs the existing C++ library in the browser, compiled to WebAssembly (Emscripten, embind adapter in `wasm/`). It loads, edits and saves `.tir` files, shows the model, and plots sweeps (any input as the X axis, up to two step variables, hue or saturation per step).
+
+Prerequisites: python3, Conan 2, CMake >= 4.0, Ninja, Node 24 and npm; network access once, to fetch the project-local Emscripten SDK. The bash scripts are macOS/Linux only.
+
+```bash
+bash wasm/setup-emsdk.sh          # once: installs Emscripten 5.0.7 into .emsdk/ (gitignored)
+bash wasm/build.sh                # builds web/src/wasm/mf_wasm.js (wasm embedded, gitignored)
+cd web && npm ci
+npm run dev                       # http://localhost:5173
+```
+
+Tests (from `web/`): `npm test` (unit tests plus a Node smoke test that loads the built wasm and solves a sweep), `npm run test:unit`, `npm run test:smoke`, `npm run typecheck`, `npm run build`. The wasm module must be built first (`npm run dev` checks this).
+
+The wasm module is outside the native build and the coverage gate. CI has no web or wasm job yet (follow-up).
+
 ## Code quality and coverage
 
 ```bash

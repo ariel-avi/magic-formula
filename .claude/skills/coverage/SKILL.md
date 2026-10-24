@@ -54,6 +54,8 @@ Read the `Missing` column of the text reports: `coverage/summary.txt` (lines) an
 
 No per-file tables for fully covered files, no HTML dumps.
 
+`wasm/` and `web/` lie outside the gcovr gate by layout (not under `src/` or `include/`, not compiled natively), with no exclusion markers; `web/src/domain` has its own 100% Vitest thresholds (a local gate, not CI in the POC).
+
 ## Exclusion policy
 
 - Exclusions are **forbidden in core** (`src/`, `include/`) by default.

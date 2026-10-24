@@ -10,11 +10,12 @@ Dependencies point downwards only. The core model knows nothing about files or t
 |-------|------|------|-----------|------|
 | core model | `tire_model.hpp`, `model_layout.hpp`, `mf5x_layout.hpp`, `model_checks.hpp`, `mf5x_model.hpp`, `pac2002_model.hpp`, `mf52_model.hpp`, `mf5x_forms.hpp`, `mf5x_coefficients.hpp`, `evaluation_types.hpp`, `error.hpp` | `model/`, `error.cpp` | `mf`, `mf::mf5x` | Abstract formulation, the index maps, the two concrete models, the free check functions. No I/O, no printing. |
 | detail | `detail/lanes.hpp`, `detail/mf5x_kernels.hpp`, `detail/text.hpp` | `detail/` | `mf::detail` | Internal, lane-templated equation kernels and helpers. Under `include/` so tests can include them; production code includes `detail/mf5x_kernels.hpp` only from `src/model/mf5x_model.cpp`. |
-| io | `io/*.hpp` | `io/` | `mf::io` | `.tir` lexing (`tir_document`, `tir_reader`), unit check, model routing, key-to-coefficient bindings, the model loader (factory), the input-table parser and its mapping onto a model's input channels, the CSV result writer. |
+| io | `io/*.hpp` | `io/` | `mf::io` | `.tir` lexing (`tir_document`, `tir_reader`), unit check, model routing, key-to-coefficient bindings, the model loader (factory), the `.tir` text editor (`tir_editor`: `replace_value` changes only the bytes of one value, using each entry's `value_offset`/`value_length` span, and re-parses to check the result), the input-table parser and its mapping onto a model's input channels, the CSV result writer. |
 | cli | `cli/cli.hpp` | `cli/cli.cpp` | `mf::cli` | Command-line parsing and the `run` driver. Compiled into `mflib` so module tests can run it in-process. |
+| wasm adapter | none | `wasm/mf_wasm.cpp` (outside `src/`) | `mf::wasm` | embind adapter that only converts types and calls `io::tir_document::parse`, `io::load_tire_model`, `io::replace_value` and `checked_evaluate_batch`. Not part of `mflib`, not coverage-gated, built only by the `wasm` preset. |
 | app | none | `app/main.cpp` | none | One call into `mf::cli::run`. Builds the executable `mf`. |
 
-The library target is `mflib` (alias `mf::mflib`, every `src/**/*.cpp` except `src/app/`). Eigen 5.0.1 is a PUBLIC dependency of `mflib`: it appears in the public signatures, so every consumer links it through `mflib`. Errors are values (see "Options and error model"); only `mf::cli::run` catches exceptions.
+The library target is `mflib` (alias `mf::mflib`, every `src/**/*.cpp` except `src/app/`). Eigen 5.0.1 is a PUBLIC dependency of `mflib`: it appears in the public signatures, so every consumer links it through `mflib`. The web app (`web/`, React + Vite) is a consumer of the wasm adapter, not a layer of the library: it holds the `.tir` text, re-parses it on each evaluate call, and contains no tire equations. See the README, "Web frontend (WebAssembly)". Errors are values (see "Options and error model"); only `mf::cli::run` catches exceptions.
 
 ## Class hierarchy
 

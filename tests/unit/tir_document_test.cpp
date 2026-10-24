@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <ios>
 #include <magic_formula/error.hpp>
+#include <magic_formula/io/text_file.hpp>
 #include <magic_formula/io/tir_document.hpp>
 #include <random>
 #include <span>
@@ -505,6 +506,94 @@ TEST_F(read_tir_file, ReadTirFile_LexicalMix_Succeeds) {
   EXPECT_EQ(units_mass->value, "kg");
   EXPECT_EQ(inertia_mass->value, "9.3");
   EXPECT_TRUE(result->warnings().empty());
+}
+
+TEST(tir_document, Parse_UnquotedValue_RecordsValueSpan) {
+  const std::string_view text = "[A]\nKEY = 12.5\n";
+  const auto result = parse(text);
+  ASSERT_TRUE(result.has_value()) << describe(result);
+  const tir_entry *const entry = result->find("KEY");
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(entry->value_offset, text.find("12.5"));
+  EXPECT_EQ(entry->value_length, 4U);
+}
+
+TEST(tir_document, Parse_QuotedValue_SpanIncludesQuotes) {
+  const std::string_view text = "[A]\nNAME = 'abc def'\n";
+  const auto result = parse(text);
+  ASSERT_TRUE(result.has_value()) << describe(result);
+  const tir_entry *const entry = result->find("NAME");
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(entry->value_offset, text.find('\''));
+  EXPECT_EQ(entry->value_length, 9U);
+  EXPECT_EQ(text.substr(entry->value_offset, entry->value_length), "'abc def'");
+}
+
+TEST(tir_document, Parse_ValueWithTrailingComment_SpanExcludesComment) {
+  const std::string_view text = "[A]\nKEY = 3 $ note\nN = 'x' $ c\n";
+  const auto result = parse(text);
+  ASSERT_TRUE(result.has_value()) << describe(result);
+  const tir_entry *const unquoted = result->find("KEY");
+  const tir_entry *const quoted = result->find("N");
+  ASSERT_NE(unquoted, nullptr);
+  ASSERT_NE(quoted, nullptr);
+  EXPECT_EQ(text.substr(unquoted->value_offset, unquoted->value_length), "3");
+  EXPECT_EQ(text.substr(quoted->value_offset, quoted->value_length), "'x'");
+}
+
+TEST(tir_document, Parse_EmptyValue_ZeroLengthSpanAtValueStart) {
+  const std::string_view bare = "[A]\nKEY =\n";
+  const auto bare_result = parse(bare);
+  ASSERT_TRUE(bare_result.has_value()) << describe(bare_result);
+  const tir_entry *const bare_entry = bare_result->find("KEY");
+  ASSERT_NE(bare_entry, nullptr);
+  EXPECT_EQ(bare_entry->value_length, 0U);
+  EXPECT_EQ(bare_entry->value_offset, bare.find('=') + 1U);
+
+  const std::string_view commented = "[A]\nKEY = $ c\n";
+  const auto commented_result = parse(commented);
+  ASSERT_TRUE(commented_result.has_value()) << describe(commented_result);
+  const tir_entry *const commented_entry = commented_result->find("KEY");
+  ASSERT_NE(commented_entry, nullptr);
+  EXPECT_EQ(commented_entry->value_length, 0U);
+  EXPECT_EQ(commented_entry->value_offset, commented.find('$'));
+}
+
+TEST(tir_document, Parse_LeadingBom_OffsetsCountTheBom) {
+  const std::string_view text = "\xEF\xBB\xBF[A]\nKEY = 7\n";
+  const auto result = parse(text);
+  ASSERT_TRUE(result.has_value()) << describe(result);
+  const tir_entry *const entry = result->find("KEY");
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(entry->value_offset, text.find('7'));
+  EXPECT_EQ(entry->value_length, 1U);
+}
+
+TEST(tir_document, Parse_CrlfLines_SpanExcludesCarriageReturn) {
+  const std::string_view text = "[A]\r\nKEY = 5\r\nQ = 'v'\r\n";
+  const auto result = parse(text);
+  ASSERT_TRUE(result.has_value()) << describe(result);
+  const tir_entry *const plain = result->find("KEY");
+  const tir_entry *const quoted = result->find("Q");
+  ASSERT_NE(plain, nullptr);
+  ASSERT_NE(quoted, nullptr);
+  EXPECT_EQ(text.substr(plain->value_offset, plain->value_length), "5");
+  EXPECT_EQ(text.substr(quoted->value_offset, quoted->value_length), "'v'");
+}
+
+TEST(tir_document, Parse_FixtureFiles_EverySpanReadsBackTheValue) {
+  for (const std::string_view name : {"pac2002_S.tir", "lexical_mix.tir"}) {
+    const std::filesystem::path path = std::filesystem::path{MF_TEST_DATA_DIR} / name;
+    const auto text = mf::io::read_text_file(path);
+    ASSERT_TRUE(text.has_value()) << mf::to_string(text.error());
+    const auto result = tir_document::parse(*text);
+    ASSERT_TRUE(result.has_value()) << describe(result);
+    ASSERT_FALSE(result->entries().empty());
+    for (const tir_entry &entry : result->entries()) {
+      const std::string expected = entry.quoted ? "'" + entry.value + "'" : entry.value;
+      EXPECT_EQ(text->substr(entry.value_offset, entry.value_length), expected) << name << ": " << entry.key;
+    }
+  }
 }
 
 TEST_F(read_tir_file, ReadTirFile_Nonexistent_ReturnsIo) {

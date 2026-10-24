@@ -10,21 +10,28 @@ class MagicFormulaConan(ConanFile):
     settings = "os", "arch", "compiler", "build_type"
 
     # "auto" = Google Benchmark for Release only; True/False force it on/off for any build type.
-    options = {"with_benchmark": ["auto", True, False]}
-    default_options = {"with_benchmark": "auto"}
+    # with_tests=False drops every test requirement (gtest and benchmark), e.g. for the WebAssembly host profile.
+    options = {"with_benchmark": ["auto", True, False], "with_tests": [True, False]}
+    default_options = {"with_benchmark": "auto", "with_tests": True}
 
     def requirements(self):
         self.requires("eigen/5.0.1")
 
     def build_requirements(self):
+        if not self.options.with_tests:
+            return
         self.test_requires("gtest/1.17.0")
         want = str(self.options.with_benchmark)
         if want == "True" or (want == "auto" and str(self.settings.build_type) == "Release"):
             self.test_requires("benchmark/1.9.5")
 
     def layout(self):
-        # build/conan/<build_type>/conan_toolchain.cmake, referenced by CMakePresets.json
-        self.folders.generators = os.path.join("build", "conan", str(self.settings.build_type).lower())
+        # build/conan/<build_type>/conan_toolchain.cmake (build/conan/wasm for the Emscripten host), referenced by
+        # CMakePresets.json
+        if str(self.settings.os) == "Emscripten":
+            self.folders.generators = os.path.join("build", "conan", "wasm")
+        else:
+            self.folders.generators = os.path.join("build", "conan", str(self.settings.build_type).lower())
 
     def generate(self):
         CMakeDeps(self).generate()
