@@ -45,8 +45,13 @@ Input table (plain text, one operating point per row):
   - The first content line is the header. Required columns: FZ SA SR IA VX. Optional column: P (pressure; it is
     read but ignored with a warning, because PAC2002 and MF 5.2 have no pressure input).
     Columns may be in any order and in any letter case.
-  - A column name may carry a unit in brackets; without a unit the SI unit applies:
-      FZ[N]  SA[rad|deg]  SR[-]  IA[rad|deg]  VX[m/s]  P[Pa]
+  - The next non-comment line after the header is the mandatory unit line: one unit per column, in header order
+    (column names only on the header line).
+    Accepted units:
+      FZ: N  SA: rad|deg  SR: -  IA: rad|deg  VX: m/s  P: Pa
+    A unit in brackets after a name (FZ[N]) is an error. Example header and unit line:
+      FZ,SA,SR,IA,VX
+      N,deg,-,deg,m/s
   - Every data row has exactly as many numbers as the header has columns.
 
 Output (stdout):

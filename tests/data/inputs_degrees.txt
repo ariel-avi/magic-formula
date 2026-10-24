@@ -1,7 +1,9 @@
 # synthetic, authored for magic-formula from docs/research/test-data.md; not derived from any vendor file
 # same operating points as inputs_s_vectors.csv: angles in degrees, reordered columns, mixed separators
 
-fz	sr  sa[deg]	ia[DEG]  vx[m/s]
+fz	sr  sa	ia  vx
+# unit line next; angles in degrees
+N	-  deg	DEG  m/s
 4000	0.1  0	0  10
 4000	0  2.8647889756541161	0  10
 

@@ -37,37 +37,51 @@ containing `$` and `!`; an unquoted `TYRESIDE = LEFT`; `PROPERTY_FILE_FORMAT = '
 
 ## Input tables
 
-Format: see the CLI documentation. Comments (`#`) appear only on their own lines.
+Format: a header line of column names, then the mandatory unit line, then data rows; see README.md, section "Input table". Comments (`#`) appear only on their own lines.
 
 | File | Purpose | Vector ids | Used with | Notes |
 |------|---------|------------|-----------|-------|
-| `inputs_s_vectors.csv` | Rows V2, V3, V12, V13, V22 (Fz 0), V22 (Fz -100); header with units | V2, V3, V12, V13, V22, M1, M2, M5 | S, S52 | Data lines 4-9 |
-| `inputs_degrees.txt` | The same six points, angles in degrees, columns reordered (`fz sr sa[deg] ia[DEG] vx`), blank/tab separated, comments and blank lines between rows | as above | S | Results equal the CSV run within 1e-9 |
-| `inputs_pressure.csv` | A `P[Pa]` column | pressure column ignored | S, S52 | One pressure warning |
+| `inputs_s_vectors.csv` | Rows V2, V3, V12, V13, V22 (Fz 0), V22 (Fz -100); header and unit line | V2, V3, V12, V13, V22, M1, M2, M5 | S, S52 | Header line 3, unit line 4, data lines 5-10 |
+| `inputs_degrees.txt` | The same six points, angles in degrees, columns reordered (`fz sr sa ia vx` header, a comment, unit line `N - deg DEG m/s`), blank/tab separated, comments and blank lines between rows | as above | S | Results equal the CSV run within 1e-9 |
+| `inputs_pressure.csv` | A `P` column with unit `Pa` on the unit line | pressure column ignored | S, S52 | One pressure warning |
 | `inputs_ranges.csv` | One row inside and one row beyond each S-rng limit | V19 | `pac2002_S_rng.tir` | See line numbers below |
-| `inputs_low_speed.csv` | Vx = 0.5 and Vx = 0 | M8 | S, S52 | PAC2002: VXLOW warning; MF 5.2: error at line 4 |
-| `inputs_negative_vx.csv` | Negative Vx | negative Vx is rejected | S, S52 | Error at line 4 |
-| `inputs_malformed.csv` | Field-count mismatch | - | S | Error at line 4 |
-| `inputs_overflow.csv` | Fz = 1e308 overflows the model to a non-finite output: NUMERICAL error with its line and an empty stdout | hand-written, see cli_test Run_OverflowFz_NumericalErrorAtLine | S | Error at line 4 |
+| `inputs_low_speed.csv` | Vx = 0.5 and Vx = 0 | M8 | S, S52 | PAC2002: VXLOW warning; MF 5.2: error at line 5 |
+| `inputs_negative_vx.csv` | Negative Vx | negative Vx is rejected | S, S52 | Error at line 5 |
+| `inputs_malformed.csv` | Field-count mismatch | - | S | Error at line 5 |
+| `inputs_overflow.csv` | Fz = 1e308 overflows the model to a non-finite output: NUMERICAL error with its line and an empty stdout | hand-written, see cli_test Run_OverflowFz_NumericalErrorAtLine | S | Error at line 5 |
+| `inputs_legacy_brackets.csv` | Legacy `NAME[unit]` header (`FZ[N],SA[rad],...`) is rejected | - | S | Error at line 2 (SYNTAX, key FZ) |
+| `inputs_no_unit_line.csv` | Data row directly after the header: missing unit line | - | S | Error at line 3 (SYNTAX) |
+| `inputs_header_only.csv` | Text ends after the header: missing unit line | - | S | Error at line 2 (SYNTAX, at the header) |
+| `inputs_unit_count.csv` | Empty unit entry (`N,rad,,rad,m/s`): 4 units for 5 columns | - | S | Error at line 3 (SYNTAX) |
+| `inputs_unknown_unit.csv` | Unknown unit `kN` for FZ | - | S | Error at line 3 (UNSUPPORTED_UNIT, key FZ) |
+| `inputs_wrong_unit_column.csv` | Another column's unit (`deg`) for FZ | - | S | Error at line 3 (UNSUPPORTED_UNIT, key FZ) |
+
+`tests/module/fixtures_test.cpp` (`EveryInputTable_HasExpectedOutcome`) loads every `inputs_*` file and checks its documented outcome (rows, or error code and line); `cli_test` `Run_BadInputTable_Exit1AtLine` runs the six error tables through the CLI.
 
 CLI outputs carry 15 columns: the five inputs, the five outputs (FX, FY, MZ, MX, MY) and five 0/1 flag columns
 (FZ_CLAMPED, SR_CLAMPED, SA_CLAMPED, IA_CLAMPED, BELOW_VXLOW).
 
-### Documented line numbers (1-based, comments and header included)
+### Documented line numbers (1-based, comments, header and unit line included)
 
 | File | Line | Meaning |
 |------|------|---------|
-| `inputs_negative_vx.csv` | 4 | `VX = -1`, evaluation error (INVALID_INPUT, key VX) |
-| `inputs_malformed.csv` | 4 | 4 fields instead of 5, SYNTAX error |
-| `inputs_low_speed.csv` | 3 | Vx = 0.5, below VXLOW (flagged, PAC2002 warns) |
-| `inputs_low_speed.csv` | 4 | Vx = 0, rejected by MF 5.2 (INVALID_INPUT, key VX); accepted by PAC2002 (flagged) |
-| `inputs_overflow.csv` | 4 | Fz = 1e308, non-finite output (NUMERICAL) |
-| `inputs_ranges.csv` | 4 | inside all S-rng limits |
-| `inputs_ranges.csv` | 5 | SR = 10, above KPUMAX |
-| `inputs_ranges.csv` | 6 | SA = 2, above ALPMAX |
-| `inputs_ranges.csv` | 7 | IA = 0.5, above CAMMAX |
-| `inputs_ranges.csv` | 8 | Fz = 20000, above FZMAX |
-| `inputs_ranges.csv` | 9 | Fz = 1e-9, below FZMIN |
+| `inputs_negative_vx.csv` | 5 | `VX = -1`, evaluation error (INVALID_INPUT, key VX) |
+| `inputs_malformed.csv` | 5 | 4 fields instead of 5, SYNTAX error |
+| `inputs_low_speed.csv` | 4 | Vx = 0.5, below VXLOW (flagged, PAC2002 warns) |
+| `inputs_low_speed.csv` | 5 | Vx = 0, rejected by MF 5.2 (INVALID_INPUT, key VX); accepted by PAC2002 (flagged) |
+| `inputs_overflow.csv` | 5 | Fz = 1e308, non-finite output (NUMERICAL) |
+| `inputs_ranges.csv` | 5 | inside all S-rng limits |
+| `inputs_ranges.csv` | 6 | SR = 10, above KPUMAX |
+| `inputs_ranges.csv` | 7 | SA = 2, above ALPMAX |
+| `inputs_ranges.csv` | 8 | IA = 0.5, above CAMMAX |
+| `inputs_ranges.csv` | 9 | Fz = 20000, above FZMAX |
+| `inputs_ranges.csv` | 10 | Fz = 1e-9, below FZMIN |
+| `inputs_legacy_brackets.csv` | 2 | legacy `FZ[N]` header field (SYNTAX, key FZ) |
+| `inputs_no_unit_line.csv` | 3 | data row where the unit line belongs (SYNTAX, names header line 2) |
+| `inputs_header_only.csv` | 2 | header with no unit line after it (SYNTAX) |
+| `inputs_unit_count.csv` | 3 | unit line with 4 units (SYNTAX) |
+| `inputs_unknown_unit.csv` | 3 | `kN` for FZ (UNSUPPORTED_UNIT) |
+| `inputs_wrong_unit_column.csv` | 3 | `deg` for FZ (UNSUPPORTED_UNIT) |
 
 ## Numerics
 
