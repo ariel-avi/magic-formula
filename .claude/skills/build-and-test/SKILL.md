@@ -116,6 +116,25 @@ cmake --preset release && cmake --build --preset release --target mf_bench
 
 Benchmarks are informational unless the caller gives a threshold; report name, time/iteration and items/s only. A benchmark that prints `ERROR OCCURRED` (SkipWithError) or a non-zero exit is a FAIL.
 
+## WebAssembly module and web app
+
+Prerequisites: git, python3 and network access once (for the project-local emsdk 5.0.7 in `.emsdk/`; nothing system-wide), Node 24 and npm. The bash scripts are macOS/Linux only in the POC (Windows is a follow-up).
+
+```bash
+bash wasm/setup-emsdk.sh          # once; idempotent
+bash wasm/build.sh                # conan install (conan/profiles/wasm) + cmake --preset wasm + cmake --build --preset wasm
+cd web && npm ci
+npm run typecheck && npm run test:unit && npm run test:coverage && npm run test:smoke && npm run build
+npm run dev                       # http://localhost:5173
+```
+
+- The `wasm` preset builds only the target `mf_wasm` and writes `web/src/wasm/mf_wasm.js` (gitignored). It has no test preset; the native `debug`/`release`/`coverage` presets are unaffected.
+- `npm test` = unit + smoke. The smoke test needs the built module; the `pretest` hooks fail with "run npm run wasm:build" when it is missing.
+- `npm run test:coverage` enforces 100% thresholds on `web/src/domain`.
+- Localhost check: start `npm run dev` in the background, then `curl -sf http://localhost:5173/` must return 200; stop the server afterwards.
+- `clang-format` covers `wasm/*.cpp`; `clang-tidy` does not (it needs the Emscripten headers).
+- Vitest results go into the report template below as counts of passed/failed tests per Vitest project (`unit`, `smoke`) under `### Failed tests`, naming failing tests only.
+
 ## test-runner report template (exact)
 
 Return exactly this markdown. Omit sections that have nothing to report. Never list passing tests, never paste full logs.

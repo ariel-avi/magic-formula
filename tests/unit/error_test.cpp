@@ -1,9 +1,11 @@
+#include <array>
 #include <cstddef>
 #include <gtest/gtest.h>
 #include <magic_formula/error.hpp>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace {
   mf::location make_location(const std::string &file, std::size_t line, const std::string &key) {
@@ -104,6 +106,30 @@ TEST(model_failure, Thrown_CaughtAsRuntimeError) {
     caught_message = caught.what();
   }
   EXPECT_EQ(caught_message, "wrong size");
+}
+
+TEST(error, ErrorCodeName_EveryCode_SpelledLikeEnumerator) {
+  struct named_code {
+    mf::error_code code;
+    std::string_view name;
+  };
+  const std::array<named_code, 12> table{{
+      {.code = mf::error_code::IO, .name = "IO"},
+      {.code = mf::error_code::SYNTAX, .name = "SYNTAX"},
+      {.code = mf::error_code::INVALID_NUMBER, .name = "INVALID_NUMBER"},
+      {.code = mf::error_code::DUPLICATE_KEY, .name = "DUPLICATE_KEY"},
+      {.code = mf::error_code::MISSING_KEY, .name = "MISSING_KEY"},
+      {.code = mf::error_code::INVALID_VALUE, .name = "INVALID_VALUE"},
+      {.code = mf::error_code::UNSUPPORTED_UNIT, .name = "UNSUPPORTED_UNIT"},
+      {.code = mf::error_code::UNSUPPORTED_MODEL, .name = "UNSUPPORTED_MODEL"},
+      {.code = mf::error_code::NOT_IMPLEMENTED, .name = "NOT_IMPLEMENTED"},
+      {.code = mf::error_code::INVALID_INPUT, .name = "INVALID_INPUT"},
+      {.code = mf::error_code::NUMERICAL, .name = "NUMERICAL"},
+      {.code = mf::error_code::INVALID_ARGUMENT, .name = "INVALID_ARGUMENT"},
+  }};
+  for (const named_code &entry : table) {
+    EXPECT_EQ(mf::error_code_name(entry.code), entry.name);
+  }
 }
 
 TEST(error_code, InvalidArgument_DistinctFromNumerical) {

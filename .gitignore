@@ -28,10 +28,16 @@ compile_commands.json
 .idea/
 *.swp
 .DS_Store
-`
 # Claude Code local overrides
 .claude/settings.local.json
 .claude/worktrees
 
 # Python
 __pycache__/
+
+# WebAssembly toolchain and web app
+/.emsdk/
+/web/node_modules/
+/web/dist/
+/web/coverage/
+/web/src/wasm/mf_wasm.js

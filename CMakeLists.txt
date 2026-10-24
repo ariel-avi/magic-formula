@@ -27,6 +27,7 @@ option(MF_BUILD_TESTS "Build the unit and module tests" ON)
 option(MF_ENABLE_COVERAGE "Instrument project targets for gcov coverage and add the 'coverage' target" OFF)
 option(MF_WARNINGS_AS_ERRORS "Treat compiler warnings as errors on project targets" ON)
 option(MF_BUILD_BENCH "Build the Google Benchmark executable mf_bench from bench/ (not a CTest test, not coverage-gated)" OFF)
+option(MF_BUILD_WASM "Build the WebAssembly module mf_wasm from wasm/ (Emscripten toolchain, wasm preset)" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(ClangFormat)
@@ -59,7 +60,8 @@ file(GLOB_RECURSE MF_FORMAT_FILES CONFIGURE_DEPENDS
         "${PROJECT_SOURCE_DIR}/include/*.hpp"
         "${PROJECT_SOURCE_DIR}/src/*.hpp" "${PROJECT_SOURCE_DIR}/src/*.cpp"
         "${PROJECT_SOURCE_DIR}/tests/*.hpp" "${PROJECT_SOURCE_DIR}/tests/*.cpp"
-        "${PROJECT_SOURCE_DIR}/bench/*.hpp" "${PROJECT_SOURCE_DIR}/bench/*.cpp")
+        "${PROJECT_SOURCE_DIR}/bench/*.hpp" "${PROJECT_SOURCE_DIR}/bench/*.cpp"
+        "${PROJECT_SOURCE_DIR}/wasm/*.cpp")
 add_clang_format_for(magic_formula FILES ${MF_FORMAT_FILES})
 add_clang_tidy_for(mflib)
 add_clang_tidy_for(mf)
@@ -86,4 +88,12 @@ if (MF_ENABLE_COVERAGE)
             FAIL_UNDER_BRANCH 100
             CTEST_ARGS --output-on-failure --no-tests=error
             DEPENDS mf ${MF_TEST_TARGETS})
+endif ()
+
+# WebAssembly module (wasm preset only): embind adapter in wasm/, linked against mflib; not part of the native build.
+if (MF_BUILD_WASM)
+    if (NOT EMSCRIPTEN)
+        message(FATAL_ERROR "MF_BUILD_WASM needs the Emscripten toolchain (wasm preset)")
+    endif ()
+    add_subdirectory(wasm)
 endif ()
