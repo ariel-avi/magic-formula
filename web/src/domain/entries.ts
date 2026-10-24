@@ -1,7 +1,37 @@
 import type { TirEntry } from './model';
+import { parseNumber } from './numbers';
+
+export type EntryKind = 'number' | 'unit' | 'text';
+
+/** 'unit' for entries of the UNITS section, 'number' for unquoted entries that parse as a number, 'text' otherwise. */
+export function entryKind(entry: TirEntry): EntryKind {
+  if (entry.section.toUpperCase() === 'UNITS') {
+    return 'unit';
+  }
+  return !entry.quoted && parseNumber(entry.value).ok ? 'number' : 'text';
+}
+
+export interface EntryGroup {
+  section: string;
+  entries: TirEntry[];
+}
+
+/** Groups with only the entries whose key contains `filter` (case-insensitive); empty groups are dropped. */
+export function filterGroups(groups: readonly EntryGroup[], filter: string): EntryGroup[] {
+  const needle = filter.trim().toUpperCase();
+  if (needle === '') {
+    return groups.slice();
+  }
+  return groups
+    .map((group) => ({
+      section: group.section,
+      entries: group.entries.filter((entry) => entry.key.toUpperCase().includes(needle)),
+    }))
+    .filter((group) => group.entries.length > 0);
+}
 
 /** Groups entries by section, in order of first appearance. */
-export function groupBySection(entries: readonly TirEntry[]): Array<{ section: string; entries: TirEntry[] }> {
+export function groupBySection(entries: readonly TirEntry[]): EntryGroup[] {
   const groups = new Map<string, TirEntry[]>();
   for (const entry of entries) {
     const group = groups.get(entry.section);

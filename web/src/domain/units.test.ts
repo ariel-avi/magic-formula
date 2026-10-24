@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { displayUnit } from './units';
+import { displayUnit, hasUnit } from './units';
+
+describe('hasUnit', () => {
+  it('is false for empty and dash labels', () => {
+    expect(hasUnit('')).toBe(false);
+    expect(hasUnit('-')).toBe(false);
+  });
+
+  it('is true for a real unit', () => {
+    expect(hasUnit('N')).toBe(true);
+  });
+});
 
 describe('displayUnit', () => {
   it('shows radians as degrees', () => {

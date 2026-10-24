@@ -1,3 +1,4 @@
+import { parseNumber } from './numbers';
 import { err, ok, type Result } from './result';
 
 /** `points` values from `start` to `end`, both included. The range may be descending. */
@@ -8,8 +9,6 @@ export function linspace(start: number, end: number, points: number): number[] {
   const last = points - 1;
   return Array.from({ length: points }, (_, i) => (i === last ? end : start + ((end - start) * i) / last));
 }
-
-const NUMBER_TOKEN = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
 
 /** Parses a list of numbers separated by commas, blanks or tabs. */
 export function parseValueList(text: string): Result<number[], string> {
@@ -22,10 +21,11 @@ export function parseValueList(text: string): Result<number[], string> {
     if (token === '') {
       return err('Empty value in the list.');
     }
-    if (!NUMBER_TOKEN.test(token) || !Number.isFinite(Number(token))) {
-      return err(`'${token}' is not a finite number.`);
+    const parsed = parseNumber(token);
+    if (!parsed.ok) {
+      return parsed;
     }
-    values.push(Number(token));
+    values.push(parsed.value);
   }
   return ok(values);
 }

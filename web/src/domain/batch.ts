@@ -43,3 +43,12 @@ export function buildBatch(spec: ChartSpec, inputs: readonly InputChannel[]): Sw
 
   return { inputs: data, rows, grid, combinations };
 }
+
+/** Location of a failing solver row, e.g. 'FZ = 2000, SA = -15': the step values of the row's combination, then the swept value. */
+export function describeBatchRow(spec: ChartSpec, batch: SweepBatch, row: number): string {
+  const { points } = spec.sweep;
+  const combination = batch.combinations[Math.floor(row / points)];
+  const parts = spec.steps.map((step, k) => `${step.variable} = ${combination.values[k]}`);
+  parts.push(`${spec.sweep.variable} = ${batch.grid[row % points]}`);
+  return parts.join(', ');
+}

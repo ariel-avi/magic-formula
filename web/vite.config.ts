@@ -26,7 +26,7 @@ export default defineConfig({
         test: {
           name: 'unit',
           include: ['src/**/*.test.ts'],
-          exclude: ['src/**/*.smoke.test.ts'],
+          exclude: ['src/**/*.smoke.test.ts', 'e2e/**'],
           environment: 'node',
         },
       },

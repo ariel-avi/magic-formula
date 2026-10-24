@@ -18,6 +18,11 @@ const UNITS: Record<string, DisplayUnit> = {
   'N*m': identity('N·m'),
 };
 
+/** False for '' and '-' (dimensionless): no unit is printed. */
+export function hasUnit(label: string): boolean {
+  return label !== '-' && label !== '';
+}
+
 export function displayUnit(siUnit: string): DisplayUnit {
   return UNITS[siUnit] ?? identity(siUnit);
 }

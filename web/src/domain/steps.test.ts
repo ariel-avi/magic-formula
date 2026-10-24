@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ChartSpec, StepSpec } from './chart-spec';
+import { MAX_STEP_VALUES, type ChartSpec, type StepSpec } from './chart-spec';
 import type { InputChannel, ModelInfo, OutputChannel } from './model';
 import {
   addStep,
@@ -174,9 +174,9 @@ describe('validateChartSpec', () => {
     expect(validate(spec)).toEqual(["Step variable 'FZ' is used twice."]);
   });
 
-  it.each([[[]], [Array.from({ length: 11 }, (_, i) => i)]])('reports a step with %j values', (values) => {
+  it.each([[[]], [Array.from({ length: MAX_STEP_VALUES + 1 }, (_, i) => i)]])('reports a step with %j values', (values) => {
     const spec = makeSpec({ steps: [step('FZ', values, 'hue')] });
-    expect(validate(spec)).toEqual(["Step 'FZ' needs 1 to 10 values."]);
+    expect(validate(spec)).toEqual([`Step 'FZ' needs 1 to ${MAX_STEP_VALUES} values.`]);
   });
 
   it('reports a non-finite step value', () => {

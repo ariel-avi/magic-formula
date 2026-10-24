@@ -36,6 +36,14 @@ cmake --preset release && cmake --build --preset release
 
 `web/` is a Vite + React + TypeScript + Tailwind + shadcn/ui + Recharts app that runs the existing C++ library in the browser, compiled to WebAssembly (Emscripten, embind adapter in `wasm/`). It loads, edits and saves `.tir` files, shows the model, and plots sweeps (any input as the X axis, up to two step variables, hue or saturation per step).
 
+The app is a full-width three-pane workbench on one page: Inputs | Plot | Tire model. The model summary and the parameter panel (grouped by section, filterable) sit next to the chart.
+
+- **Inputs:** one row per model input (FZ, SA, SR, IA, VX, and P when the model has it), each with a Sweep / Step / Value switch. Exactly one input is swept; choosing Sweep on another input turns the old one into a held value. At most 2 inputs are stepped.
+- **Step values** are chips: add with Enter or the + button, remove with x, and "Range..." fills evenly spaced values. A step takes up to 8 values. Every combination is one line, coloured by Hue or Saturation per step.
+- **Plot:** Plot and Table views, a legend, output channel selection and a pure-slip (uncombined) switch.
+- **Parameters:** numeric coefficients accept only valid numbers (invalid input shows an error and is not applied). `[UNITS]` entries are dropdowns that list the SI unit, the only one the solver supports, plus common non-SI units shown as "not supported yet".
+- **Theme:** a light/dark toggle in the header. The default follows the system setting and the choice is remembered in the browser.
+
 Prerequisites: python3, Conan 2, CMake >= 4.0, Ninja, Node 24 and npm; network access once, to fetch the project-local Emscripten SDK. The bash scripts are macOS/Linux only.
 
 ```bash
@@ -46,6 +54,8 @@ npm run dev                       # http://localhost:5173
 ```
 
 Tests (from `web/`): `npm test` (unit tests plus a Node smoke test that loads the built wasm and solves a sweep), `npm run test:unit`, `npm run test:smoke`, `npm run typecheck`, `npm run build`. The wasm module must be built first (`npm run dev` checks this).
+
+UI tests: `npm run test:e2e` runs the Playwright tests in `web/e2e/` against the Vite dev server, using the locally installed Google Chrome (channel `chrome`). If Chrome is not installed: `npx playwright install chromium`, then `PLAYWRIGHT_CHANNEL=chromium npm run test:e2e`. Light and dark screenshots are written to `web/test-results/screenshots/` and the HTML report to `web/playwright-report/` (both gitignored).
 
 The wasm module is outside the native build and the coverage gate. CI has no web or wasm job yet (follow-up).
 

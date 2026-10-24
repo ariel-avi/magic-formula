@@ -20,9 +20,14 @@
     "predev": "node scripts/check-wasm.mjs",
     "prebuild": "node scripts/check-wasm.mjs",
     "pretest": "node scripts/check-wasm.mjs",
-    "pretest:smoke": "node scripts/check-wasm.mjs"
+    "pretest:smoke": "node scripts/check-wasm.mjs",
+    "test:e2e": "playwright test",
+    "pretest:e2e": "node scripts/check-wasm.mjs"
   },
   "dependencies": {
+    "@fontsource-variable/ibm-plex-sans": "5.3.0",
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@fontsource/stix-two-text": "5.3.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "lucide-react": "0.545.0",
@@ -34,6 +39,7 @@
     "tailwind-merge": "3.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.0",
     "@tailwindcss/vite": "4.1.14",
     "@types/node": "24.7.0",
     "@types/react": "19.2.2",

@@ -12,7 +12,7 @@ A C++ library and CLI that implement Pacejka Magic Formula tire models.
 
 ## Tech stack
 
-C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19; CI also builds with MSVC on Windows and Homebrew LLVM 21 on macOS) · CMake >= 4.0 · Conan 2 · Eigen (vectorised batch evaluation) · GoogleTest · Google Benchmark · CTest · gcovr (coverage) · clang-format / clang-tidy · Emscripten 5.0.7 (project-local emsdk in `.emsdk/`) for the WebAssembly module · web app: Node 24, npm, TypeScript (strict), React, Vite, Tailwind CSS v4, shadcn/ui, Recharts, Vitest.
+C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19; CI also builds with MSVC on Windows and Homebrew LLVM 21 on macOS) · CMake >= 4.0 · Conan 2 · Eigen (vectorised batch evaluation) · GoogleTest · Google Benchmark · CTest · gcovr (coverage) · clang-format / clang-tidy · Emscripten 5.0.7 (project-local emsdk in `.emsdk/`) for the WebAssembly module · web app: Node 24, npm, TypeScript (strict), React, Vite, Tailwind CSS v4, shadcn/ui, Recharts, Vitest, Playwright.
 
 ## Layout (contract)
 
@@ -41,7 +41,9 @@ wasm/                    mf_wasm.cpp: embind adapter (namespace mf::wasm; not in
                          the wasm preset); setup-emsdk.sh, build.sh, CMakeLists.txt
 web/                     Vite + React app with its own package.json: src/domain/ (pure TS, 100% Vitest threshold),
                          src/wasm/ (solver.ts adapter; mf_wasm.d.ts committed contract, mf_wasm.js generated and
-                         gitignored), src/components/ (ChartPanel, ParameterEditor), src/components/ui/ (shadcn)
+                         gitignored), src/components/ (inputs/, chart/, parameters/,
+                         shell components), src/components/ui/ (shadcn), e2e/ (Playwright; playwright.config.ts,
+                         tsconfig.e2e.json)
 conan/profiles/wasm      Emscripten host profile (tests off) used by wasm/build.sh
 .emsdk/                  project-local Emscripten SDK (gitignored; created by wasm/setup-emsdk.sh)
 conanfile.py             dependencies (eigen; test: gtest, benchmark by default for Release only, override with -o with_benchmark=True|False; -o with_tests=False drops both; generators in build/conan/<build_type>, or build/conan/wasm for os=Emscripten)
@@ -73,6 +75,7 @@ bash wasm/build.sh                # conan (wasm profile) + cmake --preset wasm -
 cd web && npm ci                  # dependencies from the committed package-lock.json
 npm run dev                       # http://localhost:5173
 npm run typecheck && npm run test:unit && npm run test:coverage && npm run test:smoke && npm run build
+npm run test:e2e                  # Playwright UI tests (Chrome; PLAYWRIGHT_CHANNEL=chromium fallback)
 ```
 
 Platform notes: the commands above are the Linux contract. On Windows (MSVC) use `-s compiler.cppstd=23`: Conan's msvc settings stop at 23 and CMake has no C++26 flag for MSVC, so the root `CMakeLists.txt` falls back to C++23 wherever `CMAKE_CXX26_STANDARD_COMPILE_OPTION` is undefined (MSVC, AppleClang). `conanfile.py` pins the Ninja generator (the presets use Ninja on every OS), so run from an MSVC developer prompt. macOS uses Homebrew LLVM 21 because AppleClang's libc++ lacks floating-point `from_chars` and `views::join_with`. `.gitattributes` forces LF so fixtures are byte-identical on Windows. Details: `build-and-test` skill, "Windows and macOS".

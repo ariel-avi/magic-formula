@@ -26,4 +26,4 @@ export interface ChartSpec {
 export const MIN_SWEEP_POINTS = 2;
 export const MAX_SWEEP_POINTS = 501;
 export const MAX_STEPS = 2;
-export const MAX_STEP_VALUES = 10;
+export const MAX_STEP_VALUES = 8; // one value per categorical palette slot

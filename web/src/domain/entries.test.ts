@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { changedEntryIds, findNumber, groupBySection } from './entries';
+import { changedEntryIds, entryKind, filterGroups, findNumber, groupBySection } from './entries';
 import type { TirEntry } from './model';
 
 const entry = (section: string, key: string, value: string, quoted = false): TirEntry => ({
@@ -33,6 +33,43 @@ describe('changedEntryIds', () => {
 
   it('reports nothing when unchanged', () => {
     expect(changedEntryIds(original, original).size).toBe(0);
+  });
+});
+
+describe('entryKind', () => {
+  it('marks entries of the UNITS section as units, quoted or not', () => {
+    expect(entryKind(entry('UNITS', 'LENGTH', 'meter', true))).toBe('unit');
+    expect(entryKind(entry('UNITS', 'LENGTH', 'meter'))).toBe('unit');
+    expect(entryKind(entry('units', 'LENGTH', 'meter'))).toBe('unit');
+  });
+
+  it('marks quoted entries as text and the rest as numbers', () => {
+    expect(entryKind(entry('MODEL', 'TYRESIDE', 'LEFT', true))).toBe('text');
+    expect(entryKind(entry('MODEL', 'FITTYP', '6'))).toBe('number');
+  });
+
+  it('marks an unquoted value that is not a number as text', () => {
+    expect(entryKind(entry('MODEL', 'TYRESIDE', 'LEFT'))).toBe('text');
+  });
+});
+
+describe('filterGroups', () => {
+  const groups = groupBySection([entry('A', 'PDY1', '1'), entry('A', 'PCY1', '2'), entry('B', 'QSY1', '3')]);
+
+  it('returns all groups for a blank filter', () => {
+    expect(filterGroups(groups, '')).toEqual(groups);
+    expect(filterGroups(groups, '   ')).toEqual(groups);
+  });
+
+  it('matches keys case-insensitively and drops empty groups', () => {
+    const result = filterGroups(groups, 'pdy');
+    expect(result).toHaveLength(1);
+    expect(result[0].section).toBe('A');
+    expect(result[0].entries.map((e) => e.key)).toEqual(['PDY1']);
+  });
+
+  it('returns nothing when no key matches', () => {
+    expect(filterGroups(groups, 'zzz')).toEqual([]);
   });
 });
 

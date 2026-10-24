@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildBatch } from './batch';
+import { buildBatch, describeBatchRow } from './batch';
 import type { ChartSpec } from './chart-spec';
 import type { InputChannel } from './model';
 
@@ -14,6 +14,19 @@ const spec: ChartSpec = {
   output: 'FY',
   uncombined: false,
 };
+
+describe('describeBatchRow', () => {
+  it('names the step values and the swept value of a row', () => {
+    const batch = buildBatch(spec, layout);
+    expect(describeBatchRow(spec, batch, 4)).toBe('FZ = 5000, SA = 0');
+    expect(describeBatchRow(spec, batch, 0)).toBe('FZ = 3000, SA = -10');
+  });
+
+  it('names only the swept value without steps', () => {
+    const plain = { ...spec, steps: [], fixed: { ...spec.fixed, FZ: 4000 } };
+    expect(describeBatchRow(plain, buildBatch(plain, layout), 2)).toBe('SA = 10');
+  });
+});
 
 describe('buildBatch', () => {
   const batch = buildBatch(spec, layout);

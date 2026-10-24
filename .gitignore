@@ -40,4 +40,6 @@ __pycache__/
 /web/node_modules/
 /web/dist/
 /web/coverage/
+/web/test-results/
+/web/playwright-report/
 /web/src/wasm/mf_wasm.js

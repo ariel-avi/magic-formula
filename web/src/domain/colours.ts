@@ -1,38 +1,69 @@
 import type { ColourMode, StepSpec } from './chart-spec';
 import type { Combination } from './steps';
+import type { Theme } from './theme';
 
-export interface Hsl {
-  h: number;
-  s: number;
+/** Lightness 0..1, chroma >= 0, hue in degrees. */
+export interface Oklch {
   l: number;
+  c: number;
+  h: number;
 }
 
-export const BASE_HUE = 210;
-export const HUE_OFFSET = 210;
-export const SATURATION_MAX = 90;
-export const SATURATION_MIN = 25;
-export const LIGHTNESS = 45;
+/**
+ * Fixed categorical order, never cycled; checked for colour-vision deficiency on adjacent pairs in both themes.
+ */
+export const SERIES_PALETTES: Readonly<Record<Theme, readonly Oklch[]>> = {
+  light: [
+    { l: 0.575, c: 0.163, h: 255.5 },
+    { l: 0.671, c: 0.175, h: 40.6 },
+    { l: 0.669, c: 0.141, h: 162.1 },
+    { l: 0.764, c: 0.161, h: 75.1 },
+    { l: 0.716, c: 0.141, h: 357.4 },
+    { l: 0.529, c: 0.18, h: 142.5 },
+    { l: 0.527, c: 0.197, h: 283.4 },
+    { l: 0.623, c: 0.191, h: 24.9 },
+  ],
+  dark: [
+    { l: 0.622, c: 0.161, h: 255.1 },
+    { l: 0.622, c: 0.173, h: 40.1 },
+    { l: 0.621, c: 0.128, h: 163.1 },
+    { l: 0.67, c: 0.143, h: 73.2 },
+    { l: 0.622, c: 0.171, h: 0.8 },
+    { l: 0.529, c: 0.18, h: 142.5 },
+    { l: 0.67, c: 0.145, h: 286.8 },
+    { l: 0.669, c: 0.159, h: 22.3 },
+  ],
+};
+
+export const SATURATION_MIN_FACTOR = 0.25;
 
 /** One strategy per colour mode: which colour component a step drives. */
-const STRATEGIES: Record<ColourMode, (index: number, count: number) => Partial<Hsl>> = {
-  hue: (index, count) => ({ h: (HUE_OFFSET + (index * 360) / count) % 360 }),
-  saturation: (index, count) => ({
-    s: count === 1 ? SATURATION_MAX : SATURATION_MAX - (index * (SATURATION_MAX - SATURATION_MIN)) / (count - 1),
+const STRATEGIES: Record<
+  ColourMode,
+  (colour: Oklch, index: number, count: number, palette: readonly Oklch[]) => Oklch
+> = {
+  hue: (_colour, index, _count, palette) => palette[index],
+  saturation: (colour, index, count) => ({
+    ...colour,
+    c: colour.c * (count === 1 ? 1 : 1 - (index * (1 - SATURATION_MIN_FACTOR)) / (count - 1)),
   }),
 };
 
-export function colourFor(combination: Combination, steps: readonly StepSpec[]): Hsl {
-  let colour: Hsl = { h: BASE_HUE, s: SATURATION_MAX, l: LIGHTNESS };
-  steps.forEach((step, k) => {
-    colour = { ...colour, ...STRATEGIES[step.colourMode](combination.indices[k], step.values.length) };
-  });
+/** Modes are applied in this order whatever the step order: hue picks the slot, saturation scales its chroma. */
+const ORDER: readonly ColourMode[] = ['hue', 'saturation'];
+
+export function colourFor(combination: Combination, steps: readonly StepSpec[], theme: Theme): Oklch {
+  const palette = SERIES_PALETTES[theme];
+  let colour = palette[0];
+  for (const mode of ORDER) {
+    const k = steps.findIndex((step) => step.colourMode === mode);
+    if (k >= 0) {
+      colour = STRATEGIES[mode](colour, combination.indices[k], steps[k].values.length, palette);
+    }
+  }
   return colour;
 }
 
-function fmt(value: number): string {
-  return String(Number(value.toFixed(1)));
-}
-
-export function toCss(colour: Hsl): string {
-  return `hsl(${fmt(colour.h)} ${fmt(colour.s)}% ${fmt(colour.l)}%)`;
+export function toCss(colour: Oklch): string {
+  return `oklch(${Number(colour.l.toFixed(3))} ${Number(colour.c.toFixed(3))} ${Number(colour.h.toFixed(1))})`;
 }

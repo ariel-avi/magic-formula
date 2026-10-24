@@ -3,7 +3,8 @@ import type { SweepBatch } from './batch';
 import { colourFor, toCss } from './colours';
 import type { InputChannel, OutputChannel } from './model';
 import type { Combination } from './steps';
-import { displayUnit } from './units';
+import type { Theme } from './theme';
+import { displayUnit, hasUnit } from './units';
 
 export interface Series {
   key: string;
@@ -16,10 +17,6 @@ export interface ChartData {
   series: Series[];
   xLabel: string;
   yLabel: string;
-}
-
-function hasUnit(label: string): boolean {
-  return label !== '-' && label !== '';
 }
 
 function axisLabel(name: string, siUnit: string): string {
@@ -48,6 +45,7 @@ export function buildChartData(
   outputs: Float64Array,
   inputs: readonly InputChannel[],
   outputChannels: readonly OutputChannel[],
+  theme: Theme,
 ): ChartData {
   const o = outputChannels.findIndex((channel) => channel.name === spec.output);
   if (o < 0) {
@@ -59,7 +57,7 @@ export function buildChartData(
   const series: Series[] = batch.combinations.map((combination) => ({
     key: `s${combination.indices.join('_')}`,
     label: comboLabel(combination, spec.steps, inputs) || spec.output,
-    colour: toCss(colourFor(combination, spec.steps)),
+    colour: toCss(colourFor(combination, spec.steps, theme)),
   }));
 
   const rows = batch.grid.map((x, i) => {
