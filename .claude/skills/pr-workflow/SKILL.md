@@ -46,7 +46,7 @@ Create from an up-to-date `master` (`git switch master && git pull --ff-only && 
 ```
 
 - Types: `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `build`, `ci`, `chore`.
-- Scopes: `core`, `pac2002`, `mf52`, `io`, `app`, `bench`, `tests`, `cmake`, `conan`, `agents`, `skills`, `workflows`.
+- Scopes: `core`, `pac2002`, `mf52`, `io`, `app`, `bench`, `tests`, `cmake`, `conan`, `python`, `agents`, `skills`, `workflows`.
 - Stage files explicitly (`git add <paths>`). Never `git add -A` blindly; check `git status` first and make sure no build outputs or secrets are included.
 - Add any attribution lines the session requires at the end of the message.
 

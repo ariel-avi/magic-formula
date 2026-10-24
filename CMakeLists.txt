@@ -26,6 +26,7 @@ endif ()
 option(MF_BUILD_TESTS "Build the unit and module tests" ON)
 option(MF_ENABLE_COVERAGE "Instrument project targets for gcov coverage and add the 'coverage' target" OFF)
 option(MF_WARNINGS_AS_ERRORS "Treat compiler warnings as errors on project targets" ON)
+option(MF_BUILD_PYTHON "Build the pybind11 extension magic_formula._core from python/ (python/pyproject.toml sets it; not a CTest test, not coverage-gated)" OFF)
 option(MF_BUILD_BENCH "Build the Google Benchmark executable mf_bench from bench/ (not a CTest test, not coverage-gated)" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
@@ -60,6 +61,8 @@ file(GLOB_RECURSE MF_FORMAT_FILES CONFIGURE_DEPENDS
         "${PROJECT_SOURCE_DIR}/src/*.hpp" "${PROJECT_SOURCE_DIR}/src/*.cpp"
         "${PROJECT_SOURCE_DIR}/tests/*.hpp" "${PROJECT_SOURCE_DIR}/tests/*.cpp"
         "${PROJECT_SOURCE_DIR}/bench/*.hpp" "${PROJECT_SOURCE_DIR}/bench/*.cpp")
+file(GLOB_RECURSE MF_PYTHON_FORMAT_FILES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/python/bindings/*.cpp")
+list(APPEND MF_FORMAT_FILES ${MF_PYTHON_FORMAT_FILES})
 add_clang_format_for(magic_formula FILES ${MF_FORMAT_FILES})
 add_clang_tidy_for(mflib)
 add_clang_tidy_for(mf)
@@ -72,6 +75,11 @@ endif ()
 # Google Benchmark (bench/mf_bench): ON in the release preset; never a CTest test and never coverage-gated.
 if (MF_BUILD_BENCH)
     add_subdirectory(bench)
+endif ()
+
+# Python extension (python/): pybind11 adapter that embeds mflib; built by scikit-build-core, tested by pytest.
+if (MF_BUILD_PYTHON)
+    add_subdirectory(python)
 endif ()
 
 if (MF_ENABLE_COVERAGE)

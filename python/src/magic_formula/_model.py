@@ -1,0 +1,202 @@
+"""Tire model facade over the compiled ``_core`` extension."""
+
+from __future__ import annotations
+
+import os
+import warnings as _warnings
+from typing import NamedTuple
+
+import numpy as np
+import numpy.typing as npt
+
+from magic_formula import _core
+from magic_formula._errors import MagicFormulaError, MagicFormulaWarning
+
+
+class Channel(NamedTuple):
+    """A named input or output channel."""
+
+    name: str  # upper-case layout name, e.g. 'FZ'
+    unit: str  # SI unit
+
+
+def _checked(result):
+    """Return ``result`` or raise MagicFormulaError when it is a ``_core.Error``."""
+    if isinstance(result, _core.Error):
+        raise MagicFormulaError(
+            result.text,
+            code=result.code,
+            message=result.message,
+            file=result.file,
+            line=result.line,
+            key=result.key,
+            row=result.row,
+        )
+    return result
+
+
+class TireModel:
+    """A loaded tire model.
+
+    Units are SI (N, m, rad, m/s), ISO-W axis system. Inputs are the columns
+    ``FZ, SA, SR, IA, VX`` (see ``inputs``); outputs are listed in ``outputs``.
+    A model is immutable after loading and the GIL is released during
+    evaluation, so threads may share one instance. Do not mutate an input array
+    from another thread while a call is using it.
+    """
+
+    __slots__ = ('_core', '_inputs', '_outputs', '_limits')
+
+    def __init__(self, core: _core.Model) -> None:
+        """Wrap a ``_core.Model``; use ``load_tir`` or ``parse_tir`` instead."""
+        self._core = core
+        self._inputs = tuple(Channel(n, u) for n, u in core.inputs)
+        self._outputs = tuple(Channel(n, u) for n, u in core.outputs)
+        self._limits = dict(core.limits)
+
+    def __repr__(self) -> str:
+        """Return e.g. ``TireModel(name='PAC2002', combined=True)``."""
+        return f'TireModel(name={self.name!r}, combined={self.combined!r})'
+
+    @property
+    def name(self) -> str:
+        """Model name, e.g. ``'PAC2002'``."""
+        return self._core.name
+
+    @property
+    def combined(self) -> bool:
+        """Whether combined-slip coefficients are used."""
+        return self._core.combined
+
+    @property
+    def inputs(self) -> tuple[Channel, ...]:
+        """Input channels in column order."""
+        return self._inputs
+
+    @property
+    def outputs(self) -> tuple[Channel, ...]:
+        """Output channels in column order."""
+        return self._outputs
+
+    @property
+    def limits(self) -> dict[str, float]:
+        """Validity limits (a fresh copy on each access), in layout order."""
+        return dict(self._limits)
+
+    @property
+    def fittyp(self) -> int | None:
+        """The FITTYP value of the file, ``None`` when absent."""
+        return self._core.fittyp
+
+    @property
+    def use_mode(self) -> int | None:
+        """The USE_MODE value of the file, ``None`` when absent."""
+        return self._core.use_mode
+
+    @property
+    def tyre_side(self) -> str:
+        """Tyre side, ``'LEFT'`` or ``'RIGHT'``."""
+        return self._core.tyre_side
+
+    @property
+    def warnings(self) -> tuple[str, ...]:
+        """Diagnostics produced while loading."""
+        return tuple(self._core.warnings)
+
+    @property
+    def ignored_keys(self) -> tuple[str, ...]:
+        """File keys that the model does not use."""
+        return tuple(self._core.ignored_keys)
+
+    def evaluate_batch(
+        self, inputs: npt.ArrayLike, *, check: bool = True
+    ) -> npt.NDArray[np.float64]:
+        """Evaluate rows of operating points.
+
+        Args:
+            inputs: array-like of shape ``(N, n_inputs)``, columns in ``inputs``
+                order (FZ N, SA rad, SR -, IA rad, VX m/s).
+            check: when true, validate every row and raise MagicFormulaError on
+                the first invalid or non-finite one; when false, skip validation.
+                The shape is always checked.
+
+        Returns:
+            A float64 array of shape ``(N, n_outputs)``.
+        """
+        return _checked(self._core.evaluate_batch(inputs, check))
+
+    def evaluate(
+        self, *, check: bool = True, **inputs: npt.ArrayLike
+    ) -> dict[str, npt.NDArray[np.float64]]:
+        """Evaluate named channels with NumPy broadcasting.
+
+        Args:
+            check: see ``evaluate_batch``.
+            **inputs: one array-like per input channel, keyed by lower-case name
+                (fz, sa, sr, ia, vx); SI units, rad.
+
+        Returns:
+            A dict of float64 arrays keyed by lower-case output name, each with
+            the broadcast shape (0-d for scalar inputs). ``MagicFormulaError.row``
+            is the flat C-order index into the broadcast inputs.
+
+        Raises:
+            TypeError: an input is missing or unknown.
+            ValueError: the input shapes do not broadcast.
+        """
+        names = [c.name.lower() for c in self._inputs]
+        unknown = sorted(set(inputs) - set(names))
+        if unknown:
+            raise TypeError(
+                f'evaluate() got unexpected input(s) for {self.name}: '
+                f'{", ".join(unknown)}; expected {", ".join(names)}'
+            )
+        missing = [n for n in names if n not in inputs]
+        if missing:
+            raise TypeError(
+                f'evaluate() missing input(s) for {self.name}: {", ".join(missing)}'
+            )
+        arrays = np.broadcast_arrays(
+            *(np.asarray(inputs[n], dtype=np.float64) for n in names)
+        )
+        shape = arrays[0].shape
+        matrix = np.empty((arrays[0].size, len(names)), dtype=np.float64, order='F')
+        for j, a in enumerate(arrays):
+            matrix[:, j] = a.reshape(-1)
+        out = self.evaluate_batch(matrix, check=check)
+        return {c.name.lower(): out[:, j].reshape(shape) for j, c in enumerate(self._outputs)}
+
+
+def _wrap(result) -> TireModel:
+    """Build a TireModel from a ``_core`` result and re-emit its load warnings."""
+    model = TireModel(_checked(result))
+    for text in model.warnings:
+        _warnings.warn(text, MagicFormulaWarning, stacklevel=3)
+    return model
+
+
+def load_tir(path: str | os.PathLike[str], *, combined: bool = True) -> TireModel:
+    """Load a tire model from a ``.tir`` file.
+
+    Args:
+        path: file path.
+        combined: use the combined-slip coefficients.
+
+    Raises:
+        MagicFormulaError: the file is unreadable, invalid or an unsupported model.
+    """
+    return _wrap(_core.load_tir(os.fspath(path), combined))
+
+
+def parse_tir(text: str, *, file_name: str = '', combined: bool = True) -> TireModel:
+    """Parse a tire model from ``.tir`` text.
+
+    Args:
+        text: the file content.
+        file_name: name used in error locations.
+        combined: use the combined-slip coefficients.
+
+    Raises:
+        MagicFormulaError: the text is invalid or an unsupported model.
+    """
+    return _wrap(_core.parse_tir(text, file_name, combined))
