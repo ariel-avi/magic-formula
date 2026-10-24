@@ -46,7 +46,7 @@ namespace mf::io {
       double factor;
     };
 
-    /// The only unit table. The first entry of a column is its SI unit, which applies when no unit is given.
+    /// Every accepted (column, unit) pair and its factor to SI; the first entry of a column is its SI unit.
     constexpr std::array<unit_entry, 8> UNITS{
         unit_entry{.column = "FZ", .unit = "N", .factor = 1.0},
         unit_entry{.column = "SA", .unit = "rad", .factor = 1.0},
@@ -64,18 +64,13 @@ namespace mf::io {
       double factor = 1.0;
     };
 
-    /// The parsed header line.
-    struct header {
-      std::vector<column_spec> columns;
-    };
+    /// Characters that mark the legacy NAME[unit] header form.
+    constexpr std::string_view LEGACY_UNIT_MARKS = "[]";
 
-    /// Parse state: the file name for diagnostics, the header (once seen), the row-major values read so far and the
-    /// table being built (columns, header line and row lines).
-    struct parse_state {
-      std::string file;
-      std::optional<header> head;
-      std::vector<double> values;
-      input_table table;
+    /// The unread rest of the text and the 1-based number of the last line read (0 before the first line).
+    struct line_cursor {
+      std::string_view rest;
+      std::size_t line = 0;
     };
 
     /// UTF-8 byte order mark, skipped at the start of the text (spreadsheet "CSV UTF-8" exports begin with one).
@@ -108,77 +103,95 @@ namespace mf::io {
       return make_error(code, std::move(message), std::move(where));
     }
 
-    /// "N, ..." list of the units accepted for `column`, for diagnostics.
-    std::string supported_units(std::string_view column) {
+    /// Reads lines up to the next content line (not blank, not a '#' comment), clears `fields` and splits that line
+    /// into it. Returns its 1-based line number, or std::nullopt when the text ends first. A final line without '\n' is
+    /// a normal line. `fields` is an out-parameter.
+    std::optional<std::size_t> next_content_line(line_cursor &cursor, std::vector<std::string_view> &fields) {
+      while (!cursor.rest.empty()) {
+        ++cursor.line;
+        const std::size_t newline = cursor.rest.find('\n');
+        const std::string_view content = detail::trim(cursor.rest.substr(0, newline));
+        // `rest` is not empty here, so size() - 1 is valid; npos (no '\n' left) consumes the rest of the text.
+        cursor.rest.remove_prefix(std::min(newline, cursor.rest.size() - 1) + 1);
+        if (content.empty() || content.starts_with('#')) {
+          continue;
+        }
+        fields.clear();
+        split_fields(content, fields);
+        return cursor.line;
+      }
+      return std::nullopt;
+    }
+
+    /// The units accepted for `column` in table order, joined with `separator`.
+    std::string supported_units(std::string_view column, std::string_view separator) {
       const auto is_column = [column](const unit_entry &entry) { return entry.column == column; };
       const auto unit_name = [](const unit_entry &entry) { return std::string(entry.unit); };
       // Views are not const-iterable in general, so they stay non-const locals.
       auto matching = UNITS | std::views::filter(is_column);
       auto unit_names = matching | std::views::transform(unit_name);
       const std::vector<std::string> names = std::ranges::to<std::vector>(unit_names);
-      return detail::join(names, ", ");
+      return detail::join(names, separator);
     }
 
-    /// One header token, `NAME` or `NAME[unit]`: the column and its unit factor.
-    std::expected<column_spec, error> parse_header_token(std::string_view token, const std::string &file,
-                                                         std::size_t line) {
-      const std::size_t open = token.find('[');
-      const std::string_view name = token.substr(0, open);
-      const auto is_named = [name](const column_def &def) { return detail::iequals_ascii(def.name, name); };
+    /// "FZ: N, SA: rad|deg, SR: -, IA: rad|deg, VX: m/s" for `columns` in header order (P gives "P: Pa").
+    std::string unit_hint(std::span<const column_def *const> columns) {
+      const auto describe = [](const column_def *def) {
+        return std::format("{}: {}", def->name, supported_units(def->name, "|"));
+      };
+      auto described = columns | std::views::transform(describe);
+      const std::vector<std::string> parts = std::ranges::to<std::vector>(described);
+      return detail::join(parts, ", ");
+    }
+
+    /// True when `columns` already holds `def`.
+    bool has_column(std::span<const column_def *const> columns, const column_def *def) {
+      return std::ranges::find(columns, def) != columns.end();
+    }
+
+    /// Result types of the header and unit-line steps.
+    using token_result = std::expected<const column_def *, error>;
+    using header_result = std::expected<std::vector<const column_def *>, error>;
+    using spec_result = std::expected<column_spec, error>;
+    using unit_line_result = std::expected<std::vector<column_spec>, error>;
+
+    /// One header field: a known column name without a unit. A '[' or ']' is the legacy NAME[unit] form (key = the
+    /// upper-case text before the first mark); an unknown name gives SYNTAX with the upper-case token as key.
+    token_result parse_header_token(std::string_view token, const std::string &file, std::size_t line) {
+      const std::size_t mark = token.find_first_of(LEGACY_UNIT_MARKS);
+      if (mark != std::string_view::npos) {
+        std::string message = std::format("column header '{}' uses the legacy NAME[unit] form; ", token);
+        message += "write the column name alone and give its unit on the unit line (the line after the header)";
+        const std::string key = detail::to_upper_ascii(token.substr(0, mark));
+        return table_error(error_code::SYNTAX, std::move(message), file, line, key);
+      }
+      const auto is_named = [token](const column_def &def) { return detail::iequals_ascii(def.name, token); };
       // Searched through a span: its iterator is a class type on every standard library (no raw pointer).
       const std::span<const column_def> known_columns(COLUMNS);
       const auto column = std::ranges::find_if(known_columns, is_named);
       if (column == known_columns.end()) {
         std::string message = std::format("unknown column {} (expected FZ, SA, SR, IA, VX, P)", token);
-        return table_error(error_code::SYNTAX, std::move(message), file, line, detail::to_upper_ascii(name));
+        return table_error(error_code::SYNTAX, std::move(message), file, line, detail::to_upper_ascii(token));
       }
-      std::string_view unit;
-      if (open != std::string_view::npos) {
-        const std::size_t close = token.find(']');
-        if (close != token.size() - 1 || close <= open + 1) {
-          return table_error(error_code::SYNTAX,
-                             std::format("malformed unit in column header {} (expected NAME or NAME[unit])", token),
-                             file, line, column->name);
-        }
-        unit = token.substr(open + 1, close - open - 1);
-      }
-      const std::string_view column_name = column->name;
-      const auto accepts = [column_name, unit](const unit_entry &candidate) {
-        return candidate.column == column_name && (unit.empty() || detail::iequals_ascii(candidate.unit, unit));
-      };
-      const std::span<const unit_entry> known_units(UNITS);
-      const auto entry = std::ranges::find_if(known_units, accepts);
-      if (entry == known_units.end()) {
-        return table_error(error_code::UNSUPPORTED_UNIT,
-                           std::format("unsupported unit '{}' for column {} (supported: {})", unit, column->name,
-                                       supported_units(column->name)),
-                           file, line, column->name);
-      }
-      return column_spec{.def = &*column, .factor = entry->factor};
+      return &*column;
     }
 
-    /// True when `columns` already contains `def`.
-    bool has_column(const std::vector<column_spec> &columns, const column_def *def) {
-      return std::ranges::any_of(columns, [def](const column_spec &spec) { return spec.def == def; });
-    }
-
-    /// The header line: every token is a known column with a supported unit, no column twice, all required present.
-    std::expected<header, error> parse_header(std::span<const std::string_view> tokens, const std::string &file,
-                                              std::size_t line) {
-      header result;
+    /// The header line: every field a known name, no column twice, all required columns present.
+    header_result parse_header(std::span<const std::string_view> tokens, const std::string &file, std::size_t line) {
+      std::vector<const column_def *> result;
       for (const std::string_view token : tokens) {
-        const auto spec = parse_header_token(token, file, line);
-        if (!spec.has_value()) {
-          return std::unexpected<error>(spec.error());
+        const auto column = parse_header_token(token, file, line);
+        if (!column.has_value()) {
+          return std::unexpected<error>(column.error());
         }
-        if (has_column(result.columns, spec->def)) {
-          return table_error(error_code::DUPLICATE_KEY, std::format("duplicate column {}", spec->def->name), file, line,
-                             spec->def->name);
+        if (has_column(result, *column)) {
+          std::string message = std::format("duplicate column {}", (*column)->name);
+          return table_error(error_code::DUPLICATE_KEY, std::move(message), file, line, (*column)->name);
         }
-        result.columns.push_back(*spec);
+        result.push_back(*column);
       }
       const std::span<const column_def> required = std::span<const column_def>(COLUMNS).first(REQUIRED_COLUMNS);
-      const auto is_absent = [&result](const column_def &def) { return !has_column(result.columns, &def); };
+      const auto is_absent = [&result](const column_def &def) { return !has_column(result, &def); };
       const auto missing = std::ranges::find_if(required, is_absent);
       if (missing != required.end()) {
         std::string message = std::format("missing required column {} ", missing->name);
@@ -188,91 +201,129 @@ namespace mf::io {
       return result;
     }
 
+    /// True when the first field parses as a number; false for no fields.
+    bool starts_with_number(std::span<const std::string_view> fields) {
+      return !fields.empty() && parse_number(fields.front()).has_value();
+    }
+
+    /// One unit-line entry: the column and the factor of the `unit` that it accepts, or UNSUPPORTED_UNIT.
+    spec_result parse_unit(const column_def &def, std::string_view unit, const std::string &file, std::size_t line) {
+      const auto accepts = [&def, unit](const unit_entry &candidate) {
+        return candidate.column == def.name && detail::iequals_ascii(candidate.unit, unit);
+      };
+      const std::span<const unit_entry> known_units(UNITS);
+      const auto entry = std::ranges::find_if(known_units, accepts);
+      if (entry == known_units.end()) {
+        std::string message = std::format("unsupported unit '{}' for column {}", unit, def.name);
+        message += std::format(" (supported: {})", supported_units(def.name, ", "));
+        return table_error(error_code::UNSUPPORTED_UNIT, std::move(message), file, line, def.name);
+      }
+      return column_spec{.def = &def, .factor = entry->factor};
+    }
+
+    /// The unit line (at `line`, after the header at `header_line`): one unit per header column. Checks in order: a
+    /// number first (the unit line is missing), the unit count, then every unit left to right.
+    unit_line_result parse_unit_line(std::span<const column_def *const> columns,
+                                     std::span<const std::string_view> fields, const std::string &file,
+                                     std::size_t header_line, std::size_t line) {
+      if (starts_with_number(fields)) {
+        std::string message = std::format("missing unit line: the line after the header (line {}) ", header_line);
+        message += std::format("starts with the number '{}'; ", fields.front());
+        message += std::format("it must give one unit per column ({})", unit_hint(columns));
+        return table_error(error_code::SYNTAX, std::move(message), file, line, {});
+      }
+      if (fields.size() != columns.size()) {
+        std::string message = std::format("unit line: expected {} units, one per header column, ", columns.size());
+        message += std::format("got {} ({})", fields.size(), unit_hint(columns));
+        return table_error(error_code::SYNTAX, std::move(message), file, line, {});
+      }
+      std::vector<column_spec> specs;
+      for (const auto [def, field] : std::views::zip(columns, fields)) {
+        const auto spec = parse_unit(*def, field, file, line);
+        if (!spec.has_value()) {
+          return std::unexpected<error>(spec.error());
+        }
+        specs.push_back(*spec);
+      }
+      return specs;
+    }
+
     /// One data row: exactly as many numbers as the header has columns, converted to SI and appended to `values` in
     /// header order. `values` is an out-parameter so that no named return value is destroyed only on an exception
     /// path; on an error it may hold a partial row, which the caller discards.
-    std::expected<void, error> parse_row(const header &head, std::span<const std::string_view> fields,
+    std::expected<void, error> parse_row(std::span<const column_spec> columns, std::span<const std::string_view> fields,
                                          const std::string &file, std::size_t line, std::vector<double> &values) {
-      if (fields.size() != head.columns.size()) {
-        return table_error(error_code::SYNTAX,
-                           std::format("expected {} fields, got {}", head.columns.size(), fields.size()), file, line,
-                           {});
+      if (fields.size() != columns.size()) {
+        std::string message = std::format("expected {} fields, got {}", columns.size(), fields.size());
+        return table_error(error_code::SYNTAX, std::move(message), file, line, {});
       }
-      for (const auto [spec, field] : std::views::zip(head.columns, fields)) {
+      for (const auto [spec, field] : std::views::zip(columns, fields)) {
         const std::optional<double> parsed = parse_number(field);
         if (!parsed.has_value()) {
-          return table_error(error_code::INVALID_NUMBER,
-                             std::format("invalid number '{}' in column {}", field, spec.def->name), file, line,
-                             spec.def->name);
+          std::string message = std::format("invalid number '{}' in column {}", field, spec.def->name);
+          return table_error(error_code::INVALID_NUMBER, std::move(message), file, line, spec.def->name);
         }
         values.push_back(*parsed * spec.factor);
       }
       return {};
     }
 
-    /// One content line (not blank, not a comment): the header when none was seen yet, otherwise a data row.
-    std::expected<void, error> handle_content_line(parse_state &state, std::string_view content, std::size_t line) {
-      std::vector<std::string_view> fields;
-      split_fields(content, fields);
-      if (!state.head.has_value()) {
-        auto parsed = parse_header(fields, state.file, line);
-        if (!parsed.has_value()) {
-          return std::unexpected<error>(std::move(parsed.error()));
+    /// All remaining content lines as data rows: appends the SI values row-major to `values` and the line numbers to
+    /// `lines`.
+    std::expected<void, error> parse_rows(line_cursor &cursor, std::span<const column_spec> columns,
+                                          const std::string &file, std::vector<std::string_view> &fields,
+                                          std::vector<double> &values, std::vector<std::size_t> &lines) {
+      while (const auto line = next_content_line(cursor, fields)) {
+        const auto row = parse_row(columns, fields, file, *line, values);
+        if (!row.has_value()) {
+          return std::unexpected<error>(row.error());
         }
-        for (const column_spec &spec : parsed->columns) {
-          state.table.columns.emplace_back(spec.def->name);
-        }
-        state.table.header_line = line;
-        state.head = std::move(*parsed);
-        return {};
-      }
-      const auto row = parse_row(*state.head, fields, state.file, line, state.values);
-      if (!row.has_value()) {
-        return std::unexpected<error>(row.error());
-      }
-      state.table.lines.push_back(line);
-      return {};
-    }
-
-    /// Walks the text line by line (a final line without '\n' is a normal line), skipping blank and comment lines.
-    std::expected<void, error> parse_lines(parse_state &state, std::string_view text) {
-      std::size_t line_number = 0;
-      while (!text.empty()) {
-        ++line_number;
-        const std::size_t newline = text.find('\n');
-        const std::string_view content = detail::trim(text.substr(0, newline));
-        // `text` is not empty here, so size() - 1 is valid; npos (no '\n' left) consumes the rest of the text.
-        text.remove_prefix(std::min(newline, text.size() - 1) + 1);
-        if (content.empty() || content.starts_with('#')) {
-          continue;
-        }
-        auto handled = handle_content_line(state, content, line_number);
-        if (!handled.has_value()) {
-          return handled;
-        }
+        lines.push_back(*line);
       }
       return {};
     }
   } // namespace
 
   std::expected<input_table, error> parse_input_table(std::string_view text, std::string file_name) {
-    parse_state state{.file = std::move(file_name), .head = std::nullopt, .values = {}, .table = {}};
     if (text.starts_with(UTF8_BOM)) {
       text.remove_prefix(UTF8_BOM.size());
     }
-    const auto parsed = parse_lines(state, text);
-    if (!parsed.has_value()) {
-      return std::unexpected<error>(parsed.error());
+    line_cursor cursor{.rest = text};
+    std::vector<std::string_view> fields;
+    const auto header_line = next_content_line(cursor, fields);
+    if (!header_line.has_value()) {
+      return table_error(error_code::SYNTAX, "missing header line", file_name, 0, {});
     }
-    if (!state.head.has_value()) {
-      return table_error(error_code::SYNTAX, "missing header line", state.file, 0, {});
+    const auto names = parse_header(fields, file_name, *header_line);
+    if (!names.has_value()) {
+      return std::unexpected<error>(names.error());
+    }
+    const auto unit_line = next_content_line(cursor, fields);
+    if (!unit_line.has_value()) {
+      std::string message = "missing unit line: the header must be followed by a line with one unit per column ";
+      message += std::format("({})", unit_hint(*names));
+      return table_error(error_code::SYNTAX, std::move(message), file_name, *header_line, {});
+    }
+    const auto specs = parse_unit_line(*names, fields, file_name, *header_line, *unit_line);
+    if (!specs.has_value()) {
+      return std::unexpected<error>(specs.error());
+    }
+    input_table table;
+    table.header_line = *header_line;
+    for (const column_def *def : *names) {
+      table.columns.emplace_back(def->name);
+    }
+    std::vector<double> values;
+    const auto rows_read = parse_rows(cursor, *specs, file_name, fields, values, table.lines);
+    if (!rows_read.has_value()) {
+      return std::unexpected<error>(rows_read.error());
     }
     using row_major_matrix = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
-    const auto rows = static_cast<Eigen::Index>(state.table.lines.size());
-    const auto cols = static_cast<Eigen::Index>(state.table.columns.size());
-    state.table.file = state.file;
-    state.table.values = Eigen::Map<const row_major_matrix>(state.values.data(), rows, cols);
-    return std::move(state.table);
+    const auto rows = static_cast<Eigen::Index>(table.lines.size());
+    const auto cols = static_cast<Eigen::Index>(table.columns.size());
+    table.values = Eigen::Map<const row_major_matrix>(values.data(), rows, cols);
+    table.file = std::move(file_name);
+    return table;
   }
 
   std::expected<input_table, error> read_input_table(const std::filesystem::path &path) {
@@ -291,8 +342,8 @@ namespace mf::io {
       const auto is_named = [name](const std::string &column) { return column == name; };
       const auto column = std::ranges::find_if(table.columns, is_named);
       if (column == table.columns.end()) {
-        return table_error(error_code::MISSING_KEY, std::format("missing required column {}", name), table.file,
-                           table.header_line, name);
+        std::string message = std::format("missing required column {}", name);
+        return table_error(error_code::MISSING_KEY, std::move(message), table.file, table.header_line, name);
       }
       const Eigen::Index source = column - table.columns.begin();
       result.values.col(static_cast<Eigen::Index>(k)) = table.values.col(source);

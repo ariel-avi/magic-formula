@@ -3,11 +3,13 @@
 #include <Eigen/Core>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <expected>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <magic_formula/error.hpp>
 #include <magic_formula/evaluation_types.hpp>
+#include <magic_formula/io/input_table.hpp>
 #include <magic_formula/io/mf5x_bindings.hpp>
 #include <magic_formula/io/model_loader.hpp>
 #include <magic_formula/mf5x_coefficients.hpp>
@@ -50,6 +52,37 @@ namespace {
       expected_file{.name = "pac2002_S_part.tir", .failure = error_code::MISSING_KEY},
       expected_file{.name = "mf61_unsupported.tir", .failure = error_code::UNSUPPORTED_MODEL},
       expected_file{.name = "lexical_mix.tir", .failure = std::nullopt},
+  };
+
+  /// One input table of tests/data and the way reading it must end: the row count, or the error code and its line.
+  struct expected_table {
+    /// File name inside tests/data.
+    std::string_view name;
+    /// Number of data rows when the table must read.
+    std::size_t rows;
+    /// The error code the read must fail with; no value when the table must read.
+    std::optional<error_code> failure;
+    /// Line of the error (0 when the table must read).
+    std::size_t line;
+  };
+
+  /// All inputs_* files of tests/data and their documented outcome (tests/data/README.md).
+  constexpr std::array<expected_table, 14> EXPECTED_TABLES{
+      expected_table{.name = "inputs_s_vectors.csv", .rows = 6, .failure = std::nullopt, .line = 0},
+      expected_table{.name = "inputs_degrees.txt", .rows = 6, .failure = std::nullopt, .line = 0},
+      expected_table{.name = "inputs_pressure.csv", .rows = 1, .failure = std::nullopt, .line = 0},
+      expected_table{.name = "inputs_ranges.csv", .rows = 6, .failure = std::nullopt, .line = 0},
+      expected_table{.name = "inputs_low_speed.csv", .rows = 2, .failure = std::nullopt, .line = 0},
+      expected_table{.name = "inputs_negative_vx.csv", .rows = 2, .failure = std::nullopt, .line = 0},
+      expected_table{.name = "inputs_overflow.csv", .rows = 2, .failure = std::nullopt, .line = 0},
+      expected_table{.name = "inputs_malformed.csv", .rows = 0, .failure = error_code::SYNTAX, .line = 5},
+      expected_table{.name = "inputs_legacy_brackets.csv", .rows = 0, .failure = error_code::SYNTAX, .line = 2},
+      expected_table{.name = "inputs_no_unit_line.csv", .rows = 0, .failure = error_code::SYNTAX, .line = 3},
+      expected_table{.name = "inputs_header_only.csv", .rows = 0, .failure = error_code::SYNTAX, .line = 2},
+      expected_table{.name = "inputs_unit_count.csv", .rows = 0, .failure = error_code::SYNTAX, .line = 3},
+      expected_table{.name = "inputs_unknown_unit.csv", .rows = 0, .failure = error_code::UNSUPPORTED_UNIT, .line = 3},
+      expected_table{
+          .name = "inputs_wrong_unit_column.csv", .rows = 0, .failure = error_code::UNSUPPORTED_UNIT, .line = 3},
   };
 
   /// Keys of fixture S that no code reads: the header keys and the scaling factors that PAC2002 does not use.
@@ -142,6 +175,34 @@ namespace {
       }
     }
     return names;
+  }
+
+  /// Names of the inputs_* files in tests/data.
+  std::set<std::string> input_tables_in_data_dir() {
+    std::set<std::string> names;
+    for (const auto &entry : std::filesystem::directory_iterator(std::filesystem::path{MF_TEST_DATA_DIR})) {
+      const std::string name = entry.path().filename().string();
+      if (name.starts_with("inputs_")) {
+        names.insert(name);
+      }
+    }
+    return names;
+  }
+
+  /// Reads one input table of tests/data and checks that it ends as documented.
+  void expect_table_outcome(const expected_table &table) {
+    const auto read = mf::io::read_input_table(data_file(table.name));
+    if (table.failure.has_value()) {
+      ASSERT_FALSE(read.has_value()) << table.name;
+      EXPECT_EQ(read.error().code, *table.failure) << table.name << ": " << read.error().message;
+      EXPECT_EQ(read.error().where.line, table.line) << table.name << ": " << read.error().message;
+      EXPECT_EQ(read.error().where.file, data_file(table.name).string()) << table.name;
+    } else {
+      ASSERT_TRUE(read.has_value()) << table.name << ": " << mf::to_string(read.error());
+      EXPECT_EQ(static_cast<std::size_t>(read->values.rows()), table.rows) << table.name;
+      EXPECT_EQ(read->lines.size(), table.rows) << table.name;
+      EXPECT_EQ(read->columns.size(), static_cast<std::size_t>(read->values.cols())) << table.name;
+    }
   }
 
   /// Loads one file of tests/data and checks that it ends as documented.
@@ -263,6 +324,18 @@ TEST(data_fixtures, LexicalMix_EqualsFixtureS) {
   expect_same_limits(loaded->model->limits(), expected.limits);
   EXPECT_TRUE(loaded->warnings.empty());
   EXPECT_EQ(loaded->ignored_keys, LEXICAL_IGNORED_KEYS);
+}
+
+TEST(data_fixtures, EveryInputTable_HasExpectedOutcome) {
+  std::set<std::string> expected_names;
+  for (const expected_table &table : EXPECTED_TABLES) {
+    expected_names.emplace(table.name);
+  }
+  EXPECT_EQ(input_tables_in_data_dir(), expected_names);
+
+  for (const expected_table &table : EXPECTED_TABLES) {
+    expect_table_outcome(table);
+  }
 }
 
 TEST(data_fixtures, EveryTirFile_HasExpectedOutcome) {

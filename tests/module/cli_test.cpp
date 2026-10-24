@@ -386,16 +386,16 @@ TEST(cli_run, Run_Ranges_OneWarningPerVariable) {
   const run_result result = run_files("inputs_ranges.csv", "pac2002_S_rng.tir");
   EXPECT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
   const std::string table = data_file("inputs_ranges.csv").string();
-  EXPECT_TRUE(result.err.contains(table + ":5: SR outside the property-file range in 1 row(s); "
+  EXPECT_TRUE(result.err.contains(table + ":6: SR outside the property-file range in 1 row(s); "
                                           "evaluated at the limit\n"))
       << result.err;
-  EXPECT_TRUE(result.err.contains(table + ":6: SA outside the property-file range in 1 row(s); "
+  EXPECT_TRUE(result.err.contains(table + ":7: SA outside the property-file range in 1 row(s); "
                                           "evaluated at the limit\n"))
       << result.err;
-  EXPECT_TRUE(result.err.contains(table + ":7: IA outside the property-file range in 1 row(s); "
+  EXPECT_TRUE(result.err.contains(table + ":8: IA outside the property-file range in 1 row(s); "
                                           "evaluated at the limit\n"))
       << result.err;
-  EXPECT_TRUE(result.err.contains(table + ":8: FZ outside the property-file range in 2 row(s); "
+  EXPECT_TRUE(result.err.contains(table + ":9: FZ outside the property-file range in 2 row(s); "
                                           "evaluated at the limit\n"))
       << result.err;
   EXPECT_EQ(count_of(result.err, "mf: warning: "), 4U) << result.err;
@@ -452,31 +452,81 @@ TEST(cli_run, Run_LowSpeedPac2002_WarnsVxlowOnce) {
   const run_result result = run_files("inputs_low_speed.csv", "pac2002_S.tir");
   EXPECT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
   const std::string table = data_file("inputs_low_speed.csv").string();
-  EXPECT_TRUE(result.err.contains(table + ":3: VX below VXLOW in 2 row(s); VXLOW is not applied\n")) << result.err;
+  EXPECT_TRUE(result.err.contains(table + ":4: VX below VXLOW in 2 row(s); VXLOW is not applied\n")) << result.err;
   EXPECT_EQ(count_of(result.err, "mf: warning: "), 1U) << result.err;
   EXPECT_EQ(rows_of(result.out).size(), 2U);
 }
 
-TEST(cli_run, Run_LowSpeedMf52_ErrorAtLine4) {
+TEST(cli_run, Run_LowSpeedMf52_ErrorAtLine5) {
   const run_result result = run_files("inputs_low_speed.csv", "mf52_S52.tir");
   expect_failed_run(result);
   const std::string table = data_file("inputs_low_speed.csv").string();
-  EXPECT_TRUE(result.err.contains(table + ":4")) << result.err;
+  EXPECT_TRUE(result.err.contains(table + ":5")) << result.err;
   EXPECT_TRUE(result.err.contains("VX = 0 m/s")) << result.err;
 }
 
-TEST(cli_run, Run_NegativeVx_ErrorNamesLine4) {
+TEST(cli_run, Run_NegativeVx_ErrorNamesLine5) {
   const run_result result = run_files("inputs_negative_vx.csv", "pac2002_S.tir");
   expect_failed_run(result);
-  EXPECT_TRUE(result.err.contains(data_file("inputs_negative_vx.csv").string() + ":4")) << result.err;
+  EXPECT_TRUE(result.err.contains(data_file("inputs_negative_vx.csv").string() + ":5")) << result.err;
   EXPECT_TRUE(result.err.contains("VX = -1 m/s")) << result.err;
 }
 
-TEST(cli_run, Run_MalformedTable_ErrorNamesLine4) {
+TEST(cli_run, Run_MalformedTable_ErrorNamesLine5) {
   const run_result result = run_files("inputs_malformed.csv", "pac2002_S.tir");
   expect_failed_run(result);
-  EXPECT_TRUE(result.err.contains(data_file("inputs_malformed.csv").string() + ":4")) << result.err;
+  EXPECT_TRUE(result.err.contains(data_file("inputs_malformed.csv").string() + ":5")) << result.err;
 }
+
+namespace {
+  /// An input table that the loader must reject, the line of the error and a fragment of its message.
+  struct bad_table_case {
+    std::string_view file;
+    std::size_t line;
+    std::string message;
+  };
+
+  class cli_bad_input_table : public ::testing::TestWithParam<bad_table_case> {};
+
+  /// The unit hint of the parser messages for the columns FZ SA SR IA VX.
+  const std::string UNIT_HINT = "FZ: N, SA: rad|deg, SR: -, IA: rad|deg, VX: m/s";
+} // namespace
+
+TEST_P(cli_bad_input_table, Run_BadInputTable_Exit1AtLine) {
+  const bad_table_case &param = GetParam();
+  const run_result result = run_files(param.file, "pac2002_S.tir");
+  expect_failed_run(result);
+  const std::string expected =
+      "mf: error: " + data_file(param.file).string() + ":" + std::to_string(param.line) + ": " + param.message + "\n";
+  EXPECT_EQ(result.err, expected);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    cases, cli_bad_input_table,
+    ::testing::Values(
+        bad_table_case{.file = "inputs_legacy_brackets.csv",
+                       .line = 2,
+                       .message = "column header 'FZ[N]' uses the legacy NAME[unit] form; write the column name alone "
+                                  "and give its unit on the unit line (the line after the header)"},
+        bad_table_case{.file = "inputs_no_unit_line.csv",
+                       .line = 3,
+                       .message = "missing unit line: the line after the header (line 2) starts with the number "
+                                  "'4000'; it must give one unit per column (" +
+                                  UNIT_HINT + ")"},
+        bad_table_case{
+            .file = "inputs_header_only.csv",
+            .line = 2,
+            .message = "missing unit line: the header must be followed by a line with one unit per column (" +
+                       UNIT_HINT + ")"},
+        bad_table_case{.file = "inputs_unit_count.csv",
+                       .line = 3,
+                       .message = "unit line: expected 5 units, one per header column, got 4 (" + UNIT_HINT + ")"},
+        bad_table_case{.file = "inputs_unknown_unit.csv",
+                       .line = 3,
+                       .message = "unsupported unit 'kN' for column FZ (supported: N)"},
+        bad_table_case{.file = "inputs_wrong_unit_column.csv",
+                       .line = 3,
+                       .message = "unsupported unit 'deg' for column FZ (supported: N)"}));
 
 TEST(cli_run, Run_PartialCombined_MissingKeyRhx1) {
   const run_result result = run_files("inputs_s_vectors.csv", "pac2002_S_part.tir");
@@ -587,10 +637,10 @@ TEST(cli, Run_RangesFixture_FlagColumnsMatchWarnings) {
   ASSERT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
   const std::string table = data_file("inputs_ranges.csv").string();
   // The warnings are unchanged and appear in the order FZ, SR, SA, IA.
-  const std::string sr = table + ":5: SR outside the property-file range in 1 row(s); evaluated at the limit\n";
-  const std::string sa = table + ":6: SA outside the property-file range in 1 row(s); evaluated at the limit\n";
-  const std::string ia = table + ":7: IA outside the property-file range in 1 row(s); evaluated at the limit\n";
-  const std::string fz = table + ":8: FZ outside the property-file range in 2 row(s); evaluated at the limit\n";
+  const std::string sr = table + ":6: SR outside the property-file range in 1 row(s); evaluated at the limit\n";
+  const std::string sa = table + ":7: SA outside the property-file range in 1 row(s); evaluated at the limit\n";
+  const std::string ia = table + ":8: IA outside the property-file range in 1 row(s); evaluated at the limit\n";
+  const std::string fz = table + ":9: FZ outside the property-file range in 2 row(s); evaluated at the limit\n";
   EXPECT_TRUE(result.err.contains(sr)) << result.err;
   EXPECT_TRUE(result.err.contains(sa)) << result.err;
   EXPECT_TRUE(result.err.contains(ia)) << result.err;
@@ -654,7 +704,7 @@ TEST(cli, Run_NegativeVx_DomainErrorAtLine_NoStdout) {
   EXPECT_EQ(result.code, mf::cli::EXIT_ERROR);
   EXPECT_TRUE(result.out.empty()) << result.out;
   const std::string table = data_file("inputs_negative_vx.csv").string();
-  EXPECT_EQ(result.err, "mf: error: " + table + ":4: VX = -1 m/s is outside the PAC2002 domain (VX >= 0)\n");
+  EXPECT_EQ(result.err, "mf: error: " + table + ":5: VX = -1 m/s is outside the PAC2002 domain (VX >= 0)\n");
 }
 
 TEST(cli, Run_Mf52ZeroVx_DomainErrorAtLine_NoStdout) {
@@ -662,15 +712,15 @@ TEST(cli, Run_Mf52ZeroVx_DomainErrorAtLine_NoStdout) {
   EXPECT_EQ(result.code, mf::cli::EXIT_ERROR);
   EXPECT_TRUE(result.out.empty()) << result.out;
   const std::string table = data_file("inputs_low_speed.csv").string();
-  EXPECT_EQ(result.err, "mf: error: " + table + ":4: VX = 0 m/s is outside the MF 5.2 domain (VX > 0)\n");
+  EXPECT_EQ(result.err, "mf: error: " + table + ":5: VX = 0 m/s is outside the MF 5.2 domain (VX > 0)\n");
 }
 
 TEST(cli, Run_OverflowFz_NumericalErrorAtLine) {
   const run_result result = run_files("inputs_overflow.csv", "pac2002_S.tir");
   expect_failed_run(result);
   const std::string table = data_file("inputs_overflow.csv").string();
-  // Data row 2 is file line 4.
-  const std::string prefix = "mf: error: " + table + ":4: non-finite ";
+  // Data row 2 is file line 5.
+  const std::string prefix = "mf: error: " + table + ":5: non-finite ";
   EXPECT_TRUE(result.err.starts_with(prefix)) << result.err;
   // The message names the first non-finite output channel.
   constexpr std::array<std::string_view, 5> channels{"FX", "FY", "MZ", "MX", "MY"};

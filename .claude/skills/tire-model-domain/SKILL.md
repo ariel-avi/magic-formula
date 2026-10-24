@@ -48,7 +48,7 @@ The **normalised vertical load increment** `dfz = (Fz − Fz0') / Fz0'` with `Fz
 
 The model input vector is ordered FZ, SA, SR, IA, VX (P is appended after VX for MF 6.x later). The output vector is FX, FY, MZ, MX, MY followed by the flag outputs FZ_CLAMPED, SR_CLAMPED, SA_CLAMPED, IA_CLAMPED and BELOW_VXLOW, which hold 0.0 or 1.0 (1.0 when that input was clamped to the `.tir` range, or Vx is below VXLOW). Each model names the positions with index enums (`pac2002_model::input_index` and `output_index`).
 
-Input files often give angles in degrees. Conversion to radians happens once, at the io boundary (see `cpp-conventions`).
+CLI input table: the first content line (`#` comments and blank lines skipped) is the header with the column names only (FZ SA SR IA VX, optional P); the next content line is the mandatory unit line, one unit per column (FZ N; SA rad|deg; SR -; IA rad|deg; VX m/s; P Pa); the legacy `NAME[unit]` header form is rejected. Angles may be in degrees; conversion to radians happens once, at the io boundary (see `cpp-conventions`). Full spec: the doc comment of `mf::io::parse_input_table` and the README section "Input table".
 
 ## Pure vs combined slip
 

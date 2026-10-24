@@ -159,12 +159,11 @@ TEST(cli_options, Usage_Text_DocumentsSynopsisColumnsHeaderAndExitCodes) {
   EXPECT_TRUE(text.contains("--help"));
   EXPECT_TRUE(text.contains("--version"));
   EXPECT_TRUE(text.contains("FZ"));
-  EXPECT_TRUE(text.contains("FZ[N]"));
-  EXPECT_TRUE(text.contains("SA[rad|deg]"));
-  EXPECT_TRUE(text.contains("SR[-]"));
-  EXPECT_TRUE(text.contains("IA[rad|deg]"));
-  EXPECT_TRUE(text.contains("VX[m/s]"));
-  EXPECT_TRUE(text.contains("P[Pa]"));
+  EXPECT_TRUE(text.contains("The next non-comment line after the header is the mandatory unit line"));
+  EXPECT_TRUE(text.contains("(column names only on the header line)"));
+  EXPECT_TRUE(text.contains("FZ: N  SA: rad|deg  SR: -  IA: rad|deg  VX: m/s  P: Pa"));
+  EXPECT_TRUE(text.contains("A unit in brackets after a name (FZ[N]) is an error"));
+  EXPECT_TRUE(text.contains("N,deg,-,deg,m/s"));
   EXPECT_TRUE(text.contains("Exit status"));
   ASSERT_FALSE(text.empty());
   EXPECT_EQ(text.back(), '\n');

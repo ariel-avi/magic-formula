@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <ios>
@@ -75,28 +76,49 @@ namespace {
     expect_same(value_at(table, r, "VX"), vx);
   }
 
-  /// One unit-table entry: a header, a row and the SI value that the named column must have.
+  /// One unit-table entry: a unit line, a row and the SI value that the named column must have. The header is the
+  /// pressure header when the column is "P" and the required header otherwise.
   struct unit_case {
-    std::string_view header;
+    std::string_view units;
     std::string_view row;
     std::string_view column;
     double expected;
   };
 
+  constexpr std::string_view HEADER = "FZ SA SR IA VX";
+  constexpr std::string_view HEADER_P = "FZ SA SR IA VX P";
+
+  /// Default hint of the required columns, as printed in the unit-line messages.
+  constexpr std::string_view DEFAULT_HINT = "FZ: N, SA: rad|deg, SR: -, IA: rad|deg, VX: m/s";
+
   const std::array<unit_case, 13> UNIT_CASES{
-      unit_case{.header = "FZ[N] SA SR IA VX", .row = "4000 0 0 0 0", .column = "FZ", .expected = 4000.0},
-      unit_case{.header = "fz[n] SA SR IA VX", .row = "3500.5 0 0 0 0", .column = "FZ", .expected = 3500.5},
-      unit_case{.header = "FZ SA[rad] SR IA VX", .row = "0 0.25 0 0 0", .column = "SA", .expected = 0.25},
-      unit_case{.header = "FZ SA[deg] SR IA VX", .row = "0 30 0 0 0", .column = "SA", .expected = 30.0 * DEG_TO_RAD},
-      unit_case{.header = "FZ SA SR[-] IA VX", .row = "0 0 0.1 0 0", .column = "SR", .expected = 0.1},
-      unit_case{.header = "FZ SA SR IA[rad] VX", .row = "0 0 0 0.05 0", .column = "IA", .expected = 0.05},
-      unit_case{.header = "FZ SA SR IA[DEG] VX", .row = "0 0 0 -4 0", .column = "IA", .expected = -4.0 * DEG_TO_RAD},
-      unit_case{.header = "FZ SA SR IA VX[m/s]", .row = "0 0 0 0 12.5", .column = "VX", .expected = 12.5},
-      unit_case{.header = "FZ SA SR IA VX[M/S]", .row = "0 0 0 0 7", .column = "VX", .expected = 7.0},
-      unit_case{.header = "FZ SA SR IA VX P[Pa]", .row = "0 0 0 0 0 220000", .column = "P", .expected = 220000.0},
-      unit_case{.header = "FZ SA SR IA VX p[PA]", .row = "0 0 0 0 0 180000.5", .column = "P", .expected = 180000.5},
-      unit_case{.header = "FZ SA SR IA VX", .row = "4000 0.1 0.2 0.3 7", .column = "SA", .expected = 0.1},
-      unit_case{.header = "FZ SA SR IA VX", .row = "4000 0.1 0.2 0.3 7", .column = "IA", .expected = 0.3},
+      unit_case{.units = "N rad - rad m/s", .row = "4000 0 0 0 0", .column = "FZ", .expected = 4000.0},
+      unit_case{.units = "n rad - rad m/s", .row = "3500.5 0 0 0 0", .column = "FZ", .expected = 3500.5},
+      unit_case{.units = "N rad - rad m/s", .row = "0 0.25 0 0 0", .column = "SA", .expected = 0.25},
+      unit_case{.units = "N deg - rad m/s", .row = "0 30 0 0 0", .column = "SA", .expected = 30.0 * DEG_TO_RAD},
+      unit_case{.units = "N DEG - rad m/s", .row = "0 30 0 0 0", .column = "SA", .expected = 30.0 * DEG_TO_RAD},
+      unit_case{.units = "N rad - rad m/s", .row = "0 0 0.1 0 0", .column = "SR", .expected = 0.1},
+      unit_case{.units = "N rad - rad m/s", .row = "0 0 0 0.05 0", .column = "IA", .expected = 0.05},
+      unit_case{.units = "N rad - deg m/s", .row = "0 0 0 3 0", .column = "IA", .expected = 3.0 * DEG_TO_RAD},
+      unit_case{.units = "N rad - Deg m/s", .row = "0 0 0 3 0", .column = "IA", .expected = 3.0 * DEG_TO_RAD},
+      unit_case{.units = "N rad - rad m/s", .row = "0 0 0 0 12.5", .column = "VX", .expected = 12.5},
+      unit_case{.units = "N rad - rad M/S", .row = "0 0 0 0 12.5", .column = "VX", .expected = 12.5},
+      unit_case{.units = "N rad - rad m/s Pa", .row = "0 0 0 0 0 220000", .column = "P", .expected = 220000.0},
+      unit_case{.units = "N rad - rad m/s pa", .row = "0 0 0 0 0 220000", .column = "P", .expected = 220000.0},
+  };
+
+  /// A legacy header field and the column key that its error carries.
+  struct legacy_case {
+    std::string_view token;
+    std::string_view key;
+  };
+
+  const std::array<legacy_case, 10> LEGACY_CASES{
+      legacy_case{.token = "FZ[N]", .key = "FZ"},   legacy_case{.token = "fz[n]", .key = "FZ"},
+      legacy_case{.token = "SA[deg]", .key = "SA"}, legacy_case{.token = "VX[m/s]", .key = "VX"},
+      legacy_case{.token = "P[Pa]", .key = "P"},    legacy_case{.token = "FZ[", .key = "FZ"},
+      legacy_case{.token = "FZ[]", .key = "FZ"},    legacy_case{.token = "FZ]", .key = "FZ"},
+      legacy_case{.token = "[N]", .key = ""},       legacy_case{.token = "alpha[deg]", .key = "ALPHA"},
   };
 
   /// A channel span that names a column the parser never produces ("Q").
@@ -108,10 +130,7 @@ namespace {
 
   class input_table_missing_column : public ::testing::TestWithParam<std::string_view> {};
 
-  /// Header tokens with a malformed unit bracket.
-  constexpr std::array<std::string_view, 5> MALFORMED_TOKENS{"FZ[", "FZ[]", "FZ[N]x", "FZ[N]]", "FZ[N"};
-
-  class input_table_malformed_unit : public ::testing::TestWithParam<std::string_view> {};
+  class input_table_legacy_header : public ::testing::TestWithParam<legacy_case> {};
 
   /// Fixture that owns one unique per-test directory under the system temp directory and removes it afterwards.
   /// `path_` names a file inside it that does not exist until a test writes it.
@@ -142,27 +161,28 @@ namespace {
 } // namespace
 
 TEST(input_table, Parse_CommentsBlanksCrlf_Ignored) {
-  const auto table = parse_success("# comment\r\n"
+  const auto table = parse_success("# c\r\n"
+                                   "FZ,SA,SR,IA,VX\r\n"
+                                   "# units next\r\n"
                                    "\r\n"
-                                   "   \r\n"
-                                   "FZ[N],SA[rad],SR[-],IA[rad],VX[m/s]\r\n"
-                                   "# between rows\r\n"
-                                   "4000,0.05,0.1,0,10\r\n"
+                                   "N,rad,-,rad,m/s\r\n"
+                                   "4000,0,0.1,0,10\r\n"
                                    "\r\n"
-                                   "  # indented comment\r\n"
-                                   "3000,0,0,0,5\r\n");
+                                   "# x\r\n"
+                                   "4000,0.05,0,0,10\r\n");
   ASSERT_EQ(table.values.rows(), 2);
   EXPECT_EQ(table.columns.size(), 5U);
-  EXPECT_EQ(table.header_line, 4U);
+  EXPECT_EQ(table.header_line, 2U);
   ASSERT_EQ(table.lines.size(), 2U);
   EXPECT_EQ(table.lines[0], 6U);
   EXPECT_EQ(table.lines[1], 9U);
-  expect_point(table, 0, 4000.0, 0.05, 0.1, 0.0, 10.0);
-  expect_point(table, 1, 3000.0, 0.0, 0.0, 0.0, 5.0);
+  expect_point(table, 0, 4000.0, 0.0, 0.1, 0.0, 10.0);
+  expect_point(table, 1, 4000.0, 0.05, 0.0, 0.0, 10.0);
 }
 
 TEST(input_table, Parse_CommaSeparated_Rows) {
-  const auto table = parse_success("FZ[N],SA[rad],SR[-],IA[rad],VX[m/s]\n"
+  const auto table = parse_success("FZ,SA,SR,IA,VX\n"
+                                   "N,rad,-,rad,m/s\n"
                                    "1,2,3,4,5\n"
                                    "6.5,-7,8e-1,0.25,+9\n");
   ASSERT_EQ(table.values.rows(), 2);
@@ -172,13 +192,14 @@ TEST(input_table, Parse_CommaSeparated_Rows) {
   expect_point(table, 0, 1.0, 2.0, 3.0, 4.0, 5.0);
   expect_point(table, 1, 6.5, -7.0, 0.8, 0.25, 9.0);
   ASSERT_EQ(table.lines.size(), 2U);
-  EXPECT_EQ(table.lines[0], 2U);
-  EXPECT_EQ(table.lines[1], 3U);
+  EXPECT_EQ(table.lines[0], 3U);
+  EXPECT_EQ(table.lines[1], 4U);
   EXPECT_EQ(table.header_line, 1U);
 }
 
 TEST(input_table, Parse_BlankSeparated_Rows) {
   const auto table = parse_success("FZ SA SR IA VX\n"
+                                   "N rad - rad m/s\n"
                                    "1 2 3 4 5\n"
                                    "  6   7  8 9    10  \n");
   ASSERT_EQ(table.values.rows(), 2);
@@ -187,7 +208,8 @@ TEST(input_table, Parse_BlankSeparated_Rows) {
 }
 
 TEST(input_table, Parse_TabSeparated_Rows) {
-  const auto table = parse_success("FZ[N]\tSA[rad]\tSR[-]\tIA[rad]\tVX[m/s]\n"
+  const auto table = parse_success("FZ\tSA\tSR\tIA\tVX\n"
+                                   "N\trad\t-\trad\tm/s\n"
                                    "1\t2\t3\t4\t5\n");
   ASSERT_EQ(table.values.rows(), 1);
   expect_point(table, 0, 1.0, 2.0, 3.0, 4.0, 5.0);
@@ -195,10 +217,13 @@ TEST(input_table, Parse_TabSeparated_Rows) {
 
 TEST(input_table, Parse_MixedSeparators_Rows) {
   const auto table = parse_success("FZ, SA ,\tSR,,IA VX,\n"
+                                   "N ,\trad,,- rad\tm/s,\n"
                                    "4000 ,, 0.05\t0.1,0 ,10,\n"
                                    "1,,2,3,,,4,5\n"
                                    ",,7 8 9 10 11,,\n");
   ASSERT_EQ(table.values.rows(), 3);
+  const std::vector<std::string> expected_columns{"FZ", "SA", "SR", "IA", "VX"};
+  EXPECT_EQ(table.columns, expected_columns);
   expect_point(table, 0, 4000.0, 0.05, 0.1, 0.0, 10.0);
   // "1,,2" is two fields, not three.
   expect_point(table, 1, 1.0, 2.0, 3.0, 4.0, 5.0);
@@ -208,6 +233,7 @@ TEST(input_table, Parse_MixedSeparators_Rows) {
 
 TEST(input_table, Parse_HeaderCaseAndOrder_Mapped) {
   const auto table = parse_success("vx Ia sr SA fz\n"
+                                   "m/s rad - rad N\n"
                                    "5 4 3 2 1\n");
   ASSERT_EQ(table.values.rows(), 1);
   // Columns keep the header order and carry the canonical upper-case names.
@@ -216,8 +242,18 @@ TEST(input_table, Parse_HeaderCaseAndOrder_Mapped) {
   expect_point(table, 0, 1.0, 2.0, 3.0, 4.0, 5.0);
 }
 
+TEST(input_table, Parse_SrFirstColumn_UnitLineStartsWithDash) {
+  const auto table = parse_success("SR FZ SA IA VX\n"
+                                   "- N rad rad m/s\n"
+                                   "0.1 4000 0 0 10\n");
+  ASSERT_EQ(table.values.rows(), 1);
+  expect_same(value_at(table, 0, "SR"), 0.1);
+  expect_same(value_at(table, 0, "FZ"), 4000.0);
+}
+
 TEST(input_table, Parse_NumberForms_Accepted) {
   const auto table = parse_success("FZ SA SR IA VX\n"
+                                   "N rad - rad m/s\n"
                                    "1e3 -0.0 +.5 2.5E-1 -7\n");
   ASSERT_EQ(table.values.rows(), 1);
   // Negative speed and signed zero are parsed as given; rejecting them is the model's job.
@@ -226,7 +262,8 @@ TEST(input_table, Parse_NumberForms_Accepted) {
 
 TEST_P(input_table_units, Parse_Unit_AppliesFactor) {
   const unit_case &param = GetParam();
-  const std::string text = std::string(param.header) + "\n" + std::string(param.row) + "\n";
+  const std::string_view header = param.column == "P" ? HEADER_P : HEADER;
+  const std::string text = std::format("{}\n{}\n{}\n", header, param.units, param.row);
   const auto table = parse_success(text);
   ASSERT_EQ(table.values.rows(), 1) << text;
   // Bit-exact: degrees are converted as value * (pi / 180), every other unit is multiplied by exactly 1.
@@ -259,37 +296,112 @@ TEST(input_table, Parse_UnknownColumn_ReturnsSyntax) {
   EXPECT_TRUE(failure.message.contains("unknown column foo (expected FZ, SA, SR, IA, VX, P)")) << failure.message;
 }
 
-TEST(input_table, Parse_UnknownColumnWithUnit_ReturnsSyntax) {
-  const mf::error failure = parse_failure("FZ SA SR IA VX alpha[deg]\n");
-  EXPECT_EQ(failure.code, mf::error_code::SYNTAX);
-  EXPECT_EQ(failure.where.key, "ALPHA");
-  EXPECT_TRUE(failure.message.contains("unknown column alpha[deg]")) << failure.message;
-}
-
-TEST_P(input_table_malformed_unit, Parse_MalformedUnit_ReturnsSyntax) {
-  const std::string_view token = GetParam();
-  const mf::error failure = parse_failure(std::string(token) + " SA SR IA VX\n");
-  EXPECT_EQ(failure.code, mf::error_code::SYNTAX) << token;
-  EXPECT_EQ(failure.where.line, 1U) << token;
-  EXPECT_EQ(failure.where.key, "FZ") << token;
-  EXPECT_TRUE(failure.message.contains("malformed unit")) << failure.message;
+TEST_P(input_table_legacy_header, Parse_LegacyBracketField_ReturnsSyntaxWithHint) {
+  const legacy_case &param = GetParam();
+  const std::string token(param.token);
+  const bool after_required = param.key == "SA" || param.key == "VX" || param.key == "P";
+  const std::string header = after_required ? "FZ SA SR IA VX " + token : token + " SA SR IA VX";
+  const mf::error failure = parse_failure(header + "\n");
+  EXPECT_EQ(failure.code, mf::error_code::SYNTAX) << header;
+  EXPECT_EQ(failure.where.line, 1U) << header;
+  EXPECT_EQ(failure.where.key, param.key) << header;
   EXPECT_TRUE(failure.message.contains(token)) << failure.message;
+  EXPECT_TRUE(failure.message.contains("legacy NAME[unit] form")) << failure.message;
+  EXPECT_TRUE(failure.message.contains("unit line")) << failure.message;
 }
 
-INSTANTIATE_TEST_SUITE_P(cases, input_table_malformed_unit, ::testing::ValuesIn(MALFORMED_TOKENS));
+INSTANTIATE_TEST_SUITE_P(cases, input_table_legacy_header, ::testing::ValuesIn(LEGACY_CASES));
+
+TEST(input_table, Parse_LegacyBracketNotFirst_ReturnsSyntax) {
+  const mf::error failure = parse_failure("FZ SA SR IA VX[m/s]\n");
+  EXPECT_EQ(failure.code, mf::error_code::SYNTAX);
+  EXPECT_EQ(failure.where.line, 1U);
+  EXPECT_EQ(failure.where.key, "VX");
+}
+
+TEST(input_table, Parse_DataRowAfterHeader_ReturnsMissingUnitLine) {
+  const mf::error plain = parse_failure("FZ SA SR IA VX\n"
+                                        "4000 0 0 0 10\n");
+  EXPECT_EQ(plain.code, mf::error_code::SYNTAX);
+  EXPECT_EQ(plain.where.line, 2U);
+  EXPECT_TRUE(plain.where.key.empty());
+  EXPECT_EQ(plain.message, "missing unit line: the line after the header (line 1) starts with the number '4000'; it "
+                           "must give one unit per column (FZ: N, SA: rad|deg, SR: -, IA: rad|deg, VX: m/s)");
+
+  const mf::error reordered = parse_failure("# c\n"
+                                            "VX FZ SA SR IA\n"
+                                            "# x\n"
+                                            "\n"
+                                            "-0.5 4000 0 0 0\n");
+  EXPECT_EQ(reordered.code, mf::error_code::SYNTAX);
+  EXPECT_EQ(reordered.where.line, 5U);
+  EXPECT_TRUE(reordered.message.contains("(line 2)")) << reordered.message;
+  EXPECT_TRUE(reordered.message.contains("'-0.5'")) << reordered.message;
+  EXPECT_TRUE(reordered.message.contains("VX: m/s, FZ: N, SA: rad|deg, SR: -, IA: rad|deg")) << reordered.message;
+
+  // The data-row check comes before the unit count check.
+  const mf::error short_row = parse_failure("FZ SA SR IA VX\n"
+                                            "4000 0 0\n");
+  EXPECT_EQ(short_row.code, mf::error_code::SYNTAX);
+  EXPECT_EQ(short_row.where.line, 2U);
+  EXPECT_TRUE(short_row.message.contains("missing unit line")) << short_row.message;
+}
+
+TEST(input_table, Parse_TextEndsAfterHeader_ReturnsMissingUnitLineAtHeader) {
+  const mf::error plain = parse_failure("FZ SA SR IA VX\n");
+  EXPECT_EQ(plain.code, mf::error_code::SYNTAX);
+  EXPECT_EQ(plain.where.line, 1U);
+  EXPECT_TRUE(plain.where.key.empty());
+  EXPECT_EQ(plain.message, "missing unit line: the header must be followed by a line with one unit per column "
+                           "(FZ: N, SA: rad|deg, SR: -, IA: rad|deg, VX: m/s)");
+
+  const mf::error trailing = parse_failure("# c\nFZ SA SR IA VX\n# only\n\n  \n");
+  EXPECT_EQ(trailing.code, mf::error_code::SYNTAX);
+  EXPECT_EQ(trailing.where.line, 2U);
+
+  const mf::error pressure = parse_failure("FZ SA SR IA VX P");
+  EXPECT_EQ(pressure.code, mf::error_code::SYNTAX);
+  EXPECT_EQ(pressure.where.line, 1U);
+  EXPECT_TRUE(pressure.message.contains("P: Pa")) << pressure.message;
+}
+
+TEST(input_table, Parse_UnitCountMismatch_ReturnsSyntax) {
+  struct count_case {
+    std::string_view units;
+    std::size_t got;
+  };
+  const std::array<count_case, 4> cases{
+      count_case{.units = "N rad - rad", .got = 4},
+      count_case{.units = "N rad - rad m/s Pa", .got = 6},
+      count_case{.units = "N,,-,rad,m/s", .got = 4},
+      count_case{.units = ",,,,", .got = 0},
+  };
+  for (const count_case &item : cases) {
+    const mf::error failure = parse_failure(std::string(HEADER) + "\n" + std::string(item.units) + "\n");
+    EXPECT_EQ(failure.code, mf::error_code::SYNTAX) << item.units;
+    EXPECT_EQ(failure.where.line, 2U) << item.units;
+    EXPECT_TRUE(failure.where.key.empty()) << item.units;
+    const std::string expected = "unit line: expected 5 units, one per header column, got " + std::to_string(item.got);
+    EXPECT_TRUE(failure.message.contains(expected)) << failure.message;
+    EXPECT_TRUE(failure.message.contains(DEFAULT_HINT)) << failure.message;
+  }
+  const mf::error empty_entry = parse_failure("FZ SA SR IA VX\nN,,-,rad,m/s\n");
+  EXPECT_EQ(empty_entry.message, "unit line: expected 5 units, one per header column, got 4 "
+                                 "(FZ: N, SA: rad|deg, SR: -, IA: rad|deg, VX: m/s)");
+}
 
 TEST(input_table, Parse_DuplicateColumn_ReturnsDuplicateKey) {
-  const mf::error same_unit = parse_failure("FZ SA SR IA VX fz\n");
-  EXPECT_EQ(same_unit.code, mf::error_code::DUPLICATE_KEY);
-  EXPECT_EQ(same_unit.where.line, 1U);
-  EXPECT_EQ(same_unit.where.key, "FZ");
+  const mf::error same_name = parse_failure("FZ SA SR IA VX fz\n");
+  EXPECT_EQ(same_name.code, mf::error_code::DUPLICATE_KEY);
+  EXPECT_EQ(same_name.where.line, 1U);
+  EXPECT_EQ(same_name.where.key, "FZ");
 
-  const mf::error other_unit = parse_failure("FZ SA[deg] SR IA VX SA[rad]\n");
-  EXPECT_EQ(other_unit.code, mf::error_code::DUPLICATE_KEY);
-  EXPECT_EQ(other_unit.where.key, "SA");
-  EXPECT_TRUE(other_unit.message.contains("duplicate column SA")) << other_unit.message;
+  const mf::error angle = parse_failure("FZ SA SR IA VX sa\n");
+  EXPECT_EQ(angle.code, mf::error_code::DUPLICATE_KEY);
+  EXPECT_EQ(angle.where.key, "SA");
+  EXPECT_TRUE(angle.message.contains("duplicate column SA")) << angle.message;
 
-  const mf::error pressure = parse_failure("FZ SA SR IA VX P P[Pa]\n");
+  const mf::error pressure = parse_failure("FZ SA SR IA VX P p\n");
   EXPECT_EQ(pressure.code, mf::error_code::DUPLICATE_KEY);
   EXPECT_EQ(pressure.where.key, "P");
 }
@@ -320,73 +432,99 @@ TEST(input_table, Parse_EmptyHeaderFields_ReturnsMissingKey) {
 }
 
 TEST(input_table, Parse_UnsupportedUnit_ReturnsUnsupportedUnit) {
-  const mf::error angle = parse_failure("FZ SA[grad] SR IA VX\n");
-  EXPECT_EQ(angle.code, mf::error_code::UNSUPPORTED_UNIT);
-  EXPECT_EQ(angle.where.line, 1U);
-  EXPECT_EQ(angle.where.key, "SA");
-  EXPECT_TRUE(angle.message.contains("'grad'")) << angle.message;
-  EXPECT_TRUE(angle.message.contains("column SA")) << angle.message;
-  EXPECT_TRUE(angle.message.contains("supported: rad, deg")) << angle.message;
+  struct unit_error_case {
+    std::string_view header;
+    std::string_view units;
+    std::string_view key;
+    std::string_view unit;
+  };
+  const std::array<unit_error_case, 9> cases{
+      unit_error_case{.header = HEADER, .units = "N grad - rad m/s", .key = "SA", .unit = "grad"},
+      unit_error_case{.header = HEADER, .units = "kN rad - rad m/s", .key = "FZ", .unit = "kN"},
+      unit_error_case{.header = HEADER, .units = "N rad - rad km/h", .key = "VX", .unit = "km/h"},
+      unit_error_case{.header = HEADER, .units = "[N] rad - rad m/s", .key = "FZ", .unit = "[N]"},
+      unit_error_case{.header = HEADER, .units = "deg rad - rad m/s", .key = "FZ", .unit = "deg"},
+      unit_error_case{.header = HEADER, .units = "N rad rad rad m/s", .key = "SR", .unit = "rad"},
+      unit_error_case{.header = HEADER, .units = "N rad - rad Pa", .key = "VX", .unit = "Pa"},
+      unit_error_case{.header = HEADER_P, .units = "N rad - rad m/s m/s", .key = "P", .unit = "m/s"},
+      // Only the first field decides "data row": a number further right is a unit error.
+      unit_error_case{.header = HEADER, .units = "N 0 - rad m/s", .key = "SA", .unit = "0"},
+  };
+  for (const unit_error_case &item : cases) {
+    const mf::error failure = parse_failure(std::string(item.header) + "\n" + std::string(item.units) + "\n");
+    EXPECT_EQ(failure.code, mf::error_code::UNSUPPORTED_UNIT) << item.units;
+    EXPECT_EQ(failure.where.line, 2U) << item.units;
+    EXPECT_EQ(failure.where.key, item.key) << item.units;
+    const std::string expected =
+        "unsupported unit '" + std::string(item.unit) + "' for column " + std::string(item.key);
+    EXPECT_TRUE(failure.message.contains(expected)) << failure.message;
+  }
+  const mf::error angle = parse_failure("FZ SA SR IA VX\nN grad - rad m/s\n");
+  EXPECT_TRUE(angle.message.contains("(supported: rad, deg)")) << angle.message;
+  const mf::error force = parse_failure("FZ SA SR IA VX\nkN rad - rad m/s\n");
+  EXPECT_TRUE(force.message.contains("(supported: N)")) << force.message;
+}
 
-  const mf::error force = parse_failure("FZ[kN] SA SR IA VX\n");
-  EXPECT_EQ(force.code, mf::error_code::UNSUPPORTED_UNIT);
-  EXPECT_EQ(force.where.key, "FZ");
-  EXPECT_TRUE(force.message.contains("supported: N")) << force.message;
-
-  const mf::error speed = parse_failure("FZ SA SR IA VX[km/h]\n");
-  EXPECT_EQ(speed.code, mf::error_code::UNSUPPORTED_UNIT);
-  EXPECT_EQ(speed.where.key, "VX");
-
-  // A unit of another column is not accepted: degrees mean nothing for a force.
-  const mf::error wrong_column = parse_failure("FZ[deg] SA SR IA VX\n");
-  EXPECT_EQ(wrong_column.code, mf::error_code::UNSUPPORTED_UNIT);
-  EXPECT_EQ(wrong_column.where.key, "FZ");
+TEST(input_table, Parse_HeaderRepeatedAsUnitLine_ReturnsUnsupportedUnit) {
+  const mf::error failure = parse_failure("FZ SA SR IA VX\n"
+                                          "FZ SA SR IA VX\n");
+  EXPECT_EQ(failure.code, mf::error_code::UNSUPPORTED_UNIT);
+  EXPECT_EQ(failure.where.line, 2U);
+  EXPECT_EQ(failure.where.key, "FZ");
+  EXPECT_TRUE(failure.message.contains("unsupported unit 'FZ' for column FZ")) << failure.message;
 }
 
 TEST(input_table, Parse_FieldCountMismatch_ReturnsSyntaxWithLine) {
   const mf::error too_few = parse_failure("FZ SA SR IA VX\n"
+                                          "N rad - rad m/s\n"
                                           "1 2 3 4 5\n"
                                           "1 2 3 4\n");
   EXPECT_EQ(too_few.code, mf::error_code::SYNTAX);
-  EXPECT_EQ(too_few.where.line, 3U);
+  EXPECT_EQ(too_few.where.line, 4U);
   EXPECT_TRUE(too_few.message.contains("expected 5 fields, got 4")) << too_few.message;
 
   const mf::error too_many = parse_failure("FZ SA SR IA VX\n"
+                                           "N rad - rad m/s\n"
                                            "1 2 3 4 5 6\n");
   EXPECT_EQ(too_many.code, mf::error_code::SYNTAX);
-  EXPECT_EQ(too_many.where.line, 2U);
+  EXPECT_EQ(too_many.where.line, 3U);
   EXPECT_TRUE(too_many.message.contains("expected 5 fields, got 6")) << too_many.message;
 
   const mf::error no_fields = parse_failure("FZ SA SR IA VX P\n"
+                                            "N rad - rad m/s Pa\n"
                                             ",,\n");
   EXPECT_EQ(no_fields.code, mf::error_code::SYNTAX);
-  EXPECT_EQ(no_fields.where.line, 2U);
+  EXPECT_EQ(no_fields.where.line, 3U);
   EXPECT_TRUE(no_fields.message.contains("expected 6 fields, got 0")) << no_fields.message;
 }
 
 TEST(input_table, Parse_BadNumber_ReturnsInvalidNumberWithLineAndColumn) {
   const mf::error text = parse_failure("FZ SA SR IA VX\n"
+                                       "N rad - rad m/s\n"
                                        "1 2 3 4 5\n"
                                        "1 2 abc 4 5\n");
   EXPECT_EQ(text.code, mf::error_code::INVALID_NUMBER);
-  EXPECT_EQ(text.where.line, 3U);
+  EXPECT_EQ(text.where.line, 4U);
   EXPECT_EQ(text.where.key, "SR");
   EXPECT_TRUE(text.message.contains("'abc'")) << text.message;
   EXPECT_TRUE(text.message.contains("column SR")) << text.message;
 
   const mf::error infinite = parse_failure("FZ SA SR IA VX\n"
+                                           "N rad - rad m/s\n"
                                            "1 2 3 4 inf\n");
   EXPECT_EQ(infinite.code, mf::error_code::INVALID_NUMBER);
-  EXPECT_EQ(infinite.where.line, 2U);
+  EXPECT_EQ(infinite.where.line, 3U);
   EXPECT_EQ(infinite.where.key, "VX");
   EXPECT_TRUE(infinite.message.contains("'inf'")) << infinite.message;
 
   const mf::error not_a_number = parse_failure("VX FZ SA SR IA\n"
+                                               "m/s N rad - rad\n"
                                                "nan 2 3 4 5\n");
   EXPECT_EQ(not_a_number.code, mf::error_code::INVALID_NUMBER);
   EXPECT_EQ(not_a_number.where.key, "VX");
 
   const mf::error overflow = parse_failure("FZ SA SR IA VX\n"
+                                           "N rad - rad m/s\n"
                                            "1e999 2 3 4 5\n");
   EXPECT_EQ(overflow.code, mf::error_code::INVALID_NUMBER);
   EXPECT_EQ(overflow.where.key, "FZ");
@@ -394,14 +532,16 @@ TEST(input_table, Parse_BadNumber_ReturnsInvalidNumberWithLineAndColumn) {
 
 TEST(input_table, Parse_BadPressureNumber_ReturnsInvalidNumberForP) {
   const mf::error failure = parse_failure("FZ SA SR IA VX P\n"
+                                          "N rad - rad m/s Pa\n"
                                           "1 2 3 4 5 six\n");
   EXPECT_EQ(failure.code, mf::error_code::INVALID_NUMBER);
   EXPECT_EQ(failure.where.key, "P");
-  EXPECT_EQ(failure.where.line, 2U);
+  EXPECT_EQ(failure.where.line, 3U);
 }
 
 TEST(input_table, Parse_PressureColumn_SetsHasPressureAndValue) {
-  const auto table = parse_success("FZ[N] SA[rad] SR[-] IA[rad] VX[m/s] P[Pa]\n"
+  const auto table = parse_success("FZ SA SR IA VX P\n"
+                                   "N rad - rad m/s Pa\n"
                                    "1 2 3 4 5 6\n");
   const std::vector<std::string> expected_columns{"FZ", "SA", "SR", "IA", "VX", "P"};
   EXPECT_EQ(table.columns, expected_columns);
@@ -412,7 +552,8 @@ TEST(input_table, Parse_PressureColumn_SetsHasPressureAndValue) {
 }
 
 TEST(input_table, Parse_PressureColumnFirst_ValuesMapped) {
-  const auto table = parse_success("P[Pa] FZ SA SR IA VX\n"
+  const auto table = parse_success("P FZ SA SR IA VX\n"
+                                   "Pa N rad - rad m/s\n"
                                    "220000 1 2 3 4 5\n"
                                    "0 6 7 8 9 10\n");
   ASSERT_EQ(table.values.rows(), 2);
@@ -426,6 +567,7 @@ TEST(input_table, Parse_PressureColumnFirst_ValuesMapped) {
 
 TEST(input_table, Parse_NoPressureColumn_PressureEmpty) {
   const auto table = parse_success("FZ SA SR IA VX\n"
+                                   "N rad - rad m/s\n"
                                    "1 2 3 4 5\n");
   EXPECT_EQ(table.columns.size(), 5U);
   EXPECT_EQ(std::ranges::count(table.columns, "P"), 0);
@@ -433,14 +575,14 @@ TEST(input_table, Parse_NoPressureColumn_PressureEmpty) {
   EXPECT_EQ(table.values.cols(), 5);
 }
 
-TEST(input_table, Parse_HeaderOnly_ZeroRows) {
-  const auto with_newline = parse_success("FZ[N],SA[rad],SR[-],IA[rad],VX[m/s]\n");
+TEST(input_table, Parse_HeaderAndUnitsOnly_ZeroRows) {
+  const auto with_newline = parse_success("FZ SA SR IA VX P\nN rad - rad m/s Pa\n");
   EXPECT_EQ(with_newline.values.rows(), 0);
-  EXPECT_EQ(with_newline.values.cols(), 5);
+  EXPECT_EQ(with_newline.values.cols(), 6);
   EXPECT_TRUE(with_newline.lines.empty());
   EXPECT_EQ(with_newline.header_line, 1U);
 
-  const auto without_newline = parse_success("FZ SA SR IA VX P");
+  const auto without_newline = parse_success("FZ SA SR IA VX P\nN rad - rad m/s Pa");
   EXPECT_EQ(without_newline.values.rows(), 0);
   EXPECT_EQ(without_newline.values.cols(), 6);
   EXPECT_TRUE(without_newline.lines.empty());
@@ -449,31 +591,33 @@ TEST(input_table, Parse_HeaderOnly_ZeroRows) {
 
 TEST(input_table, Parse_NoFinalNewline_LastLineParsed) {
   const auto table = parse_success("FZ SA SR IA VX\n"
+                                   "N rad - rad m/s\n"
                                    "1 2 3 4 5\n"
                                    "6 7 8 9 10");
   ASSERT_EQ(table.values.rows(), 2);
   ASSERT_EQ(table.lines.size(), 2U);
-  EXPECT_EQ(table.lines[1], 3U);
+  EXPECT_EQ(table.lines[1], 4U);
   expect_point(table, 1, 6.0, 7.0, 8.0, 9.0, 10.0);
 }
 
 TEST(input_table, Parse_Utf8Bom_Skipped) {
   const auto table = parse_success("\xEF\xBB\xBF"
-                                   "FZ[N],SA[rad],SR[-],IA[rad],VX[m/s]\n"
+                                   "FZ,SA,SR,IA,VX\n"
+                                   "N,rad,-,rad,m/s\n"
                                    "4000,0.1,0.2,0.3,10\n");
   ASSERT_EQ(table.values.rows(), 1);
   ASSERT_EQ(table.lines.size(), 1U);
-  EXPECT_EQ(table.lines[0], 2U);
+  EXPECT_EQ(table.lines[0], 3U);
   expect_point(table, 0, 4000.0, 0.1, 0.2, 0.3, 10.0);
 }
 
 TEST(input_table, Parse_FileName_InErrorLocation) {
-  const mf::error named = parse_failure("FZ SA SR IA VX\n1 2 x 4 5\n", "inputs.csv");
+  const mf::error named = parse_failure("FZ SA SR IA VX\nN rad - rad m/s\n1 2 x 4 5\n", "inputs.csv");
   EXPECT_EQ(named.where.file, "inputs.csv");
-  EXPECT_EQ(named.where.line, 2U);
-  EXPECT_EQ(mf::to_string(named).rfind("inputs.csv:2: ", 0), 0U) << mf::to_string(named);
+  EXPECT_EQ(named.where.line, 3U);
+  EXPECT_EQ(mf::to_string(named).rfind("inputs.csv:3: ", 0), 0U) << mf::to_string(named);
 
-  const mf::error unnamed = parse_failure("FZ SA SR IA VX\n1 2 x 4 5\n", "");
+  const mf::error unnamed = parse_failure("FZ SA SR IA VX\nN rad - rad m/s\n1 2 x 4 5\n", "");
   EXPECT_TRUE(unnamed.where.file.empty());
 
   const auto default_name = mf::io::parse_input_table("");
@@ -492,18 +636,19 @@ TEST_F(input_table_file, ReadInputTable_Nonexistent_ReturnsIo) {
 }
 
 TEST_F(input_table_file, ReadInputTable_File_Succeeds) {
-  write_text("# synthetic\nFZ[N],SA[deg],SR[-],IA[rad],VX[m/s]\n4000,30,0.1,0,10\n");
+  write_text("# synthetic\nFZ,SA,SR,IA,VX\nN,deg,-,rad,m/s\n4000,30,0.1,0,10\n");
   const auto result = mf::io::read_input_table(path_);
   ASSERT_TRUE(result.has_value());
   ASSERT_EQ(result->values.rows(), 1);
   ASSERT_EQ(result->lines.size(), 1U);
-  EXPECT_EQ(result->lines[0], 3U);
+  EXPECT_EQ(result->lines[0], 4U);
   EXPECT_EQ(result->file, path_.string());
   expect_point(*result, 0, 4000.0, 30.0 * DEG_TO_RAD, 0.1, 0.0, 10.0);
 }
 
 TEST(map_inputs, ReorderedHeader_ColumnsInChannelOrder) {
   const auto table = parse_success("VX IA SR SA FZ\n"
+                                   "m/s rad - rad N\n"
                                    "5 4 3 2 1\n"
                                    "10 9 8 7 6\n");
   const auto mapped = mf::io::map_inputs(table, mf::mf5x::PAC2002_INPUTS);
@@ -519,6 +664,7 @@ TEST(map_inputs, ReorderedHeader_ColumnsInChannelOrder) {
 
 TEST(map_inputs, PressureColumn_ListedAsIgnored) {
   const auto table = parse_success("FZ SA SR IA VX P\n"
+                                   "N rad - rad m/s Pa\n"
                                    "1 2 3 4 5 6\n");
   const auto mapped = mf::io::map_inputs(table, mf::mf5x::PAC2002_INPUTS);
   ASSERT_TRUE(mapped.has_value());
@@ -530,6 +676,7 @@ TEST(map_inputs, PressureColumn_ListedAsIgnored) {
 
 TEST(map_inputs, NoExtraColumns_IgnoredEmpty) {
   const auto table = parse_success("FZ SA SR IA VX\n"
+                                   "N rad - rad m/s\n"
                                    "1 2 3 4 5\n");
   const auto mapped = mf::io::map_inputs(table, mf::mf5x::PAC2002_INPUTS);
   ASSERT_TRUE(mapped.has_value());
@@ -539,6 +686,7 @@ TEST(map_inputs, NoExtraColumns_IgnoredEmpty) {
 TEST(map_inputs, MissingChannel_MissingKeyAtHeaderLine) {
   const auto table = parse_success("# comment\n"
                                    "FZ SA SR IA VX\n"
+                                   "N rad - rad m/s\n"
                                    "1 2 3 4 5\n");
   const auto mapped = mf::io::map_inputs(table, UNKNOWN_CHANNELS);
   ASSERT_FALSE(mapped.has_value());
@@ -551,7 +699,8 @@ TEST(map_inputs, MissingChannel_MissingKeyAtHeaderLine) {
 }
 
 TEST(map_inputs, HeaderOnly_ZeroRowsMatrix) {
-  const auto table = parse_success("FZ SA SR IA VX\n");
+  const auto table = parse_success("FZ SA SR IA VX\n"
+                                   "N rad - rad m/s\n");
   const auto mapped = mf::io::map_inputs(table, mf::mf5x::PAC2002_INPUTS);
   ASSERT_TRUE(mapped.has_value());
   EXPECT_EQ(mapped->values.rows(), 0);
@@ -563,13 +712,14 @@ TEST(map_inputs, LinesPreserved_CommentsAndBlankLinesSkipped) {
   const auto table = parse_success("# comment\n"
                                    "\n"
                                    "FZ SA SR IA VX\n"
+                                   "N rad - rad m/s\n"
                                    "1 2 3 4 5\n"
                                    "\n"
                                    "# between rows\n"
                                    "6 7 8 9 10\n");
   const auto mapped = mf::io::map_inputs(table, mf::mf5x::PAC2002_INPUTS);
   ASSERT_TRUE(mapped.has_value());
-  const std::vector<std::size_t> expected_lines{4U, 7U};
+  const std::vector<std::size_t> expected_lines{5U, 8U};
   EXPECT_EQ(mapped->lines, expected_lines);
 }
 
@@ -579,7 +729,7 @@ TEST(read_model_inputs, ValidFile_MapsColumns) {
   ASSERT_EQ(mapped->values.rows(), 6);
   ASSERT_EQ(mapped->values.cols(), 5);
   EXPECT_TRUE(mapped->ignored_columns.empty());
-  const std::vector<std::size_t> expected_lines{4U, 5U, 6U, 7U, 8U, 9U};
+  const std::vector<std::size_t> expected_lines{5U, 6U, 7U, 8U, 9U, 10U};
   EXPECT_EQ(mapped->lines, expected_lines);
   // Row 1 is "4000,0.05,0,0,10"; the last row has a negative load.
   expect_same(mapped->values(1, mf::mf5x::FZ), 4000.0);
@@ -612,7 +762,7 @@ TEST(read_model_inputs, DegreesFile_ConvertedToRadians) {
   const auto mapped = mf::io::read_model_inputs(mf::test::data_file("inputs_degrees.txt"), mf::mf5x::PAC2002_INPUTS);
   ASSERT_TRUE(mapped.has_value());
   ASSERT_EQ(mapped->values.rows(), 6);
-  const std::vector<std::size_t> expected_lines{5U, 6U, 9U, 10U, 11U, 12U};
+  const std::vector<std::size_t> expected_lines{7U, 8U, 11U, 12U, 13U, 14U};
   EXPECT_EQ(mapped->lines, expected_lines);
   // The file has the columns reordered (FZ SR SA IA VX); the mapped matrix is in channel order.
   constexpr double angle_tol_rad = 1e-12; // the file prints the degree values with 17 digits
@@ -626,10 +776,10 @@ TEST(read_model_inputs, DegreesFile_ConvertedToRadians) {
 }
 
 TEST_F(input_table_file, ReadInputTable_ParseError_NamesThePath) {
-  write_text("FZ SA SR IA VX\n1 2 3 4\n");
+  write_text("FZ SA SR IA VX\nN rad - rad m/s\n1 2 3 4\n");
   const auto result = mf::io::read_input_table(path_);
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error().code, mf::error_code::SYNTAX);
   EXPECT_EQ(result.error().where.file, path_.string());
-  EXPECT_EQ(result.error().where.line, 2U);
+  EXPECT_EQ(result.error().where.line, 3U);
 }
