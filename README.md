@@ -137,17 +137,27 @@ MF 6.x and every other model give an error (see `docs/research/model-routing.md`
 Plain text, one operating point per row:
 
 - A line whose first non-blank character is `#` is a comment; blank lines are ignored.
-- Fields are separated by any run of commas, blanks or tabs.
-- The first content line is the header. The required columns are `FZ SA SR IA VX`; the optional column is `P` (pressure). Columns may be in any order and in any letter case.
-- A column name may carry a unit in brackets; without a unit the SI unit applies: `FZ[N]`, `SA[rad|deg]`, `SR[-]`, `IA[rad|deg]`, `VX[m/s]`, `P[Pa]`.
+- Fields are separated by any run of commas, blanks or tabs. The rule is the same on every line (header, unit line and rows), and the separators may be mixed.
+- The first content line is the header: the column names only. The required columns are `FZ SA SR IA VX`; the optional column is `P` (pressure). Columns may be in any order and in any letter case, each at most once.
+- The next content line is the unit line, which is mandatory: exactly one unit per header column, in header order, compared case-insensitively. Accepted units: `FZ` N; `SA` rad or deg; `SR` -; `IA` rad or deg; `VX` m/s; `P` Pa. Degrees are converted to radians once, when the table is read.
 - `P` is read but ignored with a warning (`column P is ignored: <model> has no P input`), because PAC2002 and MF 5.2 have no pressure input.
-- Every data row has exactly as many numbers as the header has columns.
+- Every further line is a data row with exactly as many numbers as the header has columns.
+
+Errors (reported as `mf: error: <file>:<line>: <message>`, exit code 1, nothing on stdout):
+
+- Missing unit line: the text ends after the header (reported at the header line), or the line after the header starts with a number (reported at that line).
+- Unit count: the unit line has a different number of units than the header has columns. An empty entry such as `N,,rad` collapses and counts as a missing unit.
+- Unsupported unit: an unknown unit (for example `kN`) or another column's unit (for example `deg` for `FZ`); the message names the column.
+- Legacy header: a header field with brackets, such as `FZ[N]`, is a syntax error.
+
+Migration: headers of the old form `FZ[N],SA[deg],...` are rejected. Write the bare names `FZ,SA,...` and move each unit to a unit line directly below the header.
 
 Example:
 
 ```
-# Fz[N]  SA[deg]  SR  IA[deg]  Vx[m/s]
-FZ[N],SA[deg],SR[-],IA[deg],VX[m/s]
+# Fz in N, angles in degrees, Vx in m/s
+FZ,SA,SR,IA,VX
+N,deg,-,deg,m/s
 4000,0,0,0,16.7
 4000,4,0,0,16.7
 3000,2,-0.1,1,25
@@ -160,6 +170,8 @@ CSV on stdout. The header line is
 ```
 FZ[N],SA[rad],SR[-],IA[rad],VX[m/s],FX[N],FY[N],MZ[N*m],MX[N*m],MY[N*m],FZ_CLAMPED[-],SR_CLAMPED[-],SA_CLAMPED[-],IA_CLAMPED[-],BELOW_VXLOW[-]
 ```
+
+The results header keeps the `NAME[unit]` form (the units of the echoed inputs and of the outputs); the input table has its units on the unit line instead.
 
 15 columns, followed by one line per input row, in input order. The inputs are echoed unclamped in SI units (angles in rad), followed by the five outputs in the ISO W-axis sign convention (My is negative when the wheel rolls forward) and five 0/1 flag columns: `FZ_CLAMPED`, `SR_CLAMPED`, `SA_CLAMPED` and `IA_CLAMPED` are 1 when that input was clamped to the `.tir` range, and `BELOW_VXLOW` is 1 when Vx is below `VXLOW`. Warnings about the flags are still printed on stderr. Nothing is written to stdout unless every row evaluated successfully.
 

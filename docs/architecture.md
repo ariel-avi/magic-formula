@@ -10,7 +10,7 @@ Dependencies point downwards only. The core model knows nothing about files or t
 |-------|------|------|-----------|------|
 | core model | `tire_model.hpp`, `model_layout.hpp`, `mf5x_layout.hpp`, `model_checks.hpp`, `mf5x_model.hpp`, `pac2002_model.hpp`, `mf52_model.hpp`, `mf5x_forms.hpp`, `mf5x_coefficients.hpp`, `evaluation_types.hpp`, `error.hpp` | `model/`, `error.cpp` | `mf`, `mf::mf5x` | Abstract formulation, the index maps, the two concrete models, the free check functions. No I/O, no printing. |
 | detail | `detail/lanes.hpp`, `detail/mf5x_kernels.hpp`, `detail/text.hpp` | `detail/` | `mf::detail` | Internal, lane-templated equation kernels and helpers. Under `include/` so tests can include them; production code includes `detail/mf5x_kernels.hpp` only from `src/model/mf5x_model.cpp`. |
-| io | `io/*.hpp` | `io/` | `mf::io` | `.tir` lexing (`tir_document`, `tir_reader`), unit check, model routing, key-to-coefficient bindings, the model loader (factory), the `.tir` text editor (`tir_editor`: `replace_value` changes only the bytes of one value, using each entry's `value_offset`/`value_length` span, and re-parses to check the result), the input-table parser and its mapping onto a model's input channels, the CSV result writer. |
+| io | `io/*.hpp` | `io/` | `mf::io` | `.tir` lexing (`tir_document`, `tir_reader`), unit check, model routing, key-to-coefficient bindings, the model loader (factory), the `.tir` text editor (`tir_editor`: `replace_value` changes only the bytes of one value, using each entry's `value_offset`/`value_length` span, and re-parses to check the result), the input-table parser (header, mandatory unit line, rows) and its mapping onto a model's input channels, the CSV result writer. |
 | cli | `cli/cli.hpp` | `cli/cli.cpp` | `mf::cli` | Command-line parsing and the `run` driver. Compiled into `mflib` so module tests can run it in-process. |
 | wasm adapter | none | `wasm/mf_wasm.cpp` (outside `src/`) | `mf::wasm` | embind adapter that only converts types and calls `io::tir_document::parse`, `io::load_tire_model`, `io::replace_value` and `checked_evaluate_batch`. Not part of `mflib`, not coverage-gated, built only by the `wasm` preset. |
 | app | none | `app/main.cpp` | none | One call into `mf::cli::run`. Builds the executable `mf`. |
@@ -129,13 +129,38 @@ The kernels are templates over a lane type, defined in headers (`detail/lanes.hp
 
 Routing (`io::identify_model`) maps PROPERTY_FILE_FORMAT and FITTYP to `io::model_kind` (`PAC2002`, `MF52`); see `research/model-routing.md` for the table.
 
+## Input table
+
+The input table has three parts: a header of column names, then a mandatory unit line with one unit per column, then the data rows. Comments (`#`) and blank lines are skipped everywhere, and one separator rule (any run of commas, blanks or tabs) applies on every line.
+
+`src/io/input_table.cpp` parses it as a linear pipeline:
+
+1. strip a leading UTF-8 BOM;
+2. `next_content_line`: a cursor over content lines (CR stripped, blank and `#` lines skipped);
+3. `parse_header`: names only; a field with `[` or `]` (the legacy `NAME[unit]` form) gives SYNTAX;
+4. `next_content_line` again: no line left means a missing unit line, reported at the header line;
+5. `parse_unit_line`: a data row in its place, the unit count, then the unit lookup per column;
+6. `parse_rows`: numbers times the unit factor, giving SI values.
+
+| Condition | Code | Line |
+|-----------|------|------|
+| legacy `NAME[unit]` header field | SYNTAX | header |
+| text ends after the header | SYNTAX | header |
+| line after the header starts with a number | SYNTAX | that line |
+| unit count != column count (an empty entry included) | SYNTAX | unit line |
+| unit not accepted for its column | UNSUPPORTED_UNIT | unit line (key = column) |
+
+The other errors (missing header line, unknown column, DUPLICATE_KEY, MISSING_KEY, row field count, INVALID_NUMBER) are unchanged. A file reports its first error only.
+
+The constexpr `UNITS` table in the parser is the single source of the accepted units and factors, and of the unit hints in the messages, so a new unit is one row. The doc comment of `mf::io::parse_input_table` is the specification.
+
 ## CLI flow
 
 `mf::cli::run`:
 
 1. parses the command line;
 2. loads the `.tir` file unchecked (`throw_if_model_failure` off);
-3. `io::read_model_inputs`: reads the table (units converted to SI once) and arranges its columns in the model's `input_index` order; a table column that the model has no input for (P for MF 5.x) goes to `ignored_columns`;
+3. `io::read_model_inputs`: reads the table (header, mandatory unit line, rows; units converted to SI once) and arranges its columns in the model's `input_index` order; a table column that the model has no input for (P for MF 5.x) goes to `ignored_columns`;
 4. `checked_evaluate_batch`: input validation, the batch evaluation and the output check, on the whole table;
 5. diagnostics on `err`: load warnings, `--verbose` information, one warning per ignored column, then one warning per flag output that is set (first table line and row count);
 6. `io::write_results`: the 15-column CSV on `out`.
@@ -153,7 +178,7 @@ MF 6.0 / 6.1 / 6.2 (FITTYP 60 / 61 / 62) are currently rejected with `UNSUPPORTE
 5. **CLI wording.** Add a flag wording row for P_CLAMPED to the CLI's flag-warning table. The column mapping and the writer follow the layout automatically, and the "column P is ignored" warning disappears for models whose layout has a P input.
 6. **Binding table.** Add a binding table in `io/` next to `mf5x_bindings` (for example `mf61_bindings.hpp/.cpp`) with the key, the member pointer and the `binding_role` for every key, and a "foreign keys" list if needed (compare `mf52_foreign_keys()`).
 7. **Routing.** Add `MF61` (and `MF60`, `MF62` as they are implemented) to `io::model_kind`, remove FITTYP 60 / 61 / 62 from the "not implemented" rule in `io::model_routing`, and add the new kind to the model-creation step of `model_loader.cpp`. FITTYP 70 stays unsupported until the temperature-and-velocity model exists. Keep the rule order: an unknown PFF first, a non-integer FITTYP second. Update `model-routing.md`, the routing-order rule in `research/policies.md` section 3 and the README "Models" section in the same PR.
-8. **Open items (to be resolved by research before implementation).** The pressure unit and name (the input table reads `P` in Pa today), whether and how pressure is clamped to PRESMIN / PRESMAX, and the value to use when the table has no P column.
+8. **Open items (to be resolved by research before implementation).** The pressure unit and name (the unit line accepts only Pa for P today; another pressure unit is one row of the parser's unit table), whether and how pressure is clamped to PRESMIN / PRESMAX, and the value to use when the table has no P column.
 9. **Tests to add.** 100% line and branch on core, nothing skipped:
    - unit tests for each new kernel and for the coefficient validation (every branch), on both lane types, with every `select` predicate driven both ways;
    - the batch-vs-point agreement test at the 1e-12 scaled tolerance, and the pipeline tests (flags, Fz <= 0, clamping, finite checks) for the new model;

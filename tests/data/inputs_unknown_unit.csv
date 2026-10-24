@@ -1,0 +1,4 @@
+# hand-written for magic-formula: kN is not an accepted unit of FZ; see cli_test Run_BadInputTable_Exit1AtLine
+FZ,SA,SR,IA,VX
+kN,rad,-,rad,m/s
+4,0,0.1,0,10

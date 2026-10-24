@@ -1,0 +1,3 @@
+# hand-written for magic-formula: a data row directly after the header is a missing unit line; see cli_test Run_BadInputTable_Exit1AtLine
+FZ,SA,SR,IA,VX
+4000,0,0.1,0,10

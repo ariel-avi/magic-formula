@@ -1,0 +1,4 @@
+# hand-written for magic-formula: an empty unit entry leaves four units for five columns; see cli_test Run_BadInputTable_Exit1AtLine
+FZ,SA,SR,IA,VX
+N,rad,,rad,m/s
+4000,0,0.1,0,10

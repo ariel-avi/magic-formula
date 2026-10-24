@@ -1,6 +1,7 @@
 # synthetic, authored for magic-formula from docs/research/test-data.md; not derived from any vendor file
 # rows beyond each S-rng limit plus one inside; see README.md
-FZ[N],SA[rad],SR[-],IA[rad],VX[m/s]
+FZ,SA,SR,IA,VX
+N,rad,-,rad,m/s
 4000,0.05,0.1,0,10
 4000,0,10,0,10
 4000,2,0,0,10

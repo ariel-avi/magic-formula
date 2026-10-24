@@ -1,4 +1,5 @@
 # hand-written for magic-formula: Fz = 1e308 overflows the model to a non-finite output; see cli_test Run_OverflowFz_NumericalErrorAtLine
 FZ,SA,SR,IA,VX
+N,rad,-,rad,m/s
 4000,0,0,0,16.6
 1e308,0,0,0,16.6

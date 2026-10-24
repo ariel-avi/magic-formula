@@ -1,0 +1,3 @@
+# hand-written for magic-formula: a legacy NAME[unit] header is rejected; see cli_test Run_BadInputTable_Exit1AtLine
+FZ[N],SA[rad],SR[-],IA[rad],VX[m/s]
+4000,0,0.1,0,10
