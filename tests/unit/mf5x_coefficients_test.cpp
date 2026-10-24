@@ -1,17 +1,20 @@
 #include "../support/fixtures.hpp"
 
+#include <Eigen/Core>
 #include <array>
 #include <cstddef>
 #include <gtest/gtest.h>
 #include <limits>
 #include <magic_formula/error.hpp>
 #include <magic_formula/mf5x_coefficients.hpp>
+#include <magic_formula/mf5x_layout.hpp>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace {
+  using mf::test::bits;
   using coeffs = mf::mf5x_coefficients;
   using member_ptr = double coeffs::*;
 
@@ -213,14 +216,23 @@ TEST(mf5x_coefficients, Layout_Size_Is117Doubles) {
 
 TEST(mf5x_coefficients, Parameters_DefaultConstructed_NoLimitsNoMetadataVxlowOne) {
   const mf::mf5x_parameters parameters{};
-  EXPECT_FALSE(parameters.limits.fz_n.has_value());
-  EXPECT_FALSE(parameters.limits.kappa.has_value());
-  EXPECT_FALSE(parameters.limits.alpha_rad.has_value());
-  EXPECT_FALSE(parameters.limits.gamma_rad.has_value());
-  EXPECT_DOUBLE_EQ(parameters.limits.vxlow_mps, 1.0);
+  ASSERT_EQ(parameters.limits.size(), mf::mf5x::LIMITS_LENGTH);
+  EXPECT_EQ(bits(parameters.limits(mf::mf5x::VXLOW)), bits(1.0));
   EXPECT_FALSE(parameters.metadata.fittyp.has_value());
   EXPECT_FALSE(parameters.metadata.use_mode.has_value());
   EXPECT_EQ(parameters.metadata.side, mf::tyre_side::LEFT);
+}
+
+TEST(mf5x_parameters, DefaultLimits_InfinitiesAndVxlowOne) {
+  const mf::mf5x_parameters parameters{};
+  const Eigen::VectorXd &limits = parameters.limits;
+  ASSERT_EQ(limits.size(), 9);
+  const std::array<Eigen::Index, 4> lowers{mf::mf5x::FZMIN, mf::mf5x::KPUMIN, mf::mf5x::ALPMIN, mf::mf5x::CAMMIN};
+  for (const Eigen::Index lower : lowers) {
+    EXPECT_EQ(bits(limits(lower)), bits(-std::numeric_limits<double>::infinity())) << "lower at " << lower;
+    EXPECT_EQ(bits(limits(lower + 1)), bits(std::numeric_limits<double>::infinity())) << "upper at " << lower + 1;
+  }
+  EXPECT_EQ(bits(limits(mf::mf5x::VXLOW)), bits(1.0));
 }
 
 TEST(validate_coefficients, ValidateCoefficients_FixtureS_Succeeds) {

@@ -30,14 +30,14 @@ tests/unit/              unit tests (CTest label: unit)
 tests/module/            module/integration tests (CTest label: module), incl. the CLI smoke test
 tests/support/           header-only test helpers (fixtures.hpp, namespace mf::test); not a test, not globbed
 tests/data/              .tir files, input tables, reference outputs (with origin notes)
-bench/                   Google Benchmark (mf_bench; not wired yet)
+bench/                   Google Benchmark: mf_bench (bench/*.cpp; MF_BUILD_BENCH, ON in the release preset; not a CTest test, not coverage-gated)
 docs/architecture.md     architecture: layers, class hierarchy, pipeline, error model, "Extending to MF 6.x"
 docs/research/           researcher findings: the cited source of truth for equations and the only place that carries
                          citations, page and equation numbers; policies.md = project rules where the sources are silent
 cmake/                   ClangFormat, ClangTidy, Coverage (verbatim from ariel-avi/lab/cpp/cmake; change the lab first);
                          MfCompileOptions, MfTesting (project glue)
 .clang-format, .clang-tidy  verbatim copies of ariel-avi/lab/cpp/*
-conanfile.py             dependencies (gtest; generators in build/conan/<build_type>)
+conanfile.py             dependencies (eigen; test: gtest, benchmark by default for Release only, override with -o with_benchmark=True|False; generators in build/conan/<build_type>)
 CMakePresets.json        configure/build/test presets: debug, release, coverage
 .github/workflows/ci.yml CI: quality (format/tidy), build-test matrix (linux gcc-14 + clang-19,
                          windows-2025 MSVC, macos-15 Homebrew LLVM 21), coverage (gcc-14, 100/100)
@@ -55,7 +55,9 @@ cmake --build --preset debug --target clang-format_all   # formats in place; CI 
 cmake --build --preset debug --target clang-tidy_all     # CI: -DCLANG_TIDY_EXE="clang-tidy-19;--warnings-as-errors=*"
 # coverage gate (see coverage skill): runs ctest + gcovr with the 100/100 thresholds; reports in coverage/
 cmake --preset coverage && cmake --build --preset coverage && cmake --build --preset coverage --target coverage
-# benchmarks (once bench/ exists; Release conan install + release preset)
+# benchmarks (Release conan install; the release preset sets MF_BUILD_BENCH=ON)
+conan install . --build=missing -s build_type=Release -s compiler.cppstd=26
+cmake --preset release && cmake --build --preset release
 ./build/release/bench/mf_bench
 ```
 

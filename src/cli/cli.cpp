@@ -1,3 +1,4 @@
+#include <Eigen/Core>
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -11,11 +12,12 @@
 #include <magic_formula/io/input_table.hpp>
 #include <magic_formula/io/model_loader.hpp>
 #include <magic_formula/io/result_writer.hpp>
+#include <magic_formula/model_checks.hpp>
+#include <magic_formula/model_layout.hpp>
 #include <magic_formula/tire_model.hpp>
 #include <magic_formula/version.hpp>
 #include <optional>
 #include <ostream>
-#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -25,11 +27,11 @@
 namespace mf::cli {
   namespace {
     // clang-format off
-    /// The usage text. The results header line must equal `io::RESULTS_HEADER` (checked below).
+    /// The usage text. The results header line equals `io::results_header` of the MF 5.x models (tested).
     constexpr std::string_view USAGE_TEXT = R"usage(Usage: mf [options] <inputs-table> <file.tir>
 
 Evaluates the PAC2002 or MF 5.2 tire model of <file.tir> at every row of <inputs-table> and prints
-Fx, Fy, Mz, Mx and My for every row as CSV on stdout.
+Fx, Fy, Mz, Mx and My, and the clamp and low-speed flags, for every row as CSV on stdout.
 
 Options:
   --uncombined   print the pure-slip outputs (Fx0, Fy0, Mz0) instead of the combined-slip ones
@@ -48,10 +50,11 @@ Input table (plain text, one operating point per row):
   - Every data row has exactly as many numbers as the header has columns.
 
 Output (stdout):
-  FZ[N],SA[rad],SR[-],IA[rad],VX[m/s],FX[N],FY[N],MZ[N*m],MX[N*m],MY[N*m]
+  FZ[N],SA[rad],SR[-],IA[rad],VX[m/s],FX[N],FY[N],MZ[N*m],MX[N*m],MY[N*m],FZ_CLAMPED[-],SR_CLAMPED[-],SA_CLAMPED[-],IA_CLAMPED[-],BELOW_VXLOW[-]
   followed by one line per input row, in input order. The inputs are echoed unclamped in SI units
-  (angles in rad), followed by the five outputs in the ISO W-axis sign convention. Nothing is written to
-  stdout when an error occurs. Warnings (clamped inputs, low speed, ignored column) go to stderr.
+  (angles in rad), followed by the five outputs in the ISO W-axis sign convention, then five flags
+  (1 = FZ/SR/SA/IA was clamped to the property-file range or VX is below VXLOW, 0 otherwise). Nothing is
+  written to stdout when an error occurs. Warnings (clamped inputs, low speed, ignored column) go to stderr.
 
 Exit status:
   0  success (also --help and --version)
@@ -59,15 +62,14 @@ Exit status:
   2  usage error (message and this text on stderr)
 )usage";
     // clang-format on
-    static_assert(USAGE_TEXT.find(io::RESULTS_HEADER) != std::string_view::npos);
 
     /// The names of `tyre_side`, indexed by the enumerator value.
     constexpr std::array<std::string_view, 2> SIDE_NAMES{"LEFT", "RIGHT"};
 
-    /// One `input_flags` member and the words of its warning.
-    struct flag_check {
-      /// The flag in `tire_outputs::flags`.
-      bool input_flags::*flag;
+    /// The words of the warning of one flag output channel.
+    struct flag_wording {
+      /// Name of the flag output channel.
+      std::string_view channel;
       /// Input field named in the warning.
       std::string_view key;
       /// What happened to the field.
@@ -77,28 +79,28 @@ Exit status:
     };
 
     // clang-format off
-    /// The flag warnings, in the order they are printed.
-    constexpr std::array<flag_check, 5> FLAG_CHECKS{
-        flag_check{.flag = &input_flags::fz_clamped,
-                   .key = "FZ",
-                   .what = "outside the property-file range",
-                   .consequence = "evaluated at the limit"},
-        flag_check{.flag = &input_flags::kappa_clamped,
-                   .key = "SR",
-                   .what = "outside the property-file range",
-                   .consequence = "evaluated at the limit"},
-        flag_check{.flag = &input_flags::alpha_clamped,
-                   .key = "SA",
-                   .what = "outside the property-file range",
-                   .consequence = "evaluated at the limit"},
-        flag_check{.flag = &input_flags::gamma_clamped,
-                   .key = "IA",
-                   .what = "outside the property-file range",
-                   .consequence = "evaluated at the limit"},
-        flag_check{.flag = &input_flags::below_vxlow,
-                   .key = "VX",
-                   .what = "below VXLOW",
-                   .consequence = "VXLOW is not applied"},
+    /// The flag warnings, keyed by output channel name; printed in the order of the model's output channels.
+    constexpr std::array<flag_wording, 5> FLAG_WORDINGS{
+        flag_wording{.channel = "FZ_CLAMPED",
+                     .key = "FZ",
+                     .what = "outside the property-file range",
+                     .consequence = "evaluated at the limit"},
+        flag_wording{.channel = "SR_CLAMPED",
+                     .key = "SR",
+                     .what = "outside the property-file range",
+                     .consequence = "evaluated at the limit"},
+        flag_wording{.channel = "SA_CLAMPED",
+                     .key = "SA",
+                     .what = "outside the property-file range",
+                     .consequence = "evaluated at the limit"},
+        flag_wording{.channel = "IA_CLAMPED",
+                     .key = "IA",
+                     .what = "outside the property-file range",
+                     .consequence = "evaluated at the limit"},
+        flag_wording{.channel = "BELOW_VXLOW",
+                     .key = "VX",
+                     .what = "below VXLOW",
+                     .consequence = "VXLOW is not applied"},
     };
     // clang-format on
 
@@ -146,61 +148,72 @@ Exit status:
                          detail::join(loaded.ignored_keys, ", "));
     }
 
-    /// One warning per variable that the model clamped (or flagged), naming the first table line and the row count.
-    void print_flag_warnings(std::ostream &err, const std::string &inputs_path, std::span<const io::input_row> rows,
-                             std::span<const tire_outputs> outputs) {
-      for (const flag_check &check : FLAG_CHECKS) {
-        const auto is_set = [&check](const tire_outputs &output) { return output.flags.*(check.flag); };
-        const std::ptrdiff_t count = std::ranges::count_if(outputs, is_set);
+    /// One warning per flag output channel that is set on some row, naming the first such table line and the row count.
+    /// The flags are found by their channel names in `FLAG_WORDINGS`; other output channels are skipped.
+    void print_flag_warnings(std::ostream &err, const std::string &inputs_path, std::span<const std::size_t> lines,
+                             const model_layout &layout, const Eigen::Ref<const Eigen::MatrixXd> &outputs) {
+      for (std::size_t j = 0; j < layout.outputs.size(); ++j) {
+        const std::string_view channel = layout.outputs[j].name;
+        const auto is_channel = [channel](const flag_wording &wording) { return wording.channel == channel; };
+        // NOLINTNEXTLINE(readability-qualified-auto): the array iterator is a class type on some standard libraries
+        const auto wording = std::ranges::find_if(FLAG_WORDINGS, is_channel);
+        if (wording == FLAG_WORDINGS.end()) {
+          continue;
+        }
+        const auto column = static_cast<Eigen::Index>(j);
+        const Eigen::Index count = (outputs.col(column).array() != 0.0).count();
         if (count > 0) {
-          const auto first = static_cast<std::size_t>(std::ranges::find_if(outputs, is_set) - outputs.begin());
+          // maxCoeff reports the first maximum, i.e. the first row where the flag is set.
+          Eigen::Index first = 0;
+          (outputs.col(column).array() != 0.0).cast<int>().maxCoeff(&first);
           const std::string message =
-              std::format("{} {} in {} row(s); {}", check.key, check.what, count, check.consequence);
-          print_warning(err, message, inputs_path, rows[first].line, std::string(check.key));
+              std::format("{} {} in {} row(s); {}", wording->key, wording->what, count, wording->consequence);
+          print_warning(err, message, inputs_path, lines[static_cast<std::size_t>(first)], std::string(wording->key));
         }
       }
     }
 
-    /// Everything printed to stderr on success, in this order: load warnings, `--verbose` information, the pressure
-    /// column warning, and the flag warnings.
+    /// Everything printed to stderr on success, in this order: load warnings, `--verbose` information, one warning per
+    /// ignored table column, and the flag warnings.
     void print_diagnostics(std::ostream &err, const options &parsed, const io::loaded_model &loaded,
-                           const io::input_table &table, std::span<const tire_outputs> outputs) {
+                           const io::model_inputs &inputs, const Eigen::Ref<const Eigen::MatrixXd> &outputs) {
       for (const warning &item : loaded.warnings) {
         print_warning(err, item);
       }
       if (parsed.verbose) {
         print_info(err, loaded);
       }
-      if (table.has_pressure) {
-        print_warning(err, "column P is ignored: PAC2002 and MF 5.2 have no pressure input", parsed.inputs_path, 0,
-                      "P");
+      for (const std::string &column : inputs.ignored_columns) {
+        const std::string message =
+            std::format("column {} is ignored: {} has no {} input", column, loaded.model->name(), column);
+        print_warning(err, message, parsed.inputs_path, 0, column);
       }
-      print_flag_warnings(err, parsed.inputs_path, table.rows, outputs);
+      print_flag_warnings(err, parsed.inputs_path, inputs.lines, loaded.model->layout(), outputs);
     }
 
     /// The `command::RUN` action: load, read, evaluate, report, write.
     int execute(const options &parsed, std::ostream &out, std::ostream &err) {
-      const std::expected<io::loaded_model, error> loaded = io::load_tire_model_file(parsed.tir_path);
+      const model_options evaluation{.mode = parsed.mode, .throw_if_model_failure = false};
+      const std::expected<io::loaded_model, error> loaded = io::load_tire_model_file(parsed.tir_path, evaluation);
       if (!loaded.has_value()) {
         return fail(err, loaded.error());
       }
-      const std::expected<io::input_table, error> table = io::read_input_table(parsed.inputs_path);
-      if (!table.has_value()) {
-        return fail(err, table.error());
+      const tire_model &model = *loaded->model;
+      const std::expected<io::model_inputs, error> inputs =
+          io::read_model_inputs(parsed.inputs_path, model.layout().inputs);
+      if (!inputs.has_value()) {
+        return fail(err, inputs.error());
       }
-      const std::vector<operating_point> points =
-          table->rows | std::views::transform(&io::input_row::point) | std::ranges::to<std::vector<operating_point>>();
-      std::expected<std::vector<tire_outputs>, batch_error> results =
-          loaded->model->evaluate_batch(points, parsed.mode);
+      std::expected<Eigen::MatrixXd, batch_error> results = checked_evaluate_batch(model, inputs->values);
       if (!results.has_value()) {
         // The failure is located in the input table: file and 1-based line of the failing row (the key is kept).
         batch_error &failure = results.error();
         failure.cause.where.file = parsed.inputs_path;
-        failure.cause.where.line = table->rows[failure.index].line;
+        failure.cause.where.line = inputs->lines[failure.index];
         return fail(err, failure.cause);
       }
-      print_diagnostics(err, parsed, *loaded, *table, *results);
-      io::write_results(out, points, *results);
+      print_diagnostics(err, parsed, *loaded, *inputs, *results);
+      io::write_results(out, model.layout(), inputs->values, *results);
       out.flush();
       if (out.fail()) {
         err << "mf: error: cannot write results\n";

@@ -1,32 +1,39 @@
 #pragma once
 
+#include <Eigen/Core>
 #include <cstddef>
 #include <expected>
 #include <filesystem>
 #include <magic_formula/error.hpp>
-#include <magic_formula/evaluation_types.hpp>
-#include <optional>
+#include <magic_formula/model_layout.hpp>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace mf::io {
-  /// One operating point of the CLI input table, in SI units.
-  struct input_row {
-    /// Fz [N], SR [-], SA [rad], IA [rad], Vx [m/s]; unclamped, exactly as read (after unit conversion).
-    operating_point point;
-    /// Inflation pressure [Pa] when the table has a P column. The models have no pressure input.
-    std::optional<double> pressure_pa;
-    /// 1-based line of this row in the input text.
-    std::size_t line = 0;
+  /// A parsed input table: the columns exactly as the header names them, one matrix row per data row.
+  struct input_table {
+    /// File name used in errors.
+    std::string file;
+    /// Upper-case header names in header order (each of FZ SA SR IA VX P).
+    std::vector<std::string> columns;
+    /// rows x columns, SI units, unclamped, exactly as read (after unit conversion).
+    Eigen::MatrixXd values;
+    /// 1-based line of every row in the input text.
+    std::vector<std::size_t> lines;
+    /// 1-based line of the header.
+    std::size_t header_line = 0;
   };
 
-  /// A parsed input table.
-  struct input_table {
-    /// One entry per data row, in input order.
-    std::vector<input_row> rows;
-    /// True when the header has a P column.
-    bool has_pressure = false;
+  /// A table arranged for one model: the columns in the model's input_index order.
+  struct model_inputs {
+    /// rows x channels; column k holds the table column named like channel k.
+    Eigen::MatrixXd values;
+    /// 1-based line of every row in the input text.
+    std::vector<std::size_t> lines;
+    /// Table columns that no channel uses (for example P for PAC2002), in header order.
+    std::vector<std::string> ignored_columns;
   };
 
   /// Parses the CLI input table. Units are converted to SI once, here.
@@ -43,8 +50,8 @@ namespace mf::io {
   ///   VX[m/s], P[Pa]. Degrees are converted as `value * (pi / 180)`.
   /// - Every data row has exactly as many fields as the header. Each field must be a finite number
   ///   (`mf::io::parse_number`).
-  /// - Empty text, or text with only comments and blank lines, has no header (SYNTAX). A header without rows gives an
-  ///   empty table.
+  /// - Empty text, or text with only comments and blank lines, has no header (SYNTAX). A header without rows gives a
+  ///   0 x columns matrix.
   ///
   /// Errors carry `file_name`, the 1-based line (0 when there is no header line) and the upper-case column name:
   /// SYNTAX (no header, unknown column, malformed unit, field count), DUPLICATE_KEY (column twice), MISSING_KEY
@@ -53,4 +60,15 @@ namespace mf::io {
 
   /// Reads `path` (`read_text_file`) and parses it with `parse_input_table`, using `path` as the file name in errors.
   [[nodiscard]] std::expected<input_table, error> read_input_table(const std::filesystem::path &path);
+
+  /// Arranges `table` for a model: column k of the result is the table column named like `channels[k]`; the table
+  /// columns that no channel uses are listed in `ignored_columns`.
+  /// @return the arranged inputs, or MISSING_KEY (file, header line, channel name; message "missing required column
+  ///         <NAME>") for the first channel without a column
+  [[nodiscard]] std::expected<model_inputs, error> map_inputs(const input_table &table,
+                                                              std::span<const input_channel> channels);
+
+  /// `read_input_table` followed by `map_inputs`.
+  [[nodiscard]] std::expected<model_inputs, error> read_model_inputs(const std::filesystem::path &path,
+                                                                     std::span<const input_channel> channels);
 } // namespace mf::io

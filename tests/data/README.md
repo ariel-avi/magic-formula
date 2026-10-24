@@ -48,6 +48,10 @@ Format: see the CLI documentation. Comments (`#`) appear only on their own lines
 | `inputs_low_speed.csv` | Vx = 0.5 and Vx = 0 | M8 | S, S52 | PAC2002: VXLOW warning; MF 5.2: error at line 4 |
 | `inputs_negative_vx.csv` | Negative Vx | negative Vx is rejected | S, S52 | Error at line 4 |
 | `inputs_malformed.csv` | Field-count mismatch | - | S | Error at line 4 |
+| `inputs_overflow.csv` | Fz = 1e308 overflows the model to a non-finite output: NUMERICAL error with its line and an empty stdout | hand-written, see cli_test Run_OverflowFz_NumericalErrorAtLine | S | Error at line 4 |
+
+CLI outputs carry 15 columns: the five inputs, the five outputs (FX, FY, MZ, MX, MY) and five 0/1 flag columns
+(FZ_CLAMPED, SR_CLAMPED, SA_CLAMPED, IA_CLAMPED, BELOW_VXLOW).
 
 ### Documented line numbers (1-based, comments and header included)
 
@@ -57,9 +61,14 @@ Format: see the CLI documentation. Comments (`#`) appear only on their own lines
 | `inputs_malformed.csv` | 4 | 4 fields instead of 5, SYNTAX error |
 | `inputs_low_speed.csv` | 3 | Vx = 0.5, below VXLOW (flagged, PAC2002 warns) |
 | `inputs_low_speed.csv` | 4 | Vx = 0, rejected by MF 5.2 (INVALID_INPUT, key VX); accepted by PAC2002 (flagged) |
+| `inputs_overflow.csv` | 4 | Fz = 1e308, non-finite output (NUMERICAL) |
 | `inputs_ranges.csv` | 4 | inside all S-rng limits |
 | `inputs_ranges.csv` | 5 | SR = 10, above KPUMAX |
 | `inputs_ranges.csv` | 6 | SA = 2, above ALPMAX |
 | `inputs_ranges.csv` | 7 | IA = 0.5, above CAMMAX |
 | `inputs_ranges.csv` | 8 | Fz = 20000, above FZMAX |
 | `inputs_ranges.csv` | 9 | Fz = 1e-9, below FZMIN |
+
+## Numerics
+
+The batch path is checked against the per-point path with a scaled relative tolerance of 1e-12.

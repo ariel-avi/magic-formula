@@ -3,13 +3,13 @@
 A C++26 library and command-line tool for **Pacejka Magic Formula tire models**.
 
 - An abstract base tire-model formulation, with concrete models **PAC2002** and **MF 5.2**. It is designed to be extended (e.g. MF 6.x).
-- Batch evaluation with Eigen.
+- Index-mapped, vectorised batch evaluation with Eigen. Checks are opt-in (`throw_if_model_failure`).
 - A CLI that reads a simulation input table (Fz, slip angle, slip ratio, inclination, Vx, …) and a `.tir` tire property file, then prints the tire forces and moments (Fx, Fy, Mz, Mx, My, …) for every input row.
 - Verified by unit and module tests, with a 100% line and branch coverage gate on the core library.
 
 ## Requirements
 
-CMake >= 4.0, Ninja, Conan 2 (>= 2.9), and GCC >= 14 or Clang >= 19 (C++26). Windows (MSVC 19.4x, built as C++23) and macOS (Homebrew LLVM 21) are supported too, see "Platform support" below. Conan provides GoogleTest; Eigen and Google Benchmark are added with the first code that uses them. Coverage needs gcovr 8.x; GCC needs `gcov-<N>`, Clang needs `llvm-cov` and `libclang-rt-<N>-dev`.
+CMake >= 4.0, Ninja, Conan 2 (>= 2.9), and GCC >= 14 or Clang >= 19 (C++26). Windows (MSVC 19.4x, built as C++23) and macOS (Homebrew LLVM 21) are supported too, see "Platform support" below. Conan provides Eigen, GoogleTest and Google Benchmark. Coverage needs gcovr 8.x; GCC needs `gcov-<N>`, Clang needs `llvm-cov` and `libclang-rt-<N>-dev`.
 
 ## Build and test
 
@@ -20,6 +20,16 @@ cmake --preset debug
 cmake --build --preset debug
 ctest --preset debug --output-on-failure
 ./build/debug/mf --version          # prints "mf 0.1.0"
+```
+
+### Benchmarks
+
+The release preset also builds `mf_bench` (Google Benchmark): per-point versus batch evaluation of PAC2002 and MF 5.2.
+
+```bash
+conan install . --build=missing -s build_type=Release -s compiler.cppstd=26 -o with_benchmark=True
+cmake --preset release && cmake --build --preset release
+./build/release/bench/mf_bench
 ```
 
 ## Code quality and coverage
@@ -103,7 +113,7 @@ Plain text, one operating point per row:
 - Fields are separated by any run of commas, blanks or tabs.
 - The first content line is the header. The required columns are `FZ SA SR IA VX`; the optional column is `P` (pressure). Columns may be in any order and in any letter case.
 - A column name may carry a unit in brackets; without a unit the SI unit applies: `FZ[N]`, `SA[rad|deg]`, `SR[-]`, `IA[rad|deg]`, `VX[m/s]`, `P[Pa]`.
-- `P` is read but ignored with a warning, because PAC2002 and MF 5.2 have no pressure input.
+- `P` is read but ignored with a warning (`column P is ignored: <model> has no P input`), because PAC2002 and MF 5.2 have no pressure input.
 - Every data row has exactly as many numbers as the header has columns.
 
 Example:
@@ -121,10 +131,10 @@ FZ[N],SA[deg],SR[-],IA[deg],VX[m/s]
 CSV on stdout. The header line is
 
 ```
-FZ[N],SA[rad],SR[-],IA[rad],VX[m/s],FX[N],FY[N],MZ[N*m],MX[N*m],MY[N*m]
+FZ[N],SA[rad],SR[-],IA[rad],VX[m/s],FX[N],FY[N],MZ[N*m],MX[N*m],MY[N*m],FZ_CLAMPED[-],SR_CLAMPED[-],SA_CLAMPED[-],IA_CLAMPED[-],BELOW_VXLOW[-]
 ```
 
-followed by one line per input row, in input order. The inputs are echoed unclamped in SI units (angles in rad), followed by the five outputs in the ISO W-axis sign convention (My is negative when the wheel rolls forward). Nothing is written to stdout unless every row evaluated successfully.
+15 columns, followed by one line per input row, in input order. The inputs are echoed unclamped in SI units (angles in rad), followed by the five outputs in the ISO W-axis sign convention (My is negative when the wheel rolls forward) and five 0/1 flag columns: `FZ_CLAMPED`, `SR_CLAMPED`, `SA_CLAMPED` and `IA_CLAMPED` are 1 when that input was clamped to the `.tir` range, and `BELOW_VXLOW` is 1 when Vx is below `VXLOW`. Warnings about the flags are still printed on stderr. Nothing is written to stdout unless every row evaluated successfully.
 
 ### Diagnostics and exit codes
 
@@ -133,6 +143,8 @@ Diagnostics go to stderr:
 - `mf: error: <file>:<line>: <message>` for a failure (`<file>:<line>` is omitted when there is no location).
 - `mf: warning: ...` for everything that does not stop the run: load warnings, the ignored `P` column, and one warning per variable when inputs were clamped to the `.tir` ranges or Vx is below `VXLOW` (it names the first table line and the number of rows).
 - `mf: info: ...` lines with `--verbose`.
+
+An input outside the model domain is an error that names the column, for example `VX = -1 m/s is outside the PAC2002 domain (VX >= 0)` or `VX = 0 m/s is outside the MF 5.2 domain (VX > 0)`; a non-finite value gives `VX is not finite (...)`.
 
 | Exit code | Meaning |
 |-----------|---------|

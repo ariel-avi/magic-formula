@@ -46,6 +46,8 @@ The **normalised vertical load increment** `dfz = (Fz − Fz0') / Fz0'` with `Fz
 | Mx | overturning moment | N·m |
 | My | rolling-resistance moment | N·m |
 
+The model input vector is ordered FZ, SA, SR, IA, VX (P is appended after VX for MF 6.x later). The output vector is FX, FY, MZ, MX, MY followed by the flag outputs FZ_CLAMPED, SR_CLAMPED, SA_CLAMPED, IA_CLAMPED and BELOW_VXLOW, which hold 0.0 or 1.0 (1.0 when that input was clamped to the `.tir` range, or Vx is below VXLOW). Each model names the positions with index enums (`pac2002_model::input_index` and `output_index`).
+
 Input files often give angles in degrees. Conversion to radians happens once, at the io boundary (see `cpp-conventions`).
 
 ## Pure vs combined slip

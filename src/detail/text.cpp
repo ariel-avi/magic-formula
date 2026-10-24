@@ -26,7 +26,9 @@ namespace mf::detail {
       return {};
     }
     const std::size_t last = text.find_last_not_of(blanks);
-    return text.substr(first, last - first + 1);
+    text.remove_suffix(text.size() - last - 1);
+    text.remove_prefix(first);
+    return text;
   }
 
   std::string to_upper_ascii(std::string_view text) {

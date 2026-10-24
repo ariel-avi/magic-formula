@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <optional>
+#include <stdexcept>
 #include <string>
 
 namespace mf {
@@ -19,6 +21,7 @@ namespace mf {
     NOT_IMPLEMENTED,   ///< a recognised but unimplemented feature (for example TYRESIDE mirroring)
     INVALID_INPUT,     ///< an operating point outside the model domain
     NUMERICAL,         ///< a non-finite result
+    INVALID_ARGUMENT,  ///< a vector, matrix or buffer whose size or pointer does not fit the model layout
   };
 
   /// Where a diagnostic applies. An empty file, line 0 and an empty key mean "not applicable".
@@ -44,6 +47,25 @@ namespace mf {
     /// What the caller should know.
     std::string message;
     location where;
+  };
+
+  /// Thrown by tire_model::evaluate / evaluate_batch (all overloads) of a model built with
+  /// model_options::throw_if_model_failure. what() is to_string(cause), prefixed "row <row>: " when `row` holds a
+  /// batch row.
+  class model_failure : public std::runtime_error {
+  public:
+    /// Wraps `cause`; `row` is std::nullopt for a single-point evaluation, else the batch row of the failure.
+    model_failure(error cause, std::optional<std::size_t> row);
+
+    /// The failure that was detected.
+    [[nodiscard]] const error &cause() const noexcept;
+
+    /// Batch row of the failure; empty for a single point.
+    [[nodiscard]] std::optional<std::size_t> row() const noexcept;
+
+  private:
+    error cause_;
+    std::optional<std::size_t> row_;
   };
 
   /// Builds the `std::unexpected` for `return make_error(...);` in a function returning `std::expected<T, error>`.

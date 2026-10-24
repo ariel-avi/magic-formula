@@ -18,6 +18,13 @@ function(mf_configure_target TARGET_NAME)
             target_compile_options(${TARGET_NAME} PRIVATE -Werror)
         endif ()
     endif ()
+    # Every configuration that does not define NDEBUG (Debug, coverage, and an empty CMAKE_BUILD_TYPE) gets
+    # EIGEN_RUNTIME_NO_MALLOC: lets tests assert that code does not touch Eigen's heap
+    # (Eigen::internal::set_is_malloc_allowed) and matches the allocation_test #error guard. Every target goes through
+    # this function, so the definition is uniform within a configuration (no ODR mismatch); Release-like
+    # configurations (bench, production) are unaffected.
+    target_compile_definitions(${TARGET_NAME} PRIVATE
+        "$<$<NOT:$<CONFIG:Release,RelWithDebInfo,MinSizeRel>>:EIGEN_RUNTIME_NO_MALLOC>")
     if (MF_ENABLE_COVERAGE)
         enable_coverage_for(${TARGET_NAME})
     endif ()

@@ -1,16 +1,18 @@
 #include "../support/fixtures.hpp"
 
+#include <Eigen/Core>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <expected>
 #include <format>
 #include <gtest/gtest.h>
 #include <magic_formula/error.hpp>
-#include <magic_formula/evaluation_types.hpp>
 #include <magic_formula/io/model_loader.hpp>
 #include <magic_formula/io/number.hpp>
 #include <magic_formula/io/text_file.hpp>
+#include <magic_formula/mf5x_layout.hpp>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -48,8 +50,9 @@ namespace {
 
   /// One data row of the reference CSV: the operating point, the MFeval outputs and the 1-based file line.
   struct reference_row {
-    mf::operating_point point;
-    mf::tire_outputs expected;
+    mf::test::point point;
+    /// MFeval outputs in `mf::mf5x::output_index` order FX, FY, MZ, MX, MY.
+    std::array<double, 5> expected{};
     std::size_t line = 0;
   };
 
@@ -105,11 +108,11 @@ namespace {
     row.point.kappa = values[2];
     row.point.gamma_rad = values[3];
     row.point.vx_mps = values[4];
-    row.expected.fx_n = values[5];
-    row.expected.fy_n = values[6];
-    row.expected.mz_nm = values[7];
-    row.expected.mx_nm = values[8];
-    row.expected.my_nm = values[9];
+    row.expected[mf::mf5x::FX] = values[5];
+    row.expected[mf::mf5x::FY] = values[6];
+    row.expected[mf::mf5x::MZ] = values[7];
+    row.expected[mf::mf5x::MX] = values[8];
+    row.expected[mf::mf5x::MY] = values[9];
     return row;
   }
 
@@ -135,6 +138,26 @@ namespace {
     const std::string message = std::format("ours {:.17g}, MFeval {:.17g}, bound {:.3g}", ours, reference, bound);
     return ::testing::AssertionFailure() << message;
   }
+
+  /// Loads the MF 5.2 fixture; a failure is a test failure and yields no model.
+  std::expected<mf::io::loaded_model, mf::error> load_fixture() {
+    std::expected<mf::io::loaded_model, mf::error> loaded = mf::io::load_tire_model_file(data_file("mf52_S52.tir"));
+    if (!loaded.has_value()) {
+      ADD_FAILURE() << mf::to_string(loaded.error());
+    }
+    return loaded;
+  }
+
+  /// Compares the five outputs of one reference row with `output` (indexed by `mf::mf5x::output_index`).
+  void expect_row_agrees(const reference_row &row, const Eigen::Ref<const Eigen::VectorXd> &output) {
+    constexpr double force_scale_n = NOMINAL_LOAD_N;
+    constexpr double moment_scale_nm = NOMINAL_LOAD_N * UNLOADED_RADIUS_M;
+    EXPECT_TRUE(agrees(output(mf::mf5x::FX), row.expected[mf::mf5x::FX], force_scale_n)) << "FX, line " << row.line;
+    EXPECT_TRUE(agrees(output(mf::mf5x::FY), row.expected[mf::mf5x::FY], force_scale_n)) << "FY, line " << row.line;
+    EXPECT_TRUE(agrees(output(mf::mf5x::MZ), row.expected[mf::mf5x::MZ], moment_scale_nm)) << "MZ, line " << row.line;
+    EXPECT_TRUE(agrees(output(mf::mf5x::MX), row.expected[mf::mf5x::MX], moment_scale_nm)) << "MX, line " << row.line;
+    EXPECT_TRUE(agrees(output(mf::mf5x::MY), row.expected[mf::mf5x::MY], moment_scale_nm)) << "MY, line " << row.line;
+  }
 } // namespace
 
 TEST(mfeval_reference, Reference_Mf52Csv_HasHeaderAndRows) {
@@ -152,9 +175,9 @@ TEST(mfeval_reference, Reference_Mf52Csv_IsNotTrivial) {
   double peak_fy = 0.0;
   double peak_mz = 0.0;
   for (const reference_row &row : reference_rows()) {
-    peak_fx = std::max(peak_fx, std::abs(row.expected.fx_n));
-    peak_fy = std::max(peak_fy, std::abs(row.expected.fy_n));
-    peak_mz = std::max(peak_mz, std::abs(row.expected.mz_nm));
+    peak_fx = std::max(peak_fx, std::abs(row.expected[mf::mf5x::FX]));
+    peak_fy = std::max(peak_fy, std::abs(row.expected[mf::mf5x::FY]));
+    peak_mz = std::max(peak_mz, std::abs(row.expected[mf::mf5x::MZ]));
   }
   EXPECT_GT(peak_fx, minimum_peak_n);
   EXPECT_GT(peak_fy, minimum_peak_n);
@@ -162,22 +185,33 @@ TEST(mfeval_reference, Reference_Mf52Csv_IsNotTrivial) {
 }
 
 TEST(mfeval_reference, Mf52S52_CombinedSlip_AgreesWithMfevalFittyp6Path) {
-  const std::expected<mf::io::loaded_model, mf::error> loaded = mf::io::load_tire_model_file(data_file("mf52_S52.tir"));
-  ASSERT_TRUE(loaded.has_value()) << mf::to_string(loaded.error());
+  const std::expected<mf::io::loaded_model, mf::error> loaded = load_fixture();
+  ASSERT_TRUE(loaded.has_value());
   EXPECT_EQ(loaded->model->name(), "MF 5.2");
-
-  constexpr double force_scale_n = NOMINAL_LOAD_N;
-  constexpr double moment_scale_nm = NOMINAL_LOAD_N * UNLOADED_RADIUS_M;
-
   const std::vector<reference_row> rows = reference_rows();
   ASSERT_EQ(rows.size(), REFERENCE_ROWS);
+  EXPECT_EQ(loaded->model->output_length(), mf::mf5x::OUTPUT_LENGTH);
   for (const reference_row &row : rows) {
-    const std::expected<mf::tire_outputs, mf::error> result = loaded->model->evaluate(row.point);
-    ASSERT_TRUE(result.has_value()) << "line " << row.line << ": " << mf::to_string(result.error());
-    EXPECT_TRUE(agrees(result->fx_n, row.expected.fx_n, force_scale_n)) << "FX, line " << row.line;
-    EXPECT_TRUE(agrees(result->fy_n, row.expected.fy_n, force_scale_n)) << "FY, line " << row.line;
-    EXPECT_TRUE(agrees(result->mz_nm, row.expected.mz_nm, moment_scale_nm)) << "MZ, line " << row.line;
-    EXPECT_TRUE(agrees(result->mx_nm, row.expected.mx_nm, moment_scale_nm)) << "MX, line " << row.line;
-    EXPECT_TRUE(agrees(result->my_nm, row.expected.my_nm, moment_scale_nm)) << "MY, line " << row.line;
+    const Eigen::VectorXd output = loaded->model->evaluate(mf::test::input_of(row.point));
+    ASSERT_EQ(output.size(), mf::mf5x::OUTPUT_LENGTH) << "line " << row.line;
+    expect_row_agrees(row, output);
+  }
+}
+
+TEST(mfeval_reference, Mf52_BatchEvaluate_MatchesWithin1e10) {
+  const std::expected<mf::io::loaded_model, mf::error> loaded = load_fixture();
+  ASSERT_TRUE(loaded.has_value());
+  const std::vector<reference_row> rows = reference_rows();
+  ASSERT_EQ(rows.size(), REFERENCE_ROWS);
+  std::vector<mf::test::point> points;
+  for (const reference_row &row : rows) {
+    points.push_back(row.point);
+  }
+  const Eigen::MatrixXd outputs = loaded->model->evaluate_batch(mf::test::inputs_of(points));
+  ASSERT_EQ(outputs.rows(), static_cast<Eigen::Index>(rows.size()));
+  ASSERT_EQ(outputs.cols(), mf::mf5x::OUTPUT_LENGTH);
+  for (std::size_t index = 0; index < rows.size(); ++index) {
+    const Eigen::VectorXd output = outputs.row(static_cast<Eigen::Index>(index)).transpose();
+    expect_row_agrees(rows[index], output);
   }
 }

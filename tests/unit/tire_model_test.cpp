@@ -1,602 +1,381 @@
+#include <Eigen/Core>
 #include <array>
-#include <bit>
+#include <cmath>
 #include <cstddef>
-#include <cstdint>
-#include <expected>
 #include <gtest/gtest.h>
 #include <limits>
+#include <magic_formula/error.hpp>
+#include <magic_formula/evaluation_types.hpp>
+#include <magic_formula/model_layout.hpp>
 #include <magic_formula/tire_model.hpp>
 #include <memory>
 #include <optional>
-#include <span>
-#include <string>
 #include <string_view>
 #include <utility>
-#include <vector>
 
 namespace {
+  /// The stub values are exact small integers; the tolerance only documents that.
+  constexpr double VALUE_TOL = 1e-12;
+
   constexpr double QUIET_NAN = std::numeric_limits<double>::quiet_NaN();
-  constexpr double POS_INF = std::numeric_limits<double>::infinity();
-  constexpr double NEG_INF = -std::numeric_limits<double>::infinity();
-  /// Tolerance for values that are stored and read back without arithmetic.
-  constexpr double STORED_TOL = 1e-12;
-  /// Limit interval used by the clamp tests, for every variable.
-  constexpr double CLAMP_LOWER = 1.0;
-  constexpr double CLAMP_UPPER = 2.0;
-  constexpr double INSIDE_VALUE = 1.5;
-  constexpr std::array<std::string_view, 5> OUTPUT_KEYS{"FX", "FY", "MZ", "MX", "MY"};
 
-  /// Bit pattern of a double. Echoed inputs and zero outputs are compared bit-exactly (identity vectors, see
-  /// cpp-conventions: the documented exception to "no EXPECT_EQ on doubles").
-  std::uint64_t bits(double value) {
-    return std::bit_cast<std::uint64_t>(value);
-  }
+  /// Inputs A (>= 0) and B; outputs X, Y and Z.
+  constexpr std::array<mf::input_channel, 2> STUB_INPUTS{{
+      {.name = "A", .unit = "-", .minimum = 0.0, .minimum_inclusive = true},
+      {.name = "B", .unit = "-"},
+  }};
+  constexpr std::array<mf::output_channel, 3> STUB_OUTPUTS{{
+      {.name = "X", .unit = "-"},
+      {.name = "Y", .unit = "-"},
+      {.name = "Z", .unit = "-"},
+  }};
+  constexpr mf::model_layout STUB_LAYOUT{.inputs = STUB_INPUTS, .outputs = STUB_OUTPUTS, .limits = {}};
 
-  /// Test model: echoes the CLAMPED inputs into the outputs and counts `compute` calls.
-  /// fx = Fz, fy = kappa, mz = alpha, mx = gamma, my = (UNCOMBINED ? -Vx : Vx).
-  /// When `nan_output` holds k (0..4), output k (FX, FY, MZ, MX, MY) is a quiet NaN.
+  /// X = A + B, Y = A * B, Z = 1 (or NaN when `emit_nan`), with call counters.
   class stub_model final : public mf::tire_model {
   public:
-    explicit stub_model(const mf::operating_limits &limits = {}, const mf::model_metadata &metadata = {},
-                        std::optional<std::size_t> nan_output = std::nullopt)
-        : tire_model(limits, metadata), nan_output_(nan_output) {}
+    explicit stub_model(const mf::model_options &options, bool emit_nan = false,
+                        const Eigen::VectorXd &limits = Eigen::VectorXd(),
+                        const mf::model_metadata &metadata = mf::model_metadata{})
+        : tire_model(2, 3, limits, metadata, options), emit_nan_(emit_nan) {}
 
     [[nodiscard]] std::string_view name() const noexcept override {
       return "stub";
     }
-
-    /// Number of `compute` calls so far.
-    [[nodiscard]] std::size_t compute_calls() const noexcept {
-      return calls_;
+    [[nodiscard]] int input_length() const noexcept override {
+      return 2;
     }
+    [[nodiscard]] int output_length() const noexcept override {
+      return 3;
+    }
+    [[nodiscard]] const mf::model_layout &layout() const noexcept override {
+      return STUB_LAYOUT;
+    }
+
+    mutable int compute_calls = 0;
+    mutable int batch_calls = 0;
 
   private:
-    [[nodiscard]] mf::tire_outputs compute(const mf::operating_point &point,
-                                           mf::slip_mode mode) const noexcept override {
-      ++calls_;
-      mf::tire_outputs out{};
-      out.fx_n = point.fz_n;
-      out.fy_n = point.kappa;
-      out.mz_nm = point.alpha_rad;
-      out.mx_nm = point.gamma_rad;
-      out.my_nm = mode == mf::slip_mode::UNCOMBINED ? -point.vx_mps : point.vx_mps;
-      const std::array<double mf::tire_outputs::*, 5> members{{
-          &mf::tire_outputs::fx_n,
-          &mf::tire_outputs::fy_n,
-          &mf::tire_outputs::mz_nm,
-          &mf::tire_outputs::mx_nm,
-          &mf::tire_outputs::my_nm,
-      }};
-      std::size_t index = 0;
-      for (double mf::tire_outputs::*member : members) {
-        if (nan_output_ == index) {
-          out.*member = QUIET_NAN;
-        }
-        ++index;
-      }
-      return out;
+    void compute(const Eigen::Ref<const Eigen::VectorXd> &input,
+                 Eigen::Ref<Eigen::VectorXd> output) const noexcept override {
+      ++compute_calls;
+      output(0) = input(0) + input(1);
+      output(1) = input(0) * input(1);
+      output(2) = emit_nan_ ? QUIET_NAN : 1.0;
     }
 
-    std::optional<std::size_t> nan_output_;
-    mutable std::size_t calls_ = 0;
-  };
-
-  mf::operating_point nominal_point() {
-    return {.fz_n = 4000.0, .kappa = 0.1, .alpha_rad = 0.05, .gamma_rad = 0.02, .vx_mps = 10.0};
-  }
-
-  int count_clamp_flags(const mf::input_flags &flags) {
-    return static_cast<int>(flags.fz_clamped) + static_cast<int>(flags.kappa_clamped) +
-           static_cast<int>(flags.alpha_clamped) + static_cast<int>(flags.gamma_clamped);
-  }
-
-  bool contains(const std::string &text, std::string_view part) {
-    return text.find(part) != std::string::npos;
-  }
-
-  /// True when all five outputs are bit-equal to +0.0 (the zero outputs).
-  bool all_outputs_positive_zero(const mf::tire_outputs &out) {
-    const std::uint64_t zero = bits(0.0);
-    return bits(out.fx_n) == zero && bits(out.fy_n) == zero && bits(out.mz_nm) == zero && bits(out.mx_nm) == zero &&
-           bits(out.my_nm) == zero;
-  }
-} // namespace
-
-// ---------------------------------------------------------------------------------------------------------------------
-// validate_limits
-// ---------------------------------------------------------------------------------------------------------------------
-
-TEST(validate_limits, ValidateLimits_AllAbsent_Succeeds) {
-  EXPECT_TRUE(mf::validate_limits(mf::operating_limits{}).has_value());
-}
-
-TEST(validate_limits, ValidateLimits_ValidIntervals_Succeeds) {
-  mf::operating_limits limits;
-  limits.fz_n = mf::interval{.lower = 200.0, .upper = 10000.0};
-  limits.kappa = mf::interval{.lower = -1.0, .upper = 1.0};
-  limits.alpha_rad = mf::interval{.lower = 0.5, .upper = 0.5}; // lower == upper is valid
-  limits.gamma_rad = mf::interval{.lower = -0.2, .upper = 0.2};
-  EXPECT_TRUE(mf::validate_limits(limits).has_value());
-}
-
-namespace {
-  struct limits_case {
-    std::string min_key;
-    std::string max_key;
-    std::optional<mf::interval> mf::operating_limits::*member;
-  };
-} // namespace
-
-class validate_limits_invalid : public ::testing::TestWithParam<limits_case> {};
-
-TEST_P(validate_limits_invalid, ValidateLimits_LowerAboveUpper_ReturnsInvalidValueNamingBothKeys) {
-  const limits_case &param = GetParam();
-  mf::operating_limits limits;
-  limits.*(param.member) = mf::interval{.lower = 2.0, .upper = 1.0};
-  const std::expected<void, mf::error> result = mf::validate_limits(limits);
-  ASSERT_FALSE(result.has_value());
-  EXPECT_EQ(result.error().code, mf::error_code::INVALID_VALUE);
-  EXPECT_EQ(result.error().where.key, param.min_key);
-  EXPECT_TRUE(contains(result.error().message, param.min_key));
-  EXPECT_TRUE(contains(result.error().message, param.max_key));
-  EXPECT_TRUE(contains(result.error().message, "lower limit above upper limit"));
-}
-
-namespace {
-  std::vector<limits_case> limits_cases() {
-    const std::array<limits_case, 4> cases{{
-        {.min_key = "FZMIN", .max_key = "FZMAX", .member = &mf::operating_limits::fz_n},
-        {.min_key = "KPUMIN", .max_key = "KPUMAX", .member = &mf::operating_limits::kappa},
-        {.min_key = "ALPMIN", .max_key = "ALPMAX", .member = &mf::operating_limits::alpha_rad},
-        {.min_key = "CAMMIN", .max_key = "CAMMAX", .member = &mf::operating_limits::gamma_rad},
-    }};
-    return {cases.begin(), cases.end()};
-  }
-
-  std::string limits_case_name(const ::testing::TestParamInfo<limits_case> &param_info) {
-    return param_info.param.min_key;
-  }
-} // namespace
-
-INSTANTIATE_TEST_SUITE_P(limit_pairs, validate_limits_invalid, ::testing::ValuesIn(limits_cases()), limits_case_name);
-
-// ---------------------------------------------------------------------------------------------------------------------
-// tire_model: input validation
-// ---------------------------------------------------------------------------------------------------------------------
-
-namespace {
-  struct non_finite_case {
-    std::string field;
-    double mf::operating_point::*member;
-    double value;
-    std::string kind;
-  };
-
-  std::vector<non_finite_case> non_finite_cases() {
-    const std::array<std::pair<std::string, double mf::operating_point::*>, 5> fields{{
-        {"FZ", &mf::operating_point::fz_n},
-        {"SR", &mf::operating_point::kappa},
-        {"SA", &mf::operating_point::alpha_rad},
-        {"IA", &mf::operating_point::gamma_rad},
-        {"VX", &mf::operating_point::vx_mps},
-    }};
-    const std::array<std::pair<std::string, double>, 3> values{{
-        {"nan", QUIET_NAN},
-        {"pinf", POS_INF},
-        {"ninf", NEG_INF},
-    }};
-    std::vector<non_finite_case> cases;
-    for (const auto &[field, member] : fields) {
-      for (const auto &[kind, value] : values) {
-        cases.push_back(non_finite_case{.field = field, .member = member, .value = value, .kind = kind});
-      }
+    void compute_batch(const Eigen::Ref<const Eigen::MatrixXd> &inputs,
+                       Eigen::Ref<Eigen::MatrixXd> outputs) const noexcept override {
+      ++batch_calls;
+      outputs.col(0) = inputs.col(0) + inputs.col(1);
+      outputs.col(1) = (inputs.col(0).array() * inputs.col(1).array()).matrix();
+      outputs.col(2).setConstant(emit_nan_ ? QUIET_NAN : 1.0);
     }
-    return cases;
-  }
-} // namespace
 
-class tire_model_non_finite : public ::testing::TestWithParam<non_finite_case> {};
-
-TEST_P(tire_model_non_finite, Evaluate_NonFiniteField_ReturnsInvalidInputNamingField) {
-  const non_finite_case &param = GetParam();
-  const stub_model model;
-  mf::operating_point point = nominal_point();
-  point.*(param.member) = param.value;
-  const std::expected<mf::tire_outputs, mf::error> result = model.evaluate(point);
-  ASSERT_FALSE(result.has_value());
-  EXPECT_EQ(result.error().code, mf::error_code::INVALID_INPUT);
-  EXPECT_EQ(result.error().where.key, param.field);
-  EXPECT_TRUE(contains(result.error().message, param.field));
-  EXPECT_EQ(model.compute_calls(), 0U);
-}
-
-namespace {
-  std::string non_finite_case_name(const ::testing::TestParamInfo<non_finite_case> &param_info) {
-    return param_info.param.field + "_" + param_info.param.kind;
-  }
-} // namespace
-
-INSTANTIATE_TEST_SUITE_P(fields_and_values, tire_model_non_finite, ::testing::ValuesIn(non_finite_cases()),
-                         non_finite_case_name);
-
-TEST(tire_model, Evaluate_SeveralNonFiniteFields_ReportsFirstInFieldOrder) {
-  const stub_model model;
-  mf::operating_point point = nominal_point();
-  point.vx_mps = QUIET_NAN;
-  point.alpha_rad = QUIET_NAN;
-  point.fz_n = POS_INF;
-  const std::expected<mf::tire_outputs, mf::error> result = model.evaluate(point);
-  ASSERT_FALSE(result.has_value());
-  EXPECT_EQ(result.error().where.key, "FZ");
-}
-
-class tire_model_negative_vx : public ::testing::TestWithParam<double> {};
-
-TEST_P(tire_model_negative_vx, Evaluate_NegativeVx_ReturnsInvalidInputVx) {
-  const stub_model model;
-  mf::operating_point point = nominal_point();
-  point.vx_mps = GetParam();
-  const std::expected<mf::tire_outputs, mf::error> result = model.evaluate(point);
-  ASSERT_FALSE(result.has_value());
-  EXPECT_EQ(result.error().code, mf::error_code::INVALID_INPUT);
-  EXPECT_EQ(result.error().where.key, "VX");
-  EXPECT_TRUE(contains(result.error().message, "is negative; reverse driving is not supported"));
-  EXPECT_EQ(model.compute_calls(), 0U);
-}
-
-INSTANTIATE_TEST_SUITE_P(speeds, tire_model_negative_vx, ::testing::Values(-1.0, -1e-300));
-
-TEST(tire_model, Evaluate_NegativeZeroVx_IsAccepted) {
-  const stub_model model;
-  mf::operating_point point = nominal_point();
-  point.vx_mps = -0.0;
-  EXPECT_TRUE(model.evaluate(point).has_value());
-  EXPECT_EQ(model.compute_calls(), 1U);
-}
-
-TEST(tire_model, Evaluate_ZeroVx_IsAccepted) {
-  const stub_model model;
-  mf::operating_point point = nominal_point();
-  point.vx_mps = 0.0;
-  EXPECT_TRUE(model.evaluate(point).has_value());
-  EXPECT_EQ(model.compute_calls(), 1U);
-}
-
-// ---------------------------------------------------------------------------------------------------------------------
-// tire_model: Fz <= 0 and VXLOW
-// ---------------------------------------------------------------------------------------------------------------------
-
-class tire_model_non_positive_fz : public ::testing::TestWithParam<double> {};
-
-TEST_P(tire_model_non_positive_fz, Evaluate_NonPositiveFz_ReturnsExactZeros) {
-  mf::operating_limits limits;
-  limits.fz_n = mf::interval{.lower = 200.0, .upper = 10000.0}; // the raw Fz decides, before clamping
-  const stub_model model(limits, mf::model_metadata{});
-  mf::operating_point point = nominal_point();
-  point.fz_n = GetParam();
-  const std::expected<mf::tire_outputs, mf::error> result = model.evaluate(point);
-  ASSERT_TRUE(result.has_value());
-  EXPECT_TRUE(all_outputs_positive_zero(*result));
-  EXPECT_FALSE(result->flags.fz_clamped);
-  EXPECT_EQ(model.compute_calls(), 0U);
-}
-
-INSTANTIATE_TEST_SUITE_P(loads, tire_model_non_positive_fz, ::testing::Values(0.0, -0.0, -100.0));
-
-class tire_model_fz_interval_end : public ::testing::TestWithParam<double> {};
-
-TEST_P(tire_model_fz_interval_end, Evaluate_ClampedFzNonPositive_ReturnsExactZerosWithoutCompute) {
-  mf::operating_limits limits;
-  limits.fz_n = mf::interval{.lower = -10.0, .upper = GetParam()}; // accepted by validate_limits
-  const stub_model model(limits, mf::model_metadata{});
-  const std::expected<mf::tire_outputs, mf::error> result = model.evaluate(nominal_point());
-  ASSERT_TRUE(result.has_value());
-  EXPECT_TRUE(all_outputs_positive_zero(*result));
-  EXPECT_TRUE(result->flags.fz_clamped);
-  EXPECT_EQ(model.compute_calls(), 0U);
-}
-
-INSTANTIATE_TEST_SUITE_P(upper_limits, tire_model_fz_interval_end, ::testing::Values(0.0, -5.0));
-
-TEST(tire_model, Evaluate_NonPositiveFzBelowVxlow_PreservesFlag) {
-  mf::operating_limits limits;
-  limits.vxlow_mps = 1.0;
-  const stub_model model(limits, mf::model_metadata{});
-  mf::operating_point point = nominal_point();
-  point.fz_n = 0.0;
-  point.vx_mps = 0.5;
-  const std::expected<mf::tire_outputs, mf::error> result = model.evaluate(point);
-  ASSERT_TRUE(result.has_value());
-  EXPECT_TRUE(result->flags.below_vxlow);
-  EXPECT_EQ(bits(result->fx_n), bits(0.0));
-  EXPECT_EQ(bits(result->my_nm), bits(0.0));
-  EXPECT_EQ(model.compute_calls(), 0U);
-}
-
-TEST(tire_model, Evaluate_VxBelowVxlow_SetsFlag) {
-  mf::operating_limits limits;
-  limits.vxlow_mps = 1.0;
-  const stub_model model(limits, mf::model_metadata{});
-  mf::operating_point point = nominal_point();
-  point.vx_mps = 0.5;
-  const std::expected<mf::tire_outputs, mf::error> result = model.evaluate(point);
-  ASSERT_TRUE(result.has_value());
-  EXPECT_TRUE(result->flags.below_vxlow);
-}
-
-TEST(tire_model, Evaluate_VxAtVxlow_ClearsFlag) {
-  mf::operating_limits limits;
-  limits.vxlow_mps = 1.0;
-  const stub_model model(limits, mf::model_metadata{});
-  mf::operating_point point = nominal_point();
-  point.vx_mps = 1.0;
-  const std::expected<mf::tire_outputs, mf::error> result = model.evaluate(point);
-  ASSERT_TRUE(result.has_value());
-  EXPECT_FALSE(result->flags.below_vxlow);
-}
-
-// ---------------------------------------------------------------------------------------------------------------------
-// tire_model: clamping to the limits
-// ---------------------------------------------------------------------------------------------------------------------
-
-namespace {
-  /// One clampable variable: where its limit lives, where the input is, where the stub echoes it, which flag it sets.
-  struct clamp_case {
-    std::string name;
-    std::optional<mf::interval> mf::operating_limits::*limit_member = nullptr;
-    double mf::operating_point::*input_member = nullptr;
-    double mf::tire_outputs::*output_member = nullptr;
-    bool mf::input_flags::*flag_member = nullptr;
+    bool emit_nan_;
   };
 
-  constexpr std::array<std::string_view, 4> CLAMP_NAMES{"fz", "kappa", "alpha", "gamma"};
+  mf::model_options checked_options() {
+    return mf::model_options{.mode = mf::slip_mode::COMBINED, .throw_if_model_failure = true};
+  }
 
-  const std::array<std::optional<mf::interval> mf::operating_limits::*, 4> LIMIT_MEMBERS{{
-      &mf::operating_limits::fz_n,
-      &mf::operating_limits::kappa,
-      &mf::operating_limits::alpha_rad,
-      &mf::operating_limits::gamma_rad,
-  }};
+  mf::model_options unchecked_options() {
+    return mf::model_options{};
+  }
 
-  const std::array<double mf::operating_point::*, 4> INPUT_MEMBERS{{
-      &mf::operating_point::fz_n,
-      &mf::operating_point::kappa,
-      &mf::operating_point::alpha_rad,
-      &mf::operating_point::gamma_rad,
-  }};
+  Eigen::VectorXd point_of(double a, double b) {
+    Eigen::VectorXd input(2);
+    input << a, b;
+    return input;
+  }
 
-  /// The stub echoes Fz, SR, SA and IA into FX, FY, MZ and MX.
-  const std::array<double mf::tire_outputs::*, 4> ECHO_MEMBERS{{
-      &mf::tire_outputs::fx_n,
-      &mf::tire_outputs::fy_n,
-      &mf::tire_outputs::mz_nm,
-      &mf::tire_outputs::mx_nm,
-  }};
-
-  const std::array<bool mf::input_flags::*, 4> FLAG_MEMBERS{{
-      &mf::input_flags::fz_clamped,
-      &mf::input_flags::kappa_clamped,
-      &mf::input_flags::alpha_clamped,
-      &mf::input_flags::gamma_clamped,
-  }};
-
-  std::vector<clamp_case> clamp_cases() {
-    std::vector<clamp_case> cases;
-    for (std::size_t index = 0; index < CLAMP_NAMES.size(); ++index) {
-      clamp_case entry;
-      entry.name = std::string(CLAMP_NAMES.at(index));
-      entry.limit_member = LIMIT_MEMBERS.at(index);
-      entry.input_member = INPUT_MEMBERS.at(index);
-      entry.output_member = ECHO_MEMBERS.at(index);
-      entry.flag_member = FLAG_MEMBERS.at(index);
-      cases.push_back(entry);
+  /// A 5 x 2 matrix with rows (0, 1), (1, 2), (2, 3), (3, 4), (4, 5).
+  Eigen::MatrixXd ramp_inputs() {
+    Eigen::MatrixXd inputs(5, 2);
+    for (Eigen::Index r = 0; r < inputs.rows(); ++r) {
+      inputs(r, 0) = static_cast<double>(r);
+      inputs(r, 1) = static_cast<double>(r + 1);
     }
-    return cases;
+    return inputs;
   }
 
-  std::string clamp_case_name(const ::testing::TestParamInfo<clamp_case> &param_info) {
-    return param_info.param.name;
+  /// Runs `call` once and returns the `mf::model_failure` it throws, or nothing when it does not throw.
+  template <typename Callable_T> std::optional<mf::model_failure> caught_failure(const Callable_T &call) {
+    try {
+      call();
+    } catch (const mf::model_failure &failure) {
+      return failure;
+    }
+    return std::nullopt;
   }
 
-  mf::operating_limits limits_for(const clamp_case &param) {
-    mf::operating_limits limits;
-    limits.*(param.limit_member) = mf::interval{.lower = CLAMP_LOWER, .upper = CLAMP_UPPER};
-    return limits;
+  /// Expects `call` to throw `mf::model_failure` with the given code, key and row.
+  template <typename Callable_T>
+  void expect_failure(const Callable_T &call, mf::error_code code, std::string_view key,
+                      std::optional<std::size_t> row) {
+    const std::optional<mf::model_failure> failure = caught_failure(call);
+    if (!failure.has_value()) {
+      ADD_FAILURE() << "expected mf::model_failure";
+      return;
+    }
+    EXPECT_EQ(failure->cause().code, code);
+    EXPECT_EQ(failure->cause().where.key, key);
+    EXPECT_EQ(failure->row(), row);
   }
 
-  /// All clampable inputs inside the interval, except `param`'s variable, which gets `value`.
-  mf::operating_point point_with(const clamp_case &param, double value) {
-    mf::operating_point point{.fz_n = INSIDE_VALUE,
-                              .kappa = INSIDE_VALUE,
-                              .alpha_rad = INSIDE_VALUE,
-                              .gamma_rad = INSIDE_VALUE,
-                              .vx_mps = 10.0};
-    point.*(param.input_member) = value;
-    return point;
-  }
-
-  /// Evaluates with `param`'s variable set to `value` and expects it to reach `compute` unchanged and unflagged.
-  void expect_unflagged_echo(const clamp_case &param, double value) {
-    const stub_model model(limits_for(param), mf::model_metadata{});
-    const std::expected<mf::tire_outputs, mf::error> result = model.evaluate(point_with(param, value));
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(bits((*result).*(param.output_member)), bits(value));
-    EXPECT_EQ(count_clamp_flags(result->flags), 0);
-  }
-} // namespace
-
-class tire_model_clamp : public ::testing::TestWithParam<clamp_case> {};
-
-TEST_P(tire_model_clamp, Evaluate_InputBelowLowerLimit_ClampsAndFlags) {
-  const clamp_case &param = GetParam();
-  const stub_model model(limits_for(param), mf::model_metadata{});
-  const std::expected<mf::tire_outputs, mf::error> result = model.evaluate(point_with(param, 0.5));
-  ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(bits((*result).*(param.output_member)), bits(CLAMP_LOWER));
-  EXPECT_TRUE((*result).flags.*(param.flag_member));
-  EXPECT_EQ(count_clamp_flags(result->flags), 1);
-}
-
-TEST_P(tire_model_clamp, Evaluate_InputAboveUpperLimit_ClampsAndFlags) {
-  const clamp_case &param = GetParam();
-  const stub_model model(limits_for(param), mf::model_metadata{});
-  const std::expected<mf::tire_outputs, mf::error> result = model.evaluate(point_with(param, 3.0));
-  ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(bits((*result).*(param.output_member)), bits(CLAMP_UPPER));
-  EXPECT_TRUE((*result).flags.*(param.flag_member));
-  EXPECT_EQ(count_clamp_flags(result->flags), 1);
-}
-
-TEST_P(tire_model_clamp, Evaluate_InputAtLimits_PassesThroughUnflagged) {
-  const clamp_case &param = GetParam();
-  expect_unflagged_echo(param, CLAMP_LOWER);
-  expect_unflagged_echo(param, CLAMP_UPPER);
-}
-
-TEST_P(tire_model_clamp, Evaluate_InputInside_PassesThroughUnflagged) {
-  expect_unflagged_echo(GetParam(), INSIDE_VALUE);
-}
-
-INSTANTIATE_TEST_SUITE_P(variables, tire_model_clamp, ::testing::ValuesIn(clamp_cases()), clamp_case_name);
-
-TEST(tire_model, Evaluate_LimitAbsent_PassesThroughUnflagged) {
-  const stub_model model;
-  const mf::operating_point point{.fz_n = 1e12, .kappa = -50.0, .alpha_rad = 7.0, .gamma_rad = -3.0, .vx_mps = 10.0};
-  const std::expected<mf::tire_outputs, mf::error> result = model.evaluate(point);
-  ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(bits(result->fx_n), bits(1e12));
-  EXPECT_EQ(bits(result->fy_n), bits(-50.0));
-  EXPECT_EQ(bits(result->mz_nm), bits(7.0));
-  EXPECT_EQ(bits(result->mx_nm), bits(-3.0));
-  EXPECT_EQ(count_clamp_flags(result->flags), 0);
-  EXPECT_EQ(model.compute_calls(), 1U);
-}
-
-TEST(tire_model, Evaluate_PositiveFzBelowFzmin_RaisedToFzmin) {
-  mf::operating_limits limits;
-  limits.fz_n = mf::interval{.lower = 200.0, .upper = 10000.0};
-  const stub_model model(limits, mf::model_metadata{});
-  mf::operating_point point = nominal_point();
-  point.fz_n = 1e-9;
-  const std::expected<mf::tire_outputs, mf::error> result = model.evaluate(point);
-  ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(bits(result->fx_n), bits(200.0));
-  EXPECT_TRUE(result->flags.fz_clamped);
-  EXPECT_EQ(model.compute_calls(), 1U);
-}
-
-// ---------------------------------------------------------------------------------------------------------------------
-// tire_model: finite-output check and mode forwarding
-// ---------------------------------------------------------------------------------------------------------------------
-
-class tire_model_nan_output : public ::testing::TestWithParam<std::size_t> {};
-
-TEST_P(tire_model_nan_output, Evaluate_NonFiniteOutput_ReturnsNumericalNamingOutput) {
-  const std::size_t index = GetParam();
-  const stub_model model(mf::operating_limits{}, mf::model_metadata{}, index);
-  const std::expected<mf::tire_outputs, mf::error> result = model.evaluate(nominal_point());
-  ASSERT_FALSE(result.has_value());
-  EXPECT_EQ(result.error().code, mf::error_code::NUMERICAL);
-  EXPECT_EQ(result.error().where.key, OUTPUT_KEYS.at(index));
-  EXPECT_TRUE(contains(result.error().message, OUTPUT_KEYS.at(index)));
-  EXPECT_TRUE(contains(result.error().message, "non-finite"));
-  EXPECT_EQ(model.compute_calls(), 1U);
-}
-
-namespace {
-  std::string output_name(const ::testing::TestParamInfo<std::size_t> &param_info) {
-    return std::string(OUTPUT_KEYS.at(param_info.param));
+  /// Expects `call` to throw an INVALID_ARGUMENT `mf::model_failure` without key or row.
+  template <typename Callable_T> void expect_invalid_argument(const Callable_T &call) {
+    expect_failure(call, mf::error_code::INVALID_ARGUMENT, "", std::nullopt);
   }
 } // namespace
 
-INSTANTIATE_TEST_SUITE_P(outputs, tire_model_nan_output, ::testing::Range<std::size_t>(0, 5), output_name);
-
-TEST(tire_model, Evaluate_Mode_ForwardedToCompute) {
-  const stub_model model;
-  const mf::operating_point point = nominal_point();
-  const std::expected<mf::tire_outputs, mf::error> combined = model.evaluate(point);
-  const std::expected<mf::tire_outputs, mf::error> uncombined = model.evaluate(point, mf::slip_mode::UNCOMBINED);
-  ASSERT_TRUE(combined.has_value());
-  ASSERT_TRUE(uncombined.has_value());
-  EXPECT_EQ(bits(combined->my_nm), bits(10.0));
-  EXPECT_EQ(bits(uncombined->my_nm), bits(-10.0));
+TEST(tire_model, EvaluateRef_Unchecked_ReturnsComputeOutputsCallsComputeOnce) {
+  const stub_model model(unchecked_options());
+  const Eigen::VectorXd output = model.evaluate(point_of(2.0, 3.0));
+  ASSERT_EQ(output.size(), 3);
+  EXPECT_NEAR(output(0), 5.0, VALUE_TOL);
+  EXPECT_NEAR(output(1), 6.0, VALUE_TOL);
+  EXPECT_NEAR(output(2), 1.0, VALUE_TOL);
+  EXPECT_EQ(model.compute_calls, 1);
+  EXPECT_EQ(model.batch_calls, 0);
 }
 
-// ---------------------------------------------------------------------------------------------------------------------
-// tire_model: batch evaluation
-// ---------------------------------------------------------------------------------------------------------------------
-
-TEST(tire_model, EvaluateBatch_AllValid_ReturnsOutputsInOrder) {
-  const stub_model model;
-  std::vector<mf::operating_point> points(3, nominal_point());
-  points[0].fz_n = 1000.0;
-  points[1].fz_n = 2000.0;
-  points[2].fz_n = 3000.0;
-  const std::expected<std::vector<mf::tire_outputs>, mf::batch_error> result = model.evaluate_batch(points);
-  ASSERT_TRUE(result.has_value());
-  ASSERT_EQ(result->size(), 3U);
-  EXPECT_EQ(bits(result->at(0).fx_n), bits(1000.0));
-  EXPECT_EQ(bits(result->at(1).fx_n), bits(2000.0));
-  EXPECT_EQ(bits(result->at(2).fx_n), bits(3000.0));
-  EXPECT_EQ(model.compute_calls(), 3U);
+TEST(tire_model, EvaluateRaw_Unchecked_WritesBufferCallsCompute) {
+  const stub_model model(unchecked_options());
+  const std::array<double, 2> input{2.0, 3.0};
+  std::array<double, 3> data{};
+  model.evaluate(input.data(), 2, data.data(), 3);
+  EXPECT_NEAR(data[0], 5.0, VALUE_TOL);
+  EXPECT_NEAR(data[1], 6.0, VALUE_TOL);
+  EXPECT_NEAR(data[2], 1.0, VALUE_TOL);
+  EXPECT_EQ(model.compute_calls, 1);
 }
 
-TEST(tire_model, EvaluateBatch_FailureAtIndex_ReturnsBatchErrorWithIndex) {
-  const stub_model model;
-  std::vector<mf::operating_point> points(4, nominal_point());
-  points[2].alpha_rad = QUIET_NAN;
-  points[3].alpha_rad = QUIET_NAN;
-  const std::expected<std::vector<mf::tire_outputs>, mf::batch_error> result = model.evaluate_batch(points);
-  ASSERT_FALSE(result.has_value());
-  EXPECT_EQ(result.error().index, 2U);
-  EXPECT_EQ(result.error().cause.code, mf::error_code::INVALID_INPUT);
-  EXPECT_EQ(result.error().cause.where.key, "SA");
-  EXPECT_EQ(model.compute_calls(), 2U); // stops at the first failure
+TEST(tire_model, EvaluateRaw_Unchecked_IgnoresLengthArguments) {
+  const stub_model model(unchecked_options());
+  const std::array<double, 2> input{2.0, 3.0};
+  std::array<double, 3> data{};
+  EXPECT_NO_THROW(model.evaluate(input.data(), 0, data.data(), -5));
+  EXPECT_NEAR(data[0], 5.0, VALUE_TOL);
+  EXPECT_NEAR(data[1], 6.0, VALUE_TOL);
 }
 
-TEST(tire_model, EvaluateBatch_EmptySpan_ReturnsEmptyVector) {
-  const stub_model model;
-  const std::expected<std::vector<mf::tire_outputs>, mf::batch_error> result =
-      model.evaluate_batch(std::span<const mf::operating_point>{});
-  ASSERT_TRUE(result.has_value());
-  EXPECT_TRUE(result->empty());
+TEST(tire_model, EvaluateBatchRef_Unchecked_RowsByOutputsCallsComputeBatchOnce) {
+  const stub_model model(unchecked_options());
+  Eigen::MatrixXd inputs(3, 2);
+  inputs << 1.0, 2.0, 3.0, 4.0, 5.0, 6.0;
+  const Eigen::MatrixXd outputs = model.evaluate_batch(inputs);
+  ASSERT_EQ(outputs.rows(), 3);
+  ASSERT_EQ(outputs.cols(), 3);
+  EXPECT_NEAR(outputs(0, 0), 3.0, VALUE_TOL);
+  EXPECT_NEAR(outputs(1, 0), 7.0, VALUE_TOL);
+  EXPECT_NEAR(outputs(2, 0), 11.0, VALUE_TOL);
+  EXPECT_NEAR(outputs(0, 1), 2.0, VALUE_TOL);
+  EXPECT_NEAR(outputs(1, 1), 12.0, VALUE_TOL);
+  EXPECT_NEAR(outputs(2, 1), 30.0, VALUE_TOL);
+  EXPECT_NEAR(outputs(2, 2), 1.0, VALUE_TOL);
+  EXPECT_EQ(model.batch_calls, 1);
+  EXPECT_EQ(model.compute_calls, 0);
 }
 
-TEST(tire_model, EvaluateBatch_ModeForwarded) {
-  const stub_model model;
-  const std::vector<mf::operating_point> points(1, nominal_point());
-  const std::expected<std::vector<mf::tire_outputs>, mf::batch_error> result =
-      model.evaluate_batch(points, mf::slip_mode::UNCOMBINED);
-  ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(bits(result->at(0).my_nm), bits(-10.0));
+TEST(tire_model, EvaluateBatchRaw_Unchecked_ColumnMajorBuffers) {
+  const stub_model model(unchecked_options());
+  // Column-major 3 x 2: column A = (1, 3, 5), column B = (2, 4, 6).
+  const std::array<double, 6> inputs{1.0, 3.0, 5.0, 2.0, 4.0, 6.0};
+  std::array<double, 9> data{};
+  model.evaluate_batch(inputs.data(), 3, data.data(), 9);
+  // Column-major 3 x 3: X = (3, 7, 11), Y = (2, 12, 30), Z = (1, 1, 1).
+  const std::array<double, 9> expected{3.0, 7.0, 11.0, 2.0, 12.0, 30.0, 1.0, 1.0, 1.0};
+  const Eigen::Map<const Eigen::ArrayXd> actual_values(data.data(), 9);
+  const Eigen::Map<const Eigen::ArrayXd> expected_values(expected.data(), 9);
+  EXPECT_LE((actual_values - expected_values).abs().maxCoeff(), VALUE_TOL);
+  EXPECT_EQ(model.batch_calls, 1);
 }
 
-// ---------------------------------------------------------------------------------------------------------------------
-// tire_model: accessors
-// ---------------------------------------------------------------------------------------------------------------------
-
-TEST(tire_model, Destroy_ThroughBasePointer_EvaluatesAndReleases) {
-  const std::unique_ptr<const mf::tire_model> owned = std::make_unique<stub_model>();
-  const std::expected<mf::tire_outputs, mf::error> result = owned->evaluate(nominal_point());
-  EXPECT_TRUE(result.has_value());
+TEST(tire_model, EvaluateBatch_ZeroRows_RefAndRawWithNullBuffers_Succeed) {
+  const stub_model model(unchecked_options());
+  const Eigen::MatrixXd empty_inputs(0, 2);
+  const Eigen::MatrixXd outputs = model.evaluate_batch(empty_inputs);
+  EXPECT_EQ(outputs.rows(), 0);
+  EXPECT_EQ(outputs.cols(), 3);
+  EXPECT_NO_THROW(model.evaluate_batch(nullptr, 0, nullptr, 0));
 }
 
-TEST(tire_model, Accessors_Constructed_ReturnLimitsMetadataAndName) {
-  mf::operating_limits limits;
-  limits.fz_n = mf::interval{.lower = 200.0, .upper = 10000.0};
-  limits.vxlow_mps = 3.5;
-  const mf::model_metadata metadata{.fittyp = 6, .use_mode = 4, .side = mf::tyre_side::RIGHT};
-  const stub_model model(limits, metadata);
-  const mf::tire_model &base = model;
-  EXPECT_EQ(base.name(), "stub");
-  EXPECT_NEAR(base.limits().vxlow_mps, 3.5, STORED_TOL);
-  const std::optional<mf::interval> &fz = base.limits().fz_n;
-  ASSERT_TRUE(fz.has_value());
-  const mf::interval fz_range = fz.value_or(mf::interval{});
-  EXPECT_NEAR(fz_range.lower, 200.0, STORED_TOL);
-  EXPECT_NEAR(fz_range.upper, 10000.0, STORED_TOL);
-  EXPECT_FALSE(base.limits().kappa.has_value());
-  EXPECT_EQ(base.metadata().fittyp, std::optional<int>(6));
-  EXPECT_EQ(base.metadata().use_mode, std::optional<int>(4));
-  EXPECT_EQ(base.metadata().side, mf::tyre_side::RIGHT);
+TEST(tire_model, Unchecked_InvalidInput_NotValidated) {
+  const stub_model model(unchecked_options());
+  Eigen::VectorXd output;
+  EXPECT_NO_THROW(output = model.evaluate(point_of(-1.0, 3.0)));
+  ASSERT_EQ(output.size(), 3);
+  EXPECT_NEAR(output(0), 2.0, VALUE_TOL);
+  EXPECT_NEAR(output(1), -3.0, VALUE_TOL);
+}
+
+TEST(tire_model, Unchecked_NanOutput_ReturnedWithoutThrow) {
+  const stub_model model(unchecked_options(), true);
+  Eigen::VectorXd output;
+  EXPECT_NO_THROW(output = model.evaluate(point_of(2.0, 3.0)));
+  ASSERT_EQ(output.size(), 3);
+  EXPECT_TRUE(std::isnan(output(2)));
+}
+
+TEST(tire_model, EvaluateRef_Checked_ValidInput_Succeeds) {
+  const stub_model model(checked_options());
+  Eigen::VectorXd output;
+  EXPECT_NO_THROW(output = model.evaluate(point_of(2.0, 3.0)));
+  ASSERT_EQ(output.size(), 3);
+  EXPECT_NEAR(output(0), 5.0, VALUE_TOL);
+  EXPECT_NEAR(output(1), 6.0, VALUE_TOL);
+}
+
+TEST(tire_model, EvaluateRef_Checked_WrongSize_ThrowsInvalidArgumentNoRow) {
+  const stub_model model(checked_options());
+  Eigen::VectorXd input(3);
+  input << 1.0, 2.0, 3.0;
+  expect_invalid_argument([&] { (void)model.evaluate(input); });
+  EXPECT_EQ(model.compute_calls, 0);
+}
+
+TEST(tire_model, EvaluateRef_Checked_NanInput_ThrowsInvalidInputKeyB) {
+  const stub_model model(checked_options());
+  expect_failure([&] { (void)model.evaluate(point_of(2.0, QUIET_NAN)); }, mf::error_code::INVALID_INPUT, "B",
+                 std::nullopt);
+  EXPECT_EQ(model.compute_calls, 0);
+}
+
+TEST(tire_model, EvaluateRef_Checked_OutOfDomain_ThrowsInvalidInputKeyA) {
+  const stub_model model(checked_options());
+  const auto out_of_domain = [&] { (void)model.evaluate(point_of(-1.0, 3.0)); };
+  expect_failure(out_of_domain, mf::error_code::INVALID_INPUT, "A", std::nullopt);
+}
+
+TEST(tire_model, EvaluateRef_Checked_NanOutput_ThrowsNumericalKeyZ) {
+  const stub_model model(checked_options(), true);
+  expect_failure([&] { (void)model.evaluate(point_of(2.0, 3.0)); }, mf::error_code::NUMERICAL, "Z", std::nullopt);
+  EXPECT_EQ(model.compute_calls, 1);
+}
+
+TEST(tire_model, EvaluateRaw_Checked_NullInput_Throws) {
+  const stub_model model(checked_options());
+  std::array<double, 3> data{};
+  expect_invalid_argument([&] { model.evaluate(nullptr, 2, data.data(), 3); });
+}
+
+TEST(tire_model, EvaluateRaw_Checked_NullData_Throws) {
+  const stub_model model(checked_options());
+  const std::array<double, 2> input{2.0, 3.0};
+  expect_invalid_argument([&] { model.evaluate(input.data(), 2, nullptr, 3); });
+}
+
+TEST(tire_model, EvaluateRaw_Checked_WrongInputLen_Throws) {
+  const stub_model model(checked_options());
+  const std::array<double, 2> input{2.0, 3.0};
+  std::array<double, 3> data{};
+  expect_invalid_argument([&] { model.evaluate(input.data(), 1, data.data(), 3); });
+}
+
+TEST(tire_model, EvaluateRaw_Checked_WrongLen_Throws) {
+  const stub_model model(checked_options());
+  const std::array<double, 2> input{2.0, 3.0};
+  std::array<double, 3> data{};
+  expect_invalid_argument([&] { model.evaluate(input.data(), 2, data.data(), 2); });
+}
+
+TEST(tire_model, EvaluateRaw_Checked_Valid_Succeeds) {
+  const stub_model model(checked_options());
+  const std::array<double, 2> input{2.0, 3.0};
+  std::array<double, 3> data{};
+  EXPECT_NO_THROW(model.evaluate(input.data(), 2, data.data(), 3));
+  EXPECT_NEAR(data[0], 5.0, VALUE_TOL);
+  EXPECT_NEAR(data[1], 6.0, VALUE_TOL);
+}
+
+TEST(tire_model, EvaluateBatchRef_Checked_BadRow_ThrowsWithRowIndex) {
+  const stub_model model(checked_options());
+  Eigen::MatrixXd inputs = ramp_inputs();
+  inputs(2, 0) = -1.0;
+  expect_failure([&] { (void)model.evaluate_batch(inputs); }, mf::error_code::INVALID_INPUT, "A", 2U);
+  EXPECT_EQ(model.batch_calls, 0);
+}
+
+TEST(tire_model, EvaluateBatchRef_Checked_NanOutput_ThrowsNumericalWithRowZero) {
+  const stub_model model(checked_options(), true);
+  expect_failure([&] { (void)model.evaluate_batch(ramp_inputs()); }, mf::error_code::NUMERICAL, "Z", 0U);
+}
+
+TEST(tire_model, EvaluateBatchRef_Checked_Valid_Succeeds) {
+  const stub_model model(checked_options());
+  Eigen::MatrixXd outputs;
+  EXPECT_NO_THROW(outputs = model.evaluate_batch(ramp_inputs()));
+  ASSERT_EQ(outputs.rows(), 5);
+  ASSERT_EQ(outputs.cols(), 3);
+  EXPECT_NEAR(outputs(4, 0), 9.0, VALUE_TOL);
+  EXPECT_NEAR(outputs(4, 1), 20.0, VALUE_TOL);
+}
+
+TEST(tire_model, EvaluateBatchRaw_Checked_NegativeRows_Throws) {
+  const stub_model model(checked_options());
+  const std::array<double, 2> inputs{};
+  std::array<double, 3> data{};
+  expect_invalid_argument([&] { model.evaluate_batch(inputs.data(), -1, data.data(), 3); });
+  EXPECT_EQ(model.batch_calls, 0);
+}
+
+TEST(tire_model, EvaluateBatchRaw_Checked_NullInputs_Throws) {
+  const stub_model model(checked_options());
+  std::array<double, 3> data{};
+  expect_invalid_argument([&] { model.evaluate_batch(nullptr, 1, data.data(), 3); });
+}
+
+TEST(tire_model, EvaluateBatchRaw_Checked_NullData_Throws) {
+  const stub_model model(checked_options());
+  const std::array<double, 2> inputs{1.0, 2.0};
+  expect_invalid_argument([&] { model.evaluate_batch(inputs.data(), 1, nullptr, 3); });
+}
+
+TEST(tire_model, EvaluateBatchRaw_Checked_WrongLen_Throws) {
+  const stub_model model(checked_options());
+  const std::array<double, 2> inputs{1.0, 2.0};
+  std::array<double, 3> data{};
+  expect_invalid_argument([&] { model.evaluate_batch(inputs.data(), 1, data.data(), 2); });
+}
+
+TEST(tire_model, EvaluateBatchRaw_Checked_ZeroRowsNullBuffers_Succeeds) {
+  const stub_model model(checked_options());
+  EXPECT_NO_THROW(model.evaluate_batch(nullptr, 0, nullptr, 0));
+}
+
+TEST(tire_model, EvaluateBatchRaw_Checked_Valid_Succeeds) {
+  const stub_model model(checked_options());
+  const std::array<double, 4> inputs{1.0, 3.0, 2.0, 4.0};
+  std::array<double, 6> data{};
+  EXPECT_NO_THROW(model.evaluate_batch(inputs.data(), 2, data.data(), 6));
+  EXPECT_NEAR(data[0], 3.0, VALUE_TOL);
+  EXPECT_NEAR(data[1], 7.0, VALUE_TOL);
+  EXPECT_NEAR(data[2], 2.0, VALUE_TOL);
+  EXPECT_NEAR(data[3], 12.0, VALUE_TOL);
+}
+
+TEST(tire_model, Accessors_ReturnLimitsMetadataOptions) {
+  Eigen::VectorXd limits(3);
+  limits << 1.0, 2.0, 3.0;
+  const mf::model_metadata metadata{.fittyp = 5, .use_mode = 4, .side = mf::tyre_side::RIGHT};
+  const mf::model_options options{.mode = mf::slip_mode::UNCOMBINED, .throw_if_model_failure = true};
+  const stub_model model(options, false, limits, metadata);
+  ASSERT_EQ(model.limits().size(), 3);
+  EXPECT_NEAR(model.limits()(1), 2.0, VALUE_TOL);
+  EXPECT_EQ(model.metadata().fittyp, 5);
+  EXPECT_EQ(model.metadata().use_mode, 4);
+  EXPECT_EQ(model.metadata().side, mf::tyre_side::RIGHT);
+  EXPECT_EQ(model.options().mode, mf::slip_mode::UNCOMBINED);
+  EXPECT_TRUE(model.options().throw_if_model_failure);
+}
+
+TEST(tire_model, Destruction_ThroughBasePointer) {
+  std::unique_ptr<mf::tire_model> model = std::make_unique<stub_model>(unchecked_options());
+  EXPECT_EQ(model->name(), "stub");
+  EXPECT_EQ(model->input_length(), 2);
+  EXPECT_EQ(model->output_length(), 3);
+  EXPECT_EQ(model->layout().inputs.size(), 2U);
+  model.reset();
+  EXPECT_FALSE(model);
 }

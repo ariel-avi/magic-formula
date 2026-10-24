@@ -141,6 +141,13 @@ jobs:
         run: ctest --preset debug -L unit --no-tests=error
       - name: Test (module)
         run: ctest --preset debug -L module --no-tests=error
+      # Compile-only check that bench/ still builds (Release + Google Benchmark); never run as a gate.
+      - name: Build benchmarks (compile only)
+        if: matrix.name == 'linux-gcc-14'
+        run: |
+          conan install . --build=missing -s build_type=Release -s compiler.cppstd=${{ matrix.cppstd }}
+          cmake --preset release
+          cmake --build --preset release --target mf_bench
 
   coverage:
     name: Coverage (gcc-14, 100% line and branch)
