@@ -140,6 +140,27 @@ npm run dev                       # http://localhost:5173
 - Playwright results go into the report as passed/failed counts per spec file under `### Failed tests`, naming failing tests only (same style as the Vitest line below).
 - Vitest results go into the report template below as counts of passed/failed tests per Vitest project (`unit`, `smoke`) under `### Failed tests`, naming failing tests only.
 
+## Python bindings
+
+`python/` builds the pybind11 extension `magic_formula._core` through scikit-build-core, using the Conan Release toolchain. All commands run from the repository root.
+
+```bash
+conan install . --build=missing -s build_type=Release -s compiler.cppstd=26 -o with_benchmark=False
+python3.12 -m venv .venv                      # or python3.13
+# Linux
+CC=gcc-14 CXX=g++-14 .venv/bin/python -m pip install "./python[test]"
+# macOS: Homebrew LLVM 21 (the conan install above also needs the macOS flags from "Windows and macOS")
+CC=/opt/homebrew/opt/llvm@21/bin/clang CXX=/opt/homebrew/opt/llvm@21/bin/clang++ SDKROOT=$(xcrun --show-sdk-path) \
+  .venv/bin/python -m pip install "./python[test]"
+.venv/bin/python -m pytest python/tests       # includes the notebook; the 100% pytest-cov gate comes from pyproject.toml
+```
+
+- The install is non-editable: reinstall (`pip install "./python[test]"`) after any change under `python/` before running pytest.
+- If a rebuild fails on a stale CMake cache, `rm -rf python/build` and reinstall.
+- `python/bindings/*.cpp` is covered by `clang-format_all`; a dry run is `clang-format --dry-run --Werror python/bindings/*.cpp`.
+- The report template below applies with Scope `pytest`.
+- The `feature` workflow's Verify phase runs only ctest and gcovr, so the Python run must be requested explicitly.
+
 ## test-runner report template (exact)
 
 Return exactly this markdown. Omit sections that have nothing to report. Never list passing tests, never paste full logs.

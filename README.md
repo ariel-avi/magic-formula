@@ -5,6 +5,7 @@ A C++26 library and command-line tool for **Pacejka Magic Formula tire models**.
 - An abstract base tire-model formulation, with concrete models **PAC2002** and **MF 5.2**. It is designed to be extended (e.g. MF 6.x).
 - Index-mapped, vectorised batch evaluation with Eigen. Checks are opt-in (`throw_if_model_failure`).
 - A CLI that reads a simulation input table (Fz, slip angle, slip ratio, inclination, Vx, …) and a `.tir` tire property file, then prints the tire forces and moments (Fx, Fy, Mz, Mx, My, …) for every input row.
+- Python bindings (pybind11, NumPy) with an example Jupyter notebook.
 - Verified by unit and module tests, with a 100% line and branch coverage gate on the core library.
 
 ## Requirements
@@ -192,6 +193,30 @@ An input outside the model domain is an error that names the column, for example
 | 2 | usage error (message and usage text on stderr) |
 
 See [`docs/architecture.md`](docs/architecture.md) for the architecture (layers, class hierarchy, evaluation pipeline, error model, and how to extend to MF 6.x) and `CLAUDE.md` for the project layout.
+
+## Python bindings
+
+`python/` holds a pybind11 extension that statically embeds the library, plus a thin Python layer, so the tire models can be evaluated on NumPy arrays. The package is `magic-formula` (import `magic_formula`), Python >= 3.10.
+
+```bash
+conan install . --build=missing -s build_type=Release -s compiler.cppstd=26 -o with_benchmark=False
+python3.12 -m venv .venv          # python3.12 or 3.13
+CC=gcc-14 CXX=g++-14 .venv/bin/python -m pip install ./python
+```
+
+```python
+import numpy as np
+import magic_formula as mf
+
+tire = mf.load_tir("tests/data/pac2002_S.tir")
+alpha = np.deg2rad(np.linspace(-15, 15, 301))
+res = tire.evaluate(fz=4000.0, sa=alpha, sr=0.0, ia=0.0, vx=10.0)   # dict of arrays, e.g. res["fy"]
+
+points = np.array([[4000.0, 0.0, 0.1, 0.0, 10.0]])   # (N, 5): FZ, SA, SR, IA, VX
+out = tire.evaluate_batch(points)                    # (N, 10) float64
+```
+
+An example notebook is in `python/examples/magic_formula_demo.ipynb` (committed without outputs; the test suite executes it). Run the tests with `.venv/bin/python -m pip install "./python[test]"` and `.venv/bin/python -m pytest python/tests`. The API, errors, warnings and the macOS and Windows notes are in [`python/README.md`](python/README.md).
 
 ## Development with Claude Code agents
 

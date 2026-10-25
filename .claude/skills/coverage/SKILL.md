@@ -56,6 +56,10 @@ No per-file tables for fully covered files, no HTML dumps.
 
 `wasm/` and `web/` lie outside the gcovr gate by layout (not under `src/` or `include/`, not compiled natively), with no exclusion markers; `web/src/domain` has its own 100% Vitest thresholds (a local gate, not CI in the POC).
 
+## Python bindings
+
+`python/` (the pybind11 adapter and the Python layer) is outside the gcovr gate by layout, like `bench/` and `tests/`; this is not an exclusion. The Python package has its own gate: 100% line and branch pytest-cov coverage on `magic_formula`, set in the `python/pyproject.toml` pytest `addopts` (`pytest python/tests` fails below it). The adapter's branches are covered by the pytest suite; the reviewer checks a branch-to-test table for them.
+
 ## Exclusion policy
 
 - Exclusions are **forbidden in core** (`src/`, `include/`) by default.

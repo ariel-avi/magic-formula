@@ -56,6 +56,9 @@ argument-hint: "[feature <request> | review [scope]]"
 | System/class design, patterns, interfaces, error/perf/test strategy | `architect` |
 | Turn the architecture into ordered work packets and dispatch them | `planner` |
 | C++ in `include/`, `src/` (incl. `src/app/`), `tests/`, `bench/` (never build files during Implement; new files are auto-registered, see "Build-file ownership") | `cpp-developer` |
+| C++ in `python/bindings/` (the `mf::python` adapter) | `cpp-developer` |
+| Python files under `python/` (incl. `python/pyproject.toml`, `python/CMakeLists.txt` and the example notebook) | `general-developer` |
+| venv creation, `pip install ./python`, `pytest python/tests` | `test-runner` |
 | CMake/Conan glue (incl. the wave-1 skeleton with auto-registration), scripts, GitHub Actions, hooks, PR template, docs, research notes, git/PR mechanics | `general-developer` (exception: minimal build-file changes inside Verify-phase / test-failure fixes belong to `cpp-developer`, see below) |
 | C++ in `wasm/` (`mf_wasm.cpp`, the embind adapter) | `cpp-developer` |
 | TypeScript/React under `web/`; wasm/web build files (`wasm/CMakeLists.txt`, `wasm/*.sh`, `conan/profiles/wasm`, `web/package.json` and configs) | `general-developer` |
@@ -128,6 +131,10 @@ Keep any ad-hoc workflow or hand-off within the limit. An agent that is already 
 ## Verify-phase fixes
 
 Fixes for full-suite failures (the `feature` Verify phase, and test-runner failures in the `review` workflow) are owned by **`cpp-developer`**, including the minimal CMake/build-file change a failure requires (register a test or source in a target, fix a link line). No build restructuring, no new dependencies, no changes to coverage filters, thresholds or preset flags. A failure that needs more than that is reported as a blocker and the orchestrator dispatches `general-developer`. Review findings on non-C++ files in the `review` workflow still go to `general-developer`; the cpp-developer is told not to touch those files.
+
+## Python bindings verification
+
+The `feature` workflow's Verify phase runs only ctest and the gcovr gate; it does not run pytest. When a change touches `python/` (or the core API it wraps), the orchestrator dispatches a `test-runner` Python run (venv, `pip install "./python[test]"`, `pytest python/tests`; see `build-and-test`, "Python bindings") before the PR.
 
 ## Saved workflows (`.claude/workflows/`)
 

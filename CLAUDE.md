@@ -12,7 +12,7 @@ A C++ library and CLI that implement Pacejka Magic Formula tire models.
 
 ## Tech stack
 
-C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19; CI also builds with MSVC on Windows and Homebrew LLVM 21 on macOS) · CMake >= 4.0 · Conan 2 · Eigen (vectorised batch evaluation) · GoogleTest · Google Benchmark · CTest · gcovr (coverage) · clang-format / clang-tidy · Emscripten 5.0.7 (project-local emsdk in `.emsdk/`) for the WebAssembly module · web app: Node 24, npm, TypeScript (strict), React, Vite, Tailwind CSS v4, shadcn/ui, Recharts, Vitest, Playwright.
+C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19; CI also builds with MSVC on Windows and Homebrew LLVM 21 on macOS) · CMake >= 4.0 · Conan 2 · Eigen (vectorised batch evaluation) · GoogleTest · Google Benchmark · CTest · gcovr (coverage) · clang-format / clang-tidy · Python bindings: Python >= 3.10, pybind11 3, scikit-build-core, NumPy, pytest / pytest-cov, Jupyter (nbclient) · Emscripten 5.0.7 (project-local emsdk in `.emsdk/`) for the WebAssembly module · web app: Node 24, npm, TypeScript (strict), React, Vite, Tailwind CSS v4, shadcn/ui, Recharts, Vitest, Playwright.
 
 ## Layout (contract)
 
@@ -31,6 +31,11 @@ tests/module/            module/integration tests (CTest label: module), incl. t
 tests/support/           header-only test helpers (fixtures.hpp, namespace mf::test); not a test, not globbed
 tests/data/              .tir files, input tables, reference outputs (with origin notes)
 bench/                   Google Benchmark: mf_bench (bench/*.cpp; MF_BUILD_BENCH, ON in the release preset; not a CTest test, not coverage-gated)
+python/                  Python bindings, outside the gcovr gate by layout (like bench/), not an exclusion:
+                         pyproject.toml (scikit-build-core), CMakeLists.txt (target mf_python, reached via MF_BUILD_PYTHON),
+                         bindings/mf_python.cpp (namespace mf::python adapter, one TU, no header),
+                         src/magic_formula/ (Python layer), tests/ (pytest, 100% line+branch pytest-cov gate on
+                         magic_formula), examples/magic_formula_demo.ipynb (committed without outputs, run by the tests)
 docs/architecture.md     architecture: layers, class hierarchy, pipeline, error model, "Extending to MF 6.x"
 docs/research/           researcher findings: the cited source of truth for equations and the only place that carries
                          citations, page and equation numbers; policies.md = project rules where the sources are silent
@@ -49,8 +54,8 @@ conan/profiles/wasm      Emscripten host profile (tests off) used by wasm/build.
 conanfile.py             dependencies (eigen; test: gtest, benchmark by default for Release only, override with -o with_benchmark=True|False; -o with_tests=False drops both; generators in build/conan/<build_type>, or build/conan/wasm for os=Emscripten)
 CMakePresets.json        configure/build/test presets: debug, release, coverage; configure/build only: wasm
 .github/workflows/ci.yml CI: quality (format/tidy), build-test matrix (linux gcc-14 + clang-19,
-                         windows-2025 MSVC, macos-15 Homebrew LLVM 21), coverage (gcc-14, 100/100);
-                         no web/wasm job yet (follow-up)
+                         windows-2025 MSVC, macos-15 Homebrew LLVM 21), coverage (gcc-14, 100/100),
+                         python (gcc-14, pytest + notebook); no web/wasm job yet (follow-up)
 .claude/                 agents, skills, workflows, hooks, settings
 ```
 
@@ -69,6 +74,11 @@ cmake --preset coverage && cmake --build --preset coverage && cmake --build --pr
 conan install . --build=missing -s build_type=Release -s compiler.cppstd=26
 cmake --preset release && cmake --build --preset release
 ./build/release/bench/mf_bench
+# Python bindings (Release conan install; the pytest run enforces its own 100% pytest-cov gate)
+conan install . --build=missing -s build_type=Release -s compiler.cppstd=26 -o with_benchmark=False
+python3.12 -m venv .venv
+CC=gcc-14 CXX=g++-14 .venv/bin/python -m pip install "./python[test]"
+.venv/bin/python -m pytest python/tests
 # WebAssembly module + web frontend (macOS/Linux; bash scripts)
 bash wasm/setup-emsdk.sh          # once: project-local emsdk 5.0.7 in .emsdk/
 bash wasm/build.sh                # conan (wasm profile) + cmake --preset wasm -> web/src/wasm/mf_wasm.js
@@ -77,6 +87,8 @@ npm run dev                       # http://localhost:5173
 npm run typecheck && npm run test:unit && npm run test:coverage && npm run test:smoke && npm run build
 npm run test:e2e                  # Playwright UI tests (Chrome; PLAYWRIGHT_CHANNEL=chromium fallback)
 ```
+
+macOS Python note: use `python3.12` or `python3.13` and the Homebrew LLVM 21 `CC`/`CXX`/`SDKROOT` environment and Conan flags from the `build-and-test` skill, for both `conan install` and `pip install`.
 
 Platform notes: the commands above are the Linux contract. On Windows (MSVC) use `-s compiler.cppstd=23`: Conan's msvc settings stop at 23 and CMake has no C++26 flag for MSVC, so the root `CMakeLists.txt` falls back to C++23 wherever `CMAKE_CXX26_STANDARD_COMPILE_OPTION` is undefined (MSVC, AppleClang). `conanfile.py` pins the Ninja generator (the presets use Ninja on every OS), so run from an MSVC developer prompt. macOS uses Homebrew LLVM 21 because AppleClang's libc++ lacks floating-point `from_chars` and `views::join_with`. `.gitattributes` forces LF so fixtures are byte-identical on Windows. Details: `build-and-test` skill, "Windows and macOS".
 

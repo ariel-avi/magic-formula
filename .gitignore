@@ -34,6 +34,15 @@ compile_commands.json
 
 # Python
 __pycache__/
+.venv/
+/python/build/
+.pytest_cache/
+.coverage
+.ipynb_checkpoints/
+*.egg-info/
+htmlcov/
+coverage.xml
+.coverage.*
 
 # WebAssembly toolchain and web app
 /.emsdk/
