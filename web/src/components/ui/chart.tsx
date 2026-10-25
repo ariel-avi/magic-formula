@@ -60,7 +60,7 @@ function ChartTooltipContent({
       <div className="grid gap-1">
         {payload.map((item, index) => (
           <div
-            key={String(item.dataKey ?? item.name ?? index)}
+            key={index}
             data-slot="chart-tooltip-item"
             className="flex items-center gap-2"
           >

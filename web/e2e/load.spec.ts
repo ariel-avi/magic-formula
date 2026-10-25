@@ -6,7 +6,9 @@ test('shows the empty state with both examples', async ({ page }) => {
   await expect(page.getByTestId('empty-state')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Open example pac2002_S.tir' })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Open example mf52_S52.tir' })).toBeEnabled();
-  await expect(page.getByTestId('empty-state')).toContainText('arctan');
+  await expect(page.getByTestId('empty-state')).not.toContainText('arctan');
+  await expect(page.getByTestId('empty-state')).not.toContainText('sin(');
+  await expect(page.getByTestId('empty-state')).toContainText('Open a tire property file (.tir)');
 });
 
 test('opens the PAC2002 example and plots three FZ lines of FY against SA', async ({ page }) => {

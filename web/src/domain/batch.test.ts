@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { buildBatch, describeBatchRow } from './batch';
-import type { ChartSpec } from './chart-spec';
+import type { SweepSpec } from './chart-spec';
 import type { InputChannel } from './model';
 
 const channel = (name: string, unit: string): InputChannel => ({ name, unit, minimum: 0, minimumInclusive: true });
 const layout = [channel('FZ', 'N'), channel('SA', 'rad'), channel('SR', '-'), channel('IA', 'rad'), channel('VX', 'm/s')];
 
-const spec: ChartSpec = {
-  id: 'c',
-  sweep: { variable: 'SA', start: -10, end: 10, points: 3 },
+const spec: SweepSpec = {
+  id: 'sweep-1',
+  name: 'Sweep 1',
+  swept: { variable: 'SA', start: -10, end: 10, points: 3 },
   steps: [{ variable: 'FZ', values: [3000, 5000], colourMode: 'hue' }],
   fixed: { SR: 0.1, IA: 2, VX: 16.7, P: 200000 },
-  output: 'FY',
   uncombined: false,
 };
 

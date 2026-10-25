@@ -11,7 +11,7 @@ import type { ChartSpec } from '@/domain/chart-spec';
 import { defaultChartSpec } from '@/domain/defaults';
 import { describeError } from '@/domain/errors';
 import type { TirEntry, TirInspection } from '@/domain/model';
-import { channelsChanged, referencesMissing } from '@/domain/steps';
+import { channelsChanged, referencesMissing } from '@/domain/chart';
 import { EXAMPLES } from '@/examples';
 import { downloadText } from '@/lib/download';
 import type { MfWasmModule } from '@/wasm/mf_wasm.js';

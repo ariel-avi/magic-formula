@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_STEPS, type ChartSpec } from './chart-spec';
-import { defaultSweep } from './defaults';
+import { MAX_STEPS, type SweepSpec } from './chart-spec';
+import { defaultSweptRange } from './defaults';
 import type { InputChannel, TirEntry } from './model';
 import { assignRole, INPUT_ROLES, roleBlocker, roleOf } from './roles';
 
@@ -21,16 +21,16 @@ const entries: TirEntry[] = [
   { section: 'VERTICAL', key: 'FNOMIN', value: '5000', quoted: false, line: 1, used: true },
 ];
 
-const baseSpec = (): ChartSpec => ({
-  id: 'c',
-  sweep: { variable: 'SA', start: -15, end: 15, points: 61 },
+const baseSpec = (): SweepSpec => ({
+  id: 'sweep-1',
+  name: 'Sweep 1',
+  swept: { variable: 'SA', start: -15, end: 15, points: 61 },
   steps: [{ variable: 'FZ', values: [2000, 4000, 6000], colourMode: 'hue' }],
   fixed: { FZ: 4000, SA: 0, SR: 0, IA: 2, VX: 16.7 },
-  output: 'FY',
   uncombined: false,
 });
 
-const twoSteps = (): ChartSpec => {
+const twoSteps = (): SweepSpec => {
   const spec = baseSpec();
   spec.steps.push({ variable: 'IA', values: [0, 2], colourMode: 'saturation' });
   return spec;
@@ -100,7 +100,7 @@ describe('assignRole', () => {
   it('moves the sweep and turns the old sweep into a held value', () => {
     const spec = baseSpec();
     const next = assignRole(spec, SR, 'sweep', entries);
-    expect(next.sweep).toEqual(defaultSweep(SR, entries));
+    expect(next.swept).toEqual(defaultSweptRange(SR, entries));
     expect(roleOf(next, 'SA')).toBe('value');
     expect(next.fixed.SA).toBe(0);
     expect(next.steps).toEqual(spec.steps);
@@ -109,7 +109,7 @@ describe('assignRole', () => {
   it('removes the step of an input that becomes the sweep', () => {
     const next = assignRole(baseSpec(), FZ, 'sweep', entries);
     expect(next.steps).toEqual([]);
-    expect(next.sweep.variable).toBe('FZ');
+    expect(next.swept.variable).toBe('FZ');
   });
 
   it('steps a held input from its held value with the complementary colour mode', () => {
@@ -133,5 +133,20 @@ describe('assignRole', () => {
     const next = assignRole(baseSpec(), FZ, 'value', entries);
     expect(next.steps).toEqual([]);
     expect(next.fixed.FZ).toBe(4000);
+  });
+
+  it('keeps id, name, fixed and uncombined when assigning a role', () => {
+    const spec: SweepSpec = { ...baseSpec(), name: 'Custom', uncombined: true };
+    for (const [target, role] of [
+      [SR, 'sweep'],
+      [IA, 'step'],
+      [FZ, 'value'],
+    ] as const) {
+      const next = assignRole(spec, target, role, entries);
+      expect(next.id).toBe(spec.id);
+      expect(next.name).toBe('Custom');
+      expect(next.fixed).toEqual(spec.fixed);
+      expect(next.uncombined).toBe(true);
+    }
   });
 });

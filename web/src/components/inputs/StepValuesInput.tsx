@@ -75,7 +75,7 @@ export function StepValuesInput({ name, unit, values, onValues }: StepValuesInpu
           data-testid={`step-add-${name}`}
           placeholder="Add value"
           inputMode="decimal"
-          className="h-7 w-28 font-mono text-xs md:text-xs"
+          className="h-7 min-w-0 flex-1 font-mono text-xs md:text-xs"
           aria-invalid={error !== null}
           aria-describedby={error !== null ? errorId : undefined}
           value={draft}
@@ -113,46 +113,40 @@ export function StepValuesInput({ name, unit, values, onValues }: StepValuesInpu
               Range…
             </Button>
           </PopoverTrigger>
-          <PopoverContent align="start" className="w-64 space-y-2">
-            <div className="grid grid-cols-3 gap-2">
-              <div className="space-y-1">
-                <Label htmlFor={fromId} className="text-[11px] text-muted-foreground">
-                  From
-                </Label>
-                <NumberField
-                  id={fromId}
-                  label={`${name} range from`}
-                  unit={unit}
-                  value={from}
-                  onValue={setFrom}
-                  onValidity={(valid) => setInvalid((s) => ({ ...s, from: !valid }))}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor={toId} className="text-[11px] text-muted-foreground">
-                  To
-                </Label>
-                <NumberField
-                  id={toId}
-                  label={`${name} range to`}
-                  unit={unit}
-                  value={to}
-                  onValue={setTo}
-                  onValidity={(valid) => setInvalid((s) => ({ ...s, to: !valid }))}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor={countId} className="text-[11px] text-muted-foreground">
-                  Count
-                </Label>
-                <NumberField
-                  id={countId}
-                  label={`${name} range count`}
-                  value={count}
-                  onValue={setCount}
-                  onValidity={(valid) => setInvalid((s) => ({ ...s, count: !valid }))}
-                />
-              </div>
+          <PopoverContent align="start" className="w-72 space-y-3">
+            <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
+              <Label htmlFor={fromId} className="text-[11px] text-muted-foreground">
+                From
+              </Label>
+              <NumberField
+                id={fromId}
+                label={`${name} range from`}
+                unit={unit}
+                value={from}
+                onValue={setFrom}
+                onValidity={(valid) => setInvalid((s) => ({ ...s, from: !valid }))}
+              />
+              <Label htmlFor={toId} className="text-[11px] text-muted-foreground">
+                To
+              </Label>
+              <NumberField
+                id={toId}
+                label={`${name} range to`}
+                unit={unit}
+                value={to}
+                onValue={setTo}
+                onValidity={(valid) => setInvalid((s) => ({ ...s, to: !valid }))}
+              />
+              <Label htmlFor={countId} className="text-[11px] text-muted-foreground">
+                Count
+              </Label>
+              <NumberField
+                id={countId}
+                label={`${name} range count`}
+                value={count}
+                onValue={setCount}
+                onValidity={(valid) => setInvalid((s) => ({ ...s, count: !valid }))}
+              />
             </div>
             {!range.ok && (
               <p data-testid={`step-range-error-${name}`} className="text-xs text-destructive">

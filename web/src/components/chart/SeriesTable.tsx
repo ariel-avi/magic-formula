@@ -1,36 +1,54 @@
+import { cn } from '@/lib/utils';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatSignificant } from '@/domain/numbers';
-import type { ChartData } from '@/domain/series';
+import { tableColumns, type ChartData } from '@/domain/series';
 
-export function SeriesTable({ data }: { data: ChartData }) {
-  const labels = data.series.length > 1 ? data.series.map((s) => s.label) : [data.yLabel];
+export function SeriesTable({ data, grouped }: { data: ChartData; grouped: boolean }) {
   return (
-    <ScrollArea className="h-full [&_[data-slot=table-container]]:overflow-visible">
-      <Table data-testid="series-table" className="font-mono text-xs tabular-nums slashed-zero">
-        <TableHeader className="sticky top-0 bg-card">
-          <TableRow>
-            <TableHead className="text-right">{data.xLabel}</TableHead>
-            {labels.map((label, index) => (
-              <TableHead key={index} className="text-right">
-                {label}
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {data.rows.map((row, index) => (
-            <TableRow key={index}>
-              <TableCell className="text-right">{formatSignificant(row['x'] ?? NaN, 6)}</TableCell>
-              {data.series.map((s) => (
-                <TableCell key={s.key} className="text-right">
-                  {formatSignificant(row[s.key] ?? NaN, 6)}
-                </TableCell>
-              ))}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+    <ScrollArea className="h-[26rem] xl:h-full [&_[data-slot=table-container]]:overflow-visible">
+      <div className="space-y-4">
+        {data.groups.map((g) => {
+          const columns = tableColumns(g, data.xLabel, data.yLabel);
+          return (
+            <section key={g.sweepId} data-testid="series-table-section" data-sweep={g.sweepId}>
+              
+              <Table
+                data-testid="series-table"
+                className={cn('font-mono text-xs tabular-nums slashed-zero', grouped && 'w-max')}
+              >
+                <TableHeader className="sticky top-0 bg-card">
+                  {grouped && (
+                    <TableRow>
+                      <TableHead colSpan={columns.length} className="text-left font-semibold">
+                        {g.name}
+                      </TableHead>
+                    </TableRow>
+                  )}
+                  <TableRow>
+                    {columns.map((c) => (
+                      <TableHead key={c.key} className="text-right">
+                        {c.header}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {g.grid.map((_, i) => (
+                    <TableRow key={i}>
+                      {columns.map((c) => (
+                        <TableCell key={c.key} className="text-right">
+                          {formatSignificant(c.values[i] ?? NaN, 6)}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </section>
+          );
+        })}
+      </div>
       <ScrollBar orientation="horizontal" />
     </ScrollArea>
   );

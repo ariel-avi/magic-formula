@@ -9,11 +9,8 @@ interface EmptyStateProps {
 
 export function EmptyState({ solverReady, onLoad, onOpenExample }: EmptyStateProps): React.JSX.Element {
   return (
-    <main data-testid="empty-state" className="flex w-full flex-1 flex-col items-start gap-6 px-6 py-16 sm:px-12">
-      <p className="font-serif text-[28px] leading-tight italic sm:text-[32px]">
-        y = D sin(C arctan(Bx − E(Bx − arctan Bx)))
-      </p>
-      <p className="text-sm text-muted-foreground">Open a tire property file (.tir) to plot its forces and moments.</p>
+    <main data-testid="empty-state" className="flex w-full flex-1 flex-col items-start gap-4 px-6 py-16 sm:px-12">
+      <p className="text-[15px] text-foreground">Open a tire property file (.tir) to plot its forces and moments.</p>
       <div className="flex flex-wrap gap-2">
         <Button data-testid="empty-load" disabled={!solverReady} onClick={onLoad}>
           Load .tir

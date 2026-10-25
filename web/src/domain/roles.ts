@@ -1,5 +1,5 @@
-import { MAX_STEPS, type ChartSpec } from './chart-spec';
-import { defaultFixedValue, defaultSweep } from './defaults';
+import { MAX_STEPS, type SweepSpec } from './chart-spec';
+import { defaultFixedValue, defaultSweptRange } from './defaults';
 import type { InputChannel, TirEntry } from './model';
 import { addStep } from './steps';
 
@@ -8,15 +8,15 @@ export type InputRole = 'sweep' | 'step' | 'value';
 export const INPUT_ROLES: readonly InputRole[] = ['sweep', 'step', 'value'];
 
 /** 'sweep' for the swept input, 'step' for a stepped input, otherwise 'value'. */
-export function roleOf(spec: ChartSpec, name: string): InputRole {
-  if (name === spec.sweep.variable) {
+export function roleOf(spec: SweepSpec, name: string): InputRole {
+  if (name === spec.swept.variable) {
     return 'sweep';
   }
   return spec.steps.some((step) => step.variable === name) ? 'step' : 'value';
 }
 
 /** Why `name` cannot take `role` now; null when it is allowed or already that role. */
-export function roleBlocker(spec: ChartSpec, name: string, role: InputRole): string | null {
+export function roleBlocker(spec: SweepSpec, name: string, role: InputRole): string | null {
   const current = roleOf(spec, name);
   if (role === current) {
     return null;
@@ -32,18 +32,18 @@ export function roleBlocker(spec: ChartSpec, name: string, role: InputRole): str
 
 /** Gives `channel` the role. Returns the same spec object when the role is unchanged or blocked. */
 export function assignRole(
-  spec: ChartSpec,
+  spec: SweepSpec,
   channel: InputChannel,
   role: InputRole,
   entries: readonly TirEntry[],
-): ChartSpec {
+): SweepSpec {
   const name = channel.name;
   if (roleOf(spec, name) === role || roleBlocker(spec, name, role) !== null) {
     return spec;
   }
   const withoutStep = spec.steps.filter((step) => step.variable !== name);
   if (role === 'sweep') {
-    return { ...spec, sweep: defaultSweep(channel, entries), steps: withoutStep };
+    return { ...spec, swept: defaultSweptRange(channel, entries), steps: withoutStep };
   }
   if (role === 'step') {
     const held = spec.fixed[name];

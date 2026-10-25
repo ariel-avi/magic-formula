@@ -3,11 +3,11 @@ import {
   MAX_STEP_VALUES,
   MAX_SWEEP_POINTS,
   MIN_SWEEP_POINTS,
-  type ChartSpec,
   type ColourMode,
   type StepSpec,
+  type SweepSpec,
 } from './chart-spec';
-import type { InputChannel, ModelInfo, OutputChannel } from './model';
+import type { InputChannel } from './model';
 
 /** One element per step. */
 export interface Combination {
@@ -29,14 +29,14 @@ export function stepCombinations(steps: readonly StepSpec[]): Combination[] {
   return combinations;
 }
 
-/** Inputs that `stepIndex` may use: not the sweep variable and not the variable of another step. */
+/** Inputs that `stepIndex` may use: not the swept variable and not the variable of another step. */
 export function availableStepVariables(
-  spec: ChartSpec,
+  spec: SweepSpec,
   inputs: readonly InputChannel[],
   stepIndex: number,
 ): string[] {
   const taken = new Set([
-    spec.sweep.variable,
+    spec.swept.variable,
     ...spec.steps.filter((_, index) => index !== stepIndex).map((step) => step.variable),
   ]);
   return inputs.map((channel) => channel.name).filter((name) => !taken.has(name));
@@ -68,22 +68,18 @@ export function setColourMode(steps: readonly StepSpec[], index: number, mode: C
 }
 
 /** Returns one message per violated rule; an empty array means the spec is valid. */
-export function validateChartSpec(
-  spec: ChartSpec,
-  inputs: readonly InputChannel[],
-  outputs: readonly OutputChannel[],
-): string[] {
+export function validateSweepSpec(spec: SweepSpec, inputs: readonly InputChannel[]): string[] {
   const messages: string[] = [];
   const known = (name: string) => inputs.some((channel) => channel.name === name);
-  const { sweep, steps } = spec;
+  const { swept, steps } = spec;
 
-  if (!known(sweep.variable)) {
-    messages.push(`Unknown sweep variable '${sweep.variable}'.`);
+  if (!known(swept.variable)) {
+    messages.push(`Unknown sweep variable '${swept.variable}'.`);
   }
-  if (!Number.isInteger(sweep.points) || sweep.points < MIN_SWEEP_POINTS || sweep.points > MAX_SWEEP_POINTS) {
+  if (!Number.isInteger(swept.points) || swept.points < MIN_SWEEP_POINTS || swept.points > MAX_SWEEP_POINTS) {
     messages.push(`Sweep points must be an integer from ${MIN_SWEEP_POINTS} to ${MAX_SWEEP_POINTS}.`);
   }
-  if (!Number.isFinite(sweep.start) || !Number.isFinite(sweep.end) || sweep.start === sweep.end) {
+  if (!Number.isFinite(swept.start) || !Number.isFinite(swept.end) || swept.start === swept.end) {
     messages.push('Sweep start and end must be finite and different.');
   }
   if (steps.length > MAX_STEPS) {
@@ -94,7 +90,7 @@ export function validateChartSpec(
     if (!known(name)) {
       messages.push(`Unknown step variable '${name}'.`);
     }
-    if (name === sweep.variable) {
+    if (name === swept.variable) {
       messages.push(`Step variable '${name}' is the sweep variable.`);
     }
     if (steps.slice(0, k).some((earlier) => earlier.variable === name)) {
@@ -111,36 +107,10 @@ export function validateChartSpec(
     messages.push('The two steps must use different colour modes.');
   }
   for (const channel of inputs) {
-    const driven = channel.name === sweep.variable || steps.some((step) => step.variable === channel.name);
+    const driven = channel.name === swept.variable || steps.some((step) => step.variable === channel.name);
     if (!driven && !Number.isFinite(spec.fixed[channel.name])) {
       messages.push(`Fixed value of '${channel.name}' must be a finite number.`);
     }
   }
-  if (!outputs.some((channel) => channel.name === spec.output)) {
-    messages.push(`Unknown output '${spec.output}'.`);
-  }
   return messages;
-}
-
-const names = (channels: readonly { name: string }[]) => channels.map((channel) => channel.name);
-const sameNames = (a: readonly string[], b: readonly string[]) =>
-  a.length === b.length && a.every((name, index) => name === b[index]);
-
-/** True when the input or output channel names differ (a missing previous model counts as changed). */
-export function channelsChanged(previous: ModelInfo | null, next: ModelInfo): boolean {
-  return (
-    previous === null ||
-    !sameNames(names(previous.inputs), names(next.inputs)) ||
-    !sameNames(names(previous.outputs), names(next.outputs))
-  );
-}
-
-/** True when the sweep variable, a step variable or the plotted output is absent from the model. */
-export function referencesMissing(spec: ChartSpec, model: ModelInfo): boolean {
-  const inputs = names(model.inputs);
-  return (
-    !inputs.includes(spec.sweep.variable) ||
-    spec.steps.some((step) => !inputs.includes(step.variable)) ||
-    !names(model.outputs).includes(spec.output)
-  );
 }

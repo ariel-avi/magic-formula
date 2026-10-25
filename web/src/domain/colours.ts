@@ -52,9 +52,10 @@ const STRATEGIES: Record<
 /** Modes are applied in this order whatever the step order: hue picks the slot, saturation scales its chroma. */
 const ORDER: readonly ColourMode[] = ['hue', 'saturation'];
 
-export function colourFor(combination: Combination, steps: readonly StepSpec[], theme: Theme): Oklch {
+/** baseSlot: palette slot used when no step drives the hue (the sweep's position in the chart, < MAX_SWEEPS <= 8). */
+export function colourFor(combination: Combination, steps: readonly StepSpec[], theme: Theme, baseSlot: number): Oklch {
   const palette = SERIES_PALETTES[theme];
-  let colour = palette[0];
+  let colour = palette[baseSlot];
   for (const mode of ORDER) {
     const k = steps.findIndex((step) => step.colourMode === mode);
     if (k >= 0) {
@@ -63,6 +64,9 @@ export function colourFor(combination: Combination, steps: readonly StepSpec[], 
   }
   return colour;
 }
+
+/** SVG stroke-dasharray per sweep position ('' = solid); one per allowed sweep, never cycled. */
+export const SWEEP_DASHES: readonly string[] = ['', '8 4', '2 3', '12 3 2 3', '4 4', '12 3 2 3 2 3'];
 
 export function toCss(colour: Oklch): string {
   return `oklch(${Number(colour.l.toFixed(3))} ${Number(colour.c.toFixed(3))} ${Number(colour.h.toFixed(1))})`;

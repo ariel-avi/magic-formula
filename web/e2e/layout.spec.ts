@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { MAX_SWEEPS } from '../src/domain/chart-spec';
 import { openExample } from './support';
 
 const noHorizontalScroll = (page: Page) =>
@@ -29,4 +30,20 @@ test('stacks the panes without horizontal scrolling on a phone', async ({ page }
     expect(y).toBeGreaterThan(previous);
     previous = y;
   }
+});
+
+test('keeps six long-named sweeps inside the phone width', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openExample(page);
+  for (let n = 2; n <= MAX_SWEEPS; n += 1) {
+    await page.getByTestId('sweep-duplicate').click();
+    await expect(page.getByTestId('sweep-tab')).toHaveCount(n);
+  }
+  await page.getByTestId('sweep-name').fill('W'.repeat(24));
+  expect(await noHorizontalScroll(page)).toBe(true);
+  await page.getByRole('tab', { name: 'Table' }).click();
+  await expect(page.getByTestId('series-table')).toHaveCount(MAX_SWEEPS);
+  expect(await noHorizontalScroll(page)).toBe(true);
+  await page.getByRole('tab', { name: 'Plot' }).click();
+  expect(await noHorizontalScroll(page)).toBe(true);
 });

@@ -1,4 +1,4 @@
-import type { ChartSpec, SweepSpec } from './chart-spec';
+import { SWEEP_ID_PREFIX, SWEEP_NAME_PREFIX, type ChartSpec, type SweepSpec, type SweptRange } from './chart-spec';
 import { findNumber } from './entries';
 import type { InputChannel, ModelInfo, TirEntry } from './model';
 
@@ -20,7 +20,7 @@ export function defaultFixedValue(channel: InputChannel, entries: Entries): numb
   return (FIXED_VALUES[channel.name] ?? (() => 0))(entries);
 }
 
-type Range = Omit<SweepSpec, 'variable'>;
+type Range = Omit<SweptRange, 'variable'>;
 
 const SWEEPS: Record<string, (fz0: number) => Range> = {
   SA: () => ({ start: -15, end: 15, points: 61 }),
@@ -30,34 +30,40 @@ const SWEEPS: Record<string, (fz0: number) => Range> = {
   VX: () => ({ start: 1, end: 40, points: 40 }),
 };
 
-export function defaultSweep(channel: InputChannel, entries: Entries): SweepSpec {
+/** Presentation range for sweeping `channel`. */
+export function defaultSweptRange(channel: InputChannel, entries: Entries): SweptRange {
   const fz0 = FIXED_VALUES.FZ(entries);
   const range = (SWEEPS[channel.name] ?? (() => ({ start: 0, end: 1, points: 11 })))(fz0);
   return { variable: channel.name, ...range };
 }
 
-export function defaultChartSpec(model: ModelInfo, entries: Entries, id: string): ChartSpec {
+/** SA swept with an FZ hue step at 0.5/1/1.5 x FZ0 when the model has SA and FZ; otherwise the first input swept without steps. `fixed` holds a default for every input; uncombined is false. */
+export function defaultSweepSpec(model: ModelInfo, entries: Entries, id: string, name: string): SweepSpec {
   const fixed = Object.fromEntries(model.inputs.map((channel) => [channel.name, defaultFixedValue(channel, entries)]));
-  const find = (name: string) => model.inputs.find((channel) => channel.name === name);
+  const find = (channelName: string) => model.inputs.find((channel) => channel.name === channelName);
   const sa = find('SA');
   const fz = find('FZ');
-  if (sa !== undefined && fz !== undefined && model.outputs.some((channel) => channel.name === 'FY')) {
+  if (sa !== undefined && fz !== undefined) {
     const fz0 = fixed.FZ;
     return {
       id,
-      sweep: defaultSweep(sa, entries),
+      name,
+      swept: defaultSweptRange(sa, entries),
       steps: [{ variable: 'FZ', values: [0.5 * fz0, fz0, 1.5 * fz0], colourMode: 'hue' }],
       fixed,
-      output: 'FY',
       uncombined: false,
     };
   }
+  return { id, name, swept: defaultSweptRange(model.inputs[0], entries), steps: [], fixed, uncombined: false };
+}
+
+/** One sweep `${SWEEP_ID_PREFIX}1` / `${SWEEP_NAME_PREFIX}1`; X = its swept input; Y = FY when the model has it, else outputs[0]. */
+export function defaultChartSpec(model: ModelInfo, entries: Entries, id: string): ChartSpec {
+  const sweep = defaultSweepSpec(model, entries, `${SWEEP_ID_PREFIX}1`, `${SWEEP_NAME_PREFIX}1`);
   return {
     id,
-    sweep: defaultSweep(model.inputs[0], entries),
-    steps: [],
-    fixed,
-    output: model.outputs[0].name,
-    uncombined: false,
+    sweeps: [sweep],
+    x: { kind: 'input', name: sweep.swept.variable },
+    y: { kind: 'output', name: model.outputs.some((channel) => channel.name === 'FY') ? 'FY' : model.outputs[0].name },
   };
 }

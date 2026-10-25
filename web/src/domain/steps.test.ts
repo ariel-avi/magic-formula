@@ -1,15 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_STEP_VALUES, type ChartSpec, type StepSpec } from './chart-spec';
-import type { InputChannel, ModelInfo, OutputChannel } from './model';
+import { MAX_STEP_VALUES, type StepSpec, type SweepSpec } from './chart-spec';
+import type { InputChannel } from './model';
 import {
   addStep,
   availableStepVariables,
-  channelsChanged,
-  referencesMissing,
   removeStep,
   setColourMode,
   stepCombinations,
-  validateChartSpec,
+  validateSweepSpec,
 } from './steps';
 
 const inputs: InputChannel[] = ['FZ', 'SA', 'SR', 'IA', 'VX'].map((name) => ({
@@ -18,24 +16,19 @@ const inputs: InputChannel[] = ['FZ', 'SA', 'SR', 'IA', 'VX'].map((name) => ({
   minimum: 0,
   minimumInclusive: true,
 }));
-const outputs: OutputChannel[] = [
-  { name: 'FY', unit: 'N' },
-  { name: 'FX', unit: 'N' },
-];
-
 const step = (variable: string, values: number[], colourMode: StepSpec['colourMode']): StepSpec => ({
   variable,
   values,
   colourMode,
 });
 
-function makeSpec(overrides: Partial<ChartSpec> = {}): ChartSpec {
+function makeSpec(overrides: Partial<SweepSpec> = {}): SweepSpec {
   return {
-    id: 'c1',
-    sweep: { variable: 'SA', start: -10, end: 10, points: 21 },
+    id: 'sweep-1',
+    name: 'Sweep 1',
+    swept: { variable: 'SA', start: -10, end: 10, points: 21 },
     steps: [step('FZ', [3000, 4000], 'hue')],
     fixed: { SR: 0, IA: 0, VX: 16.7 },
-    output: 'FY',
     uncombined: false,
     ...overrides,
   };
@@ -121,8 +114,8 @@ describe('availableStepVariables', () => {
   });
 });
 
-describe('validateChartSpec', () => {
-  const validate = (spec: ChartSpec) => validateChartSpec(spec, inputs, outputs);
+describe('validateSweepSpec', () => {
+  const validate = (spec: SweepSpec) => validateSweepSpec(spec, inputs);
 
   it('accepts a valid spec', () => {
     expect(validate(makeSpec())).toEqual([]);
@@ -133,12 +126,12 @@ describe('validateChartSpec', () => {
   });
 
   it('reports an unknown sweep variable', () => {
-    const spec = makeSpec({ sweep: { variable: 'XX', start: 0, end: 1, points: 5 } });
+    const spec = makeSpec({ swept: { variable: 'XX', start: 0, end: 1, points: 5 } });
     expect(validate(spec)).toContain("Unknown sweep variable 'XX'.");
   });
 
   it.each([1, 502, 2.5])('reports %s sweep points', (points) => {
-    const spec = makeSpec({ sweep: { variable: 'SA', start: 0, end: 1, points } });
+    const spec = makeSpec({ swept: { variable: 'SA', start: 0, end: 1, points } });
     expect(validate(spec)).toEqual(['Sweep points must be an integer from 2 to 501.']);
   });
 
@@ -147,7 +140,7 @@ describe('validateChartSpec', () => {
     [Number.NaN, 5],
     [0, Number.POSITIVE_INFINITY],
   ])('reports start %s and end %s', (start, end) => {
-    const spec = makeSpec({ sweep: { variable: 'SA', start, end, points: 5 } });
+    const spec = makeSpec({ swept: { variable: 'SA', start, end, points: 5 } });
     expect(validate(spec)).toEqual(['Sweep start and end must be finite and different.']);
   });
 
@@ -197,45 +190,5 @@ describe('validateChartSpec', () => {
   it('reports a non-finite fixed value', () => {
     const spec = makeSpec({ fixed: { SR: Number.NaN, IA: 0, VX: 1 } });
     expect(validate(spec)).toEqual(["Fixed value of 'SR' must be a finite number."]);
-  });
-
-  it('reports an unknown output', () => {
-    expect(validate(makeSpec({ output: 'ZZ' }))).toEqual(["Unknown output 'ZZ'."]);
-  });
-});
-
-describe('channelsChanged and referencesMissing', () => {
-  const model = (inNames: string[], outNames: string[]): ModelInfo => ({
-    name: 'm',
-    fittyp: null,
-    useMode: null,
-    tyreSide: 'LEFT',
-    inputs: inNames.map((name) => ({ name, unit: '-', minimum: 0, minimumInclusive: true })),
-    outputs: outNames.map((name) => ({ name, unit: 'N' })),
-    limits: [],
-  });
-  const base = model(['FZ', 'SA'], ['FY', 'FX']);
-
-  it('treats a missing previous model as changed', () => {
-    expect(channelsChanged(null, base)).toBe(true);
-  });
-
-  it('is false for identical channels', () => {
-    expect(channelsChanged(base, model(['FZ', 'SA'], ['FY', 'FX']))).toBe(false);
-  });
-
-  it('detects input and output differences', () => {
-    expect(channelsChanged(base, model(['FZ'], ['FY', 'FX']))).toBe(true);
-    expect(channelsChanged(base, model(['FZ', 'IA'], ['FY', 'FX']))).toBe(true);
-    expect(channelsChanged(base, model(['FZ', 'SA'], ['FY']))).toBe(true);
-    expect(channelsChanged(base, model(['FZ', 'SA'], ['FY', 'MZ']))).toBe(true);
-  });
-
-  it('detects missing sweep, step and output references', () => {
-    const spec = makeSpec({ sweep: { variable: 'SA', start: 0, end: 1, points: 5 }, steps: [step('FZ', [1], 'hue')] });
-    expect(referencesMissing(spec, base)).toBe(false);
-    expect(referencesMissing(spec, model(['FZ'], ['FY']))).toBe(true);
-    expect(referencesMissing(spec, model(['SA'], ['FY']))).toBe(true);
-    expect(referencesMissing(spec, model(['FZ', 'SA'], ['FX']))).toBe(true);
   });
 });

@@ -35,9 +35,9 @@ test('colours lines by hue or by saturation', async ({ page }) => {
   expect(parsed[1].c).toBeGreaterThan(parsed[2].c);
 });
 
-test('plots the chosen output channel', async ({ page }) => {
+test('plots the chosen Y channel', async ({ page }) => {
   await openExample(page);
-  await page.getByTestId('output-select').click();
+  await page.getByTestId('y-axis-select').click();
   await page.getByRole('option', { name: /^FX \[N\]/ }).click();
   await expect(page.getByTestId('sweep-chart')).toContainText('FX [N]');
 });

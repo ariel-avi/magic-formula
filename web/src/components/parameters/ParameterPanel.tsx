@@ -81,7 +81,7 @@ export function ParameterPanel({ original, entries, onEdit }: ParameterPanelProp
                         key={`${entry.section}/${entry.key}/${entry.value}`}
                         data-testid={`param-row-${section}-${entry.key}`}
                       >
-                        <TableCell className={entry.used ? 'w-36 font-mono' : 'w-36 font-mono text-muted-foreground'}>
+                        <TableCell className={entry.used ? 'w-44 font-mono [overflow-wrap:anywhere]' : 'w-44 font-mono text-muted-foreground [overflow-wrap:anywhere]'}>
                           <div>{entry.key}</div>
                           {!entry.used && (
                             <Badge variant="outline" className="mt-0.5">

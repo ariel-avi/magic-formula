@@ -1,20 +1,19 @@
 import { useMemo } from 'react';
 import { useTheme } from '@/components/ThemeProvider';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { channelLabel } from '@/domain/channels';
+import { axisOptions } from '@/domain/axes';
+import { sweepDisplayName, validateAxes } from '@/domain/chart';
 import type { ChartSpec } from '@/domain/chart-spec';
 import type { ModelInfo } from '@/domain/model';
-import { buildChartData } from '@/domain/series';
-import { displayUnit, hasUnit } from '@/domain/units';
+import { buildChartData, flatXGroups } from '@/domain/series';
+import { solvedSweeps } from '@/domain/solve';
 import type { MfWasmModule } from '@/wasm/mf_wasm.js';
+import { AxisSelect } from './AxisSelect';
 import { SeriesLegend } from './SeriesLegend';
 import { SeriesTable } from './SeriesTable';
 import { SweepChart } from './SweepChart';
-import { useSweepSolution } from './useSweepSolution';
+import { useSweepSolutions } from './useSweepSolutions';
 
 interface ChartViewProps {
   mf: MfWasmModule;
@@ -26,50 +25,23 @@ interface ChartViewProps {
 
 export function ChartView({ mf, text, model, spec, onChange }: ChartViewProps) {
   const { theme } = useTheme();
-  const { problems, error, solution } = useSweepSolution(mf, text, model, spec);
-  const data = useMemo(
-    () =>
-      solution === null
-        ? null
-        : buildChartData(spec, solution.batch, solution.outputs, model.inputs, model.outputs, theme),
-    [solution, spec, model, theme],
-  );
+  const outcomes = useSweepSolutions(mf, text, model, spec.sweeps);
+  const options = useMemo(() => axisOptions(model), [model]);
+  const axisProblems = useMemo(() => validateAxes(spec, model), [spec, model]);
+  const data = useMemo(() => {
+    if (axisProblems.length > 0) return null;
+    const solved = solvedSweeps(spec.sweeps, outcomes);
+    return solved.length === 0 ? null : buildChartData(spec, solved, model, theme);
+  }, [spec, outcomes, model, theme, axisProblems]);
+  const flat = useMemo(() => (data === null ? [] : flatXGroups(data.groups)), [data]);
+  const grouped = spec.sweeps.length > 1;
 
   return (
     <Tabs defaultValue="plot" data-testid="chart-view" className="flex min-h-0 flex-1 flex-col gap-0">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2">
-        <Select value={spec.output} onValueChange={(output) => onChange({ ...spec, output })}>
-          <SelectTrigger size="sm" aria-label="Output" data-testid="output-select" className="min-w-36 font-mono text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {model.outputs.map((c) => {
-              const unit = displayUnit(c.unit).label;
-              return (
-                <SelectItem
-                  key={c.name}
-                  value={c.name}
-                  description={channelLabel(c.name).description}
-                  className="font-mono text-xs"
-                >
-                  {hasUnit(unit) ? `${c.name} [${unit}]` : c.name}
-                </SelectItem>
-              );
-            })}
-          </SelectContent>
-        </Select>
-        <span className="text-xs text-muted-foreground">vs {data === null ? spec.sweep.variable : data.xLabel}</span>
-        <div className="flex items-center gap-2">
-          <Switch
-            id="uncombined"
-            data-testid="uncombined-switch"
-            checked={spec.uncombined}
-            onCheckedChange={(uncombined) => onChange({ ...spec, uncombined })}
-          />
-          <Label htmlFor="uncombined" className="text-xs">
-            Pure slip (uncombined)
-          </Label>
-        </div>
+        <AxisSelect axis="y" options={options} value={spec.y} onChange={(y) => onChange({ ...spec, y })} />
+        <span className="text-xs text-muted-foreground">vs</span>
+        <AxisSelect axis="x" options={options} value={spec.x} onChange={(x) => onChange({ ...spec, x })} />
         <TabsList className="ml-auto h-7">
           <TabsTrigger value="plot" className="text-xs">
             Plot
@@ -79,33 +51,72 @@ export function ChartView({ mf, text, model, spec, onChange }: ChartViewProps) {
           </TabsTrigger>
         </TabsList>
       </div>
-      {problems.length > 0 && (
-        <Alert variant="destructive" data-testid="chart-problems" className="mx-3 mt-3 w-auto">
-          <AlertTitle>The chart settings are not valid</AlertTitle>
+      {axisProblems.length > 0 && (
+        <Alert variant="destructive" data-testid="axis-problems" className="mx-3 mt-3 w-auto">
+          <AlertTitle className="line-clamp-none">The axis settings are not valid</AlertTitle>
           <AlertDescription>
             <ul className="list-disc pl-4">
-              {problems.map((problem) => (
+              {axisProblems.map((problem) => (
                 <li key={problem}>{problem}</li>
               ))}
             </ul>
           </AlertDescription>
         </Alert>
       )}
-      {error !== null && (
-        <Alert variant="destructive" data-testid="chart-error" className="mx-3 mt-3 w-auto">
-          <AlertTitle>The solver failed</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
+      {spec.sweeps.map((sweep, i) =>
+        outcomes[i].problems.length > 0 ? (
+          <Alert
+            key={`problems-${sweep.id}`}
+            variant="destructive"
+            data-testid="chart-problems"
+            data-sweep={sweep.id}
+            className="mx-3 mt-3 w-auto"
+          >
+            <AlertTitle className="line-clamp-none">
+              {grouped
+                ? `${sweepDisplayName(sweep, i)}: the sweep settings are not valid`
+                : 'The chart settings are not valid'}
+            </AlertTitle>
+            <AlertDescription>
+              <ul className="list-disc pl-4">
+                {outcomes[i].problems.map((problem) => (
+                  <li key={problem}>{problem}</li>
+                ))}
+              </ul>
+            </AlertDescription>
+          </Alert>
+        ) : null,
+      )}
+      {spec.sweeps.map((sweep, i) =>
+        outcomes[i].error !== null ? (
+          <Alert
+            key={`error-${sweep.id}`}
+            variant="destructive"
+            data-testid="chart-error"
+            data-sweep={sweep.id}
+            className="mx-3 mt-3 w-auto"
+          >
+            <AlertTitle className="line-clamp-none">
+              {grouped ? `${sweepDisplayName(sweep, i)}: the solver failed` : 'The solver failed'}
+            </AlertTitle>
+            <AlertDescription>{outcomes[i].error}</AlertDescription>
+          </Alert>
+        ) : null,
       )}
       {data !== null && (
         <>
+          {flat.length > 0 && (
+            <p data-testid="flat-sweeps" className="px-3 pt-2 text-xs text-muted-foreground">
+              {flat.map((g) => `${g.name} does not vary along ${data.xLabel}; choose X = ${g.sweptLabel} to see it.`).join(' ')}
+            </p>
+          )}
           <TabsContent value="plot" className="h-[26rem] min-h-0 p-3 xl:h-auto xl:flex-1">
             <SweepChart data={data} />
           </TabsContent>
           <TabsContent value="table" className="h-[26rem] min-h-0 p-3 xl:h-auto xl:flex-1">
-            <SeriesTable data={data} />
+            <SeriesTable data={data} grouped={grouped} />
           </TabsContent>
-          <SeriesLegend series={data.series} />
+          <SeriesLegend data={data} grouped={grouped} />
         </>
       )}
     </Tabs>

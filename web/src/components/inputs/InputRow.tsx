@@ -4,7 +4,7 @@ import { QuantitySymbol } from '@/components/QuantitySymbol';
 import { Label } from '@/components/ui/label';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { channelLabel } from '@/domain/channels';
-import type { ChartSpec } from '@/domain/chart-spec';
+import type { SweepSpec } from '@/domain/chart-spec';
 import type { InputChannel, TirEntry } from '@/domain/model';
 import { assignRole, roleBlocker, roleOf } from '@/domain/roles';
 import { setColourMode } from '@/domain/steps';
@@ -16,8 +16,8 @@ import { StepValuesInput } from './StepValuesInput';
 interface InputRowProps {
   channel: InputChannel;
   entries: readonly TirEntry[];
-  spec: ChartSpec;
-  onChange: (spec: ChartSpec) => void;
+  spec: SweepSpec;
+  onChange: (spec: SweepSpec) => void;
 }
 
 export function InputRow({ channel, entries, spec, onChange }: InputRowProps) {
@@ -35,7 +35,7 @@ export function InputRow({ channel, entries, spec, onChange }: InputRowProps) {
   const pointsId = useId();
 
   const setSweep = (field: 'start' | 'end' | 'points', v: number) =>
-    onChange({ ...spec, sweep: { ...spec.sweep, [field]: v } });
+    onChange({ ...spec, swept: { ...spec.swept, [field]: v } });
 
   const k = spec.steps.findIndex((s) => s.variable === name);
   const step = k >= 0 ? spec.steps[k] : undefined;
@@ -69,7 +69,7 @@ export function InputRow({ channel, entries, spec, onChange }: InputRowProps) {
       </div>
       <div className="pt-1 pl-10">
         {role === 'sweep' && (
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
             <div className="space-y-1">
               <Label htmlFor={startId} className="text-[11px] text-muted-foreground">
                 Start
@@ -79,7 +79,7 @@ export function InputRow({ channel, entries, spec, onChange }: InputRowProps) {
                 label={`${name} sweep start`}
                 data-testid="sweep-start"
                 unit={unit}
-                value={spec.sweep.start}
+                value={spec.swept.start}
                 onValue={(v) => setSweep('start', v)}
               />
             </div>
@@ -92,7 +92,7 @@ export function InputRow({ channel, entries, spec, onChange }: InputRowProps) {
                 label={`${name} sweep end`}
                 data-testid="sweep-end"
                 unit={unit}
-                value={spec.sweep.end}
+                value={spec.swept.end}
                 onValue={(v) => setSweep('end', v)}
               />
             </div>
@@ -104,7 +104,7 @@ export function InputRow({ channel, entries, spec, onChange }: InputRowProps) {
                 id={pointsId}
                 label={`${name} sweep points`}
                 data-testid="sweep-points"
-                value={spec.sweep.points}
+                value={spec.swept.points}
                 onValue={(v) => setSweep('points', v)}
               />
             </div>
@@ -150,7 +150,7 @@ export function InputRow({ channel, entries, spec, onChange }: InputRowProps) {
             unit={unit}
             value={spec.fixed[name] ?? Number.NaN}
             onValue={(v) => onChange({ ...spec, fixed: { ...spec.fixed, [name]: v } })}
-            className="w-40"
+            className="w-48"
           />
         )}
       </div>

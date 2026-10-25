@@ -1,4 +1,4 @@
-import type { ChartSpec } from './chart-spec';
+import type { SweepSpec } from './chart-spec';
 import type { InputChannel } from './model';
 import { stepCombinations, type Combination } from './steps';
 import { linspace } from './sweep';
@@ -17,9 +17,9 @@ export interface SweepBatch {
  * Builds the solver input batch for a validated spec. Row r = combination * points + point;
  * column k is inputs[k] in layout order; element (r, k) sits at k * rows + r.
  */
-export function buildBatch(spec: ChartSpec, inputs: readonly InputChannel[]): SweepBatch {
-  const { points } = spec.sweep;
-  const grid = linspace(spec.sweep.start, spec.sweep.end, points);
+export function buildBatch(spec: SweepSpec, inputs: readonly InputChannel[]): SweepBatch {
+  const { points } = spec.swept;
+  const grid = linspace(spec.swept.start, spec.swept.end, points);
   const combinations = stepCombinations(spec.steps);
   const rows = combinations.length * points;
   const data = new Float64Array(rows * inputs.length);
@@ -27,7 +27,7 @@ export function buildBatch(spec: ChartSpec, inputs: readonly InputChannel[]): Sw
   inputs.forEach((channel, k) => {
     const unit = displayUnit(channel.unit);
     const stepIndex = spec.steps.findIndex((step) => step.variable === channel.name);
-    const swept = channel.name === spec.sweep.variable;
+    const swept = channel.name === spec.swept.variable;
     combinations.forEach((combination, c) => {
       for (let i = 0; i < points; i++) {
         let value = spec.fixed[channel.name];
@@ -45,10 +45,10 @@ export function buildBatch(spec: ChartSpec, inputs: readonly InputChannel[]): Sw
 }
 
 /** Location of a failing solver row, e.g. 'FZ = 2000, SA = -15': the step values of the row's combination, then the swept value. */
-export function describeBatchRow(spec: ChartSpec, batch: SweepBatch, row: number): string {
-  const { points } = spec.sweep;
+export function describeBatchRow(spec: SweepSpec, batch: SweepBatch, row: number): string {
+  const { points } = spec.swept;
   const combination = batch.combinations[Math.floor(row / points)];
   const parts = spec.steps.map((step, k) => `${step.variable} = ${combination.values[k]}`);
-  parts.push(`${spec.sweep.variable} = ${batch.grid[row % points]}`);
+  parts.push(`${spec.swept.variable} = ${batch.grid[row % points]}`);
   return parts.join(', ');
 }

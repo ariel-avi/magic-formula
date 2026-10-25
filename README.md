@@ -35,13 +35,14 @@ cmake --preset release && cmake --build --preset release
 
 ## Web frontend (WebAssembly)
 
-`web/` is a Vite + React + TypeScript + Tailwind + shadcn/ui + Recharts app that runs the existing C++ library in the browser, compiled to WebAssembly (Emscripten, embind adapter in `wasm/`). It loads, edits and saves `.tir` files, shows the model, and plots sweeps (any input as the X axis, up to two step variables, hue or saturation per step).
+`web/` is a Vite + React + TypeScript + Tailwind + shadcn/ui + Recharts app that runs the existing C++ library in the browser, compiled to WebAssembly (Emscripten, embind adapter in `wasm/`). It loads, edits and saves `.tir` files, shows the model, and plots sweeps: several sweeps share one chart, each with its own swept input, up to two step variables and hue or saturation per step.
 
 The app is a full-width three-pane workbench on one page: Inputs | Plot | Tire model. The model summary and the parameter panel (grouped by section, filterable) sit next to the chart.
 
-- **Inputs:** one row per model input (FZ, SA, SR, IA, VX, and P when the model has it), each with a Sweep / Step / Value switch. Exactly one input is swept; choosing Sweep on another input turns the old one into a held value. At most 2 inputs are stepped.
+- **Inputs:** sweep tabs at the top of the Inputs pane with New, Duplicate, Remove and a name field (up to 6 sweeps per chart, default names "Sweep n"). Each sweep has its own swept input and range, up to 2 stepped inputs, held values and a pure-slip (uncombined) switch. Below the tabs, one row per model input (FZ, SA, SR, IA, VX, and P when the model has it), each with a Sweep / Step / Value switch; the roles apply per sweep. Exactly one input is swept; choosing Sweep on another input turns the old one into a held value.
 - **Step values** are chips: add with Enter or the + button, remove with x, and "Range..." fills evenly spaced values. A step takes up to 8 values. Every combination is one line, coloured by Hue or Saturation per step.
-- **Plot:** Plot and Table views, a legend, output channel selection and a pure-slip (uncombined) switch.
+- **Plot:** Plot and Table views. The X and Y axis selectors take any input or output channel (for example FY vs FX, or MZ vs FY). Lines follow the sweep order, so curves that are not monotonic in X plot correctly. Sweeps are told apart by a dash pattern per sweep and a legend grouped by sweep name; problems and solver errors are reported per sweep.
+- **Table:** one section per sweep.
 - **Parameters:** numeric coefficients accept only valid numbers (invalid input shows an error and is not applied). `[UNITS]` entries are dropdowns that list the SI unit, the only one the solver supports, plus common non-SI units shown as "not supported yet".
 - **Theme:** a light/dark toggle in the header. The default follows the system setting and the choice is remembered in the browser.
 
