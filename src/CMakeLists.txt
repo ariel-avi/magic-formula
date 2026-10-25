@@ -13,6 +13,7 @@ set(MF_LIB_SOURCES
         io/result_writer.cpp
         io/text_file.cpp
         io/tir_document.cpp
+        io/tir_editor.cpp
         io/tir_reader.cpp
         io/units.cpp
         model/mf52_model.cpp

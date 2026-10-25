@@ -23,6 +23,7 @@ set(MF_UNIT_TESTS
         text_file_test.cpp
         text_test.cpp
         tir_document_test.cpp
+        tir_editor_test.cpp
         tir_reader_test.cpp
         tire_model_test.cpp
         units_test.cpp
