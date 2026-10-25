@@ -16,7 +16,7 @@ Dependencies point downwards only. The core model knows nothing about files or t
 | python adapter | none | `python/bindings/mf_python.cpp` | `mf::python` | pybind11 module, target `mf_python` -> `magic_formula._core`. Statically embeds `mflib`; not part of `mflib` and outside the gcovr gate by layout. |
 | python layer | none | `python/src/magic_formula/` | none | `load_tir`, `parse_tir`, `TireModel`, `Channel`, `MagicFormulaError`, `MagicFormulaWarning`. Own 100% pytest-cov gate. |
 
-The library target is `mflib` (alias `mf::mflib`, every `src/**/*.cpp` except `src/app/`). Eigen 5.0.1 is a PUBLIC dependency of `mflib`: it appears in the public signatures, so every consumer links it through `mflib`. Errors are values (see "Options and error model"); only `mf::cli::run` catches exceptions.
+The library target is `mflib` (alias `mf::mflib`), built from the sources listed explicitly in `src/CMakeLists.txt`. The public headers are the INTERFACE target `mf_headers` (alias `mf::headers`) in `include/CMakeLists.txt`; it carries the include directory and Eigen, and `mflib` links it PUBLIC. The CLI executable `mf` is defined in `src/app/CMakeLists.txt`. The test helpers are the INTERFACE target `mf::test_support` (`tests/support/CMakeLists.txt`), which provides `MF_TEST_DATA_DIR`. Eigen 5.0.1 is a PUBLIC dependency: it appears in the public signatures, so every consumer receives it through `mf::headers` and `mflib`. Errors are values (see "Options and error model"); only `mf::cli::run` catches exceptions.
 
 ## Class hierarchy
 
@@ -172,7 +172,7 @@ Output is all-or-nothing: nothing reaches stdout unless every row evaluated succ
 
 **Layering.** core <- adapter <- Python layer <- notebook. The core knows nothing about Python; the adapter is one translation unit (`mf::python`) and the Python layer depends only on the `magic_formula._core` contract.
 
-**Build.** `MF_BUILD_PYTHON` is OFF by default; `python/pyproject.toml` (scikit-build-core, source dir = repo root, Release, Conan toolchain) turns it on. In that build only, `mflib` gets position-independent code and hidden visibility so the module can embed it. The module is built with pybind11's `NO_EXTRAS` (no LTO, no strip). The wheel ships one native file.
+**Build.** `MF_BUILD_PYTHON` is OFF by default; `python/pyproject.toml` (scikit-build-core, source dir = repo root, Release, Conan toolchain) turns it on. `python/` is always configured (its sources stay in `clang-format_all`), but the `mf_python` target is defined only when `MF_BUILD_PYTHON` is ON. In that build only, `mflib` gets position-independent code and hidden visibility so the module can embed it. The module is built with pybind11's `NO_EXTRAS` (no LTO, no strip). The wheel ships one native file.
 
 **Data flow.**
 1. `load_tir` calls `_core.load_tir`, which runs the normal loader (`loaded_model`, unchecked) and moves it into a `Model`; a failure is returned as an `Error`.
@@ -200,5 +200,6 @@ MF 6.0 / 6.1 / 6.2 (FITTYP 60 / 61 / 62) are currently rejected with `UNSUPPORTE
    - the batch-vs-point agreement test at the 1e-12 scaled tolerance, and the pipeline tests (flags, Fz <= 0, clamping, finite checks) for the new model;
    - layout tests (enum positions match the channel tables), routing tests (FITTYP 61 routes to the new model, 70 still gives `UNSUPPORTED_MODEL`), loader tests for the binding table and the pressure range;
    - a module test and a CLI test with a 6.x `.tir` file and a P column that is used; update the existing test that expects 6.x to be rejected.
-10. **Python bindings.** They are layout-driven (channels, limits and output names come from the model layout), so they need no change; `evaluate(p=...)` becomes valid once the layout has a P input.
-11. **Docs.** Update this file, `CLAUDE.md` and the README "Models" section in the same PR.
+10. **Build registration.** Register every new header in `include/CMakeLists.txt` (`MF_PUBLIC_HEADERS`), every new source in `src/CMakeLists.txt` (`MF_LIB_SOURCES`) and every new test in `tests/unit/CMakeLists.txt` or `tests/module/CMakeLists.txt`. These are explicit, `LC_ALL=C` sorted lists with no globs; an unlisted file is not built and fails the registration check (`build-and-test` skill).
+11. **Python bindings.** They are layout-driven (channels, limits and output names come from the model layout), so they need no change; `evaluate(p=...)` becomes valid once the layout has a P input.
+12. **Docs.** Update this file, `CLAUDE.md` and the README "Models" section in the same PR.

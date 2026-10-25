@@ -30,57 +30,25 @@ option(MF_BUILD_PYTHON "Build the pybind11 extension magic_formula._core from py
 option(MF_BUILD_BENCH "Build the Google Benchmark executable mf_bench from bench/ (not a CTest test, not coverage-gated)" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
-include(ClangFormat)
-include(ClangTidy)
 include(Coverage)
 include(MfCompileOptions)
+include(MfQualityGates)
 
-# Eigen (header-only, from Conan): vectorised model evaluation; a PUBLIC usage requirement of mflib.
+# Eigen (header-only, from Conan): a usage requirement of the headers target.
 find_package(Eigen3 CONFIG REQUIRED)
 
-# Library: every src/**/*.cpp except the CLI under src/app/.
-file(GLOB_RECURSE MF_LIB_SOURCES CONFIGURE_DEPENDS RELATIVE "${PROJECT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/src/*.cpp")
-list(FILTER MF_LIB_SOURCES EXCLUDE REGEX "^src/app/")
-add_library(mflib STATIC ${MF_LIB_SOURCES})
-add_library(mf::mflib ALIAS mflib)
-target_include_directories(mflib PUBLIC "${PROJECT_SOURCE_DIR}/include")
-target_link_libraries(mflib PUBLIC Eigen3::Eigen)
-target_compile_definitions(mflib PRIVATE "MF_VERSION_STRING=\"${PROJECT_VERSION}\"")
-mf_configure_target(mflib)
-
-# CLI: src/app/**/*.cpp
-file(GLOB_RECURSE MF_APP_SOURCES CONFIGURE_DEPENDS RELATIVE "${PROJECT_SOURCE_DIR}"
-        "${PROJECT_SOURCE_DIR}/src/app/*.cpp")
-add_executable(mf ${MF_APP_SOURCES})
-target_link_libraries(mf PRIVATE mf::mflib)
-mf_configure_target(mf)
-
-# Quality gates from the lab templates: clang-format_all (formats in place) and clang-tidy_all.
-file(GLOB_RECURSE MF_FORMAT_FILES CONFIGURE_DEPENDS
-        "${PROJECT_SOURCE_DIR}/include/*.hpp"
-        "${PROJECT_SOURCE_DIR}/src/*.hpp" "${PROJECT_SOURCE_DIR}/src/*.cpp"
-        "${PROJECT_SOURCE_DIR}/tests/*.hpp" "${PROJECT_SOURCE_DIR}/tests/*.cpp"
-        "${PROJECT_SOURCE_DIR}/bench/*.hpp" "${PROJECT_SOURCE_DIR}/bench/*.cpp")
-file(GLOB_RECURSE MF_PYTHON_FORMAT_FILES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/python/bindings/*.cpp")
-list(APPEND MF_FORMAT_FILES ${MF_PYTHON_FORMAT_FILES})
-add_clang_format_for(magic_formula FILES ${MF_FORMAT_FILES})
-add_clang_tidy_for(mflib)
-add_clang_tidy_for(mf)
+# Targets live in the directory that holds their files; each directory lists its files explicitly.
+add_subdirectory(include)   # mf_headers (mf::headers)
+add_subdirectory(src)       # mflib (mf::mflib), src/app: mf
 
 if (MF_BUILD_TESTS)
     enable_testing()
-    add_subdirectory(tests)
 endif ()
 
-# Google Benchmark (bench/mf_bench): ON in the release preset; never a CTest test and never coverage-gated.
-if (MF_BUILD_BENCH)
-    add_subdirectory(bench)
-endif ()
-
-# Python extension (python/): pybind11 adapter that embeds mflib; built by scikit-build-core, tested by pytest.
-if (MF_BUILD_PYTHON)
-    add_subdirectory(python)
-endif ()
+# Always configured so that clang-format_all sees their files; each checks its own option before defining a target.
+add_subdirectory(tests)     # unit, module, support (MF_BUILD_TESTS)
+add_subdirectory(bench)     # mf_bench (MF_BUILD_BENCH)
+add_subdirectory(python)    # mf_python (MF_BUILD_PYTHON)
 
 if (MF_ENABLE_COVERAGE)
     get_property(MF_TEST_TARGETS GLOBAL PROPERTY MF_TEST_TARGETS)
