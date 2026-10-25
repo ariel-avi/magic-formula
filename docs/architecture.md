@@ -13,6 +13,8 @@ Dependencies point downwards only. The core model knows nothing about files or t
 | io | `io/*.hpp` | `io/` | `mf::io` | `.tir` lexing (`tir_document`, `tir_reader`), unit check, model routing, key-to-coefficient bindings, the model loader (factory), the input-table parser (header, mandatory unit line, rows) and its mapping onto a model's input channels, the CSV result writer. |
 | cli | `cli/cli.hpp` | `cli/cli.cpp` | `mf::cli` | Command-line parsing and the `run` driver. Compiled into `mflib` so module tests can run it in-process. |
 | app | none | `app/main.cpp` | none | One call into `mf::cli::run`. Builds the executable `mf`. |
+| python adapter | none | `python/bindings/mf_python.cpp` | `mf::python` | pybind11 module, target `mf_python` -> `magic_formula._core`. Statically embeds `mflib`; not part of `mflib` and outside the gcovr gate by layout. |
+| python layer | none | `python/src/magic_formula/` | none | `load_tir`, `parse_tir`, `TireModel`, `Channel`, `MagicFormulaError`, `MagicFormulaWarning`. Own 100% pytest-cov gate. |
 
 The library target is `mflib` (alias `mf::mflib`, every `src/**/*.cpp` except `src/app/`). Eigen 5.0.1 is a PUBLIC dependency of `mflib`: it appears in the public signatures, so every consumer links it through `mflib`. Errors are values (see "Options and error model"); only `mf::cli::run` catches exceptions.
 
@@ -166,6 +168,21 @@ The constexpr `UNITS` table in the parser is the single source of the accepted u
 
 Output is all-or-nothing: nothing reaches stdout unless every row evaluated successfully. Exit codes 0 / 1 / 2.
 
+## Python bindings
+
+**Layering.** core <- adapter <- Python layer <- notebook. The core knows nothing about Python; the adapter is one translation unit (`mf::python`) and the Python layer depends only on the `magic_formula._core` contract.
+
+**Build.** `MF_BUILD_PYTHON` is OFF by default; `python/pyproject.toml` (scikit-build-core, source dir = repo root, Release, Conan toolchain) turns it on. In that build only, `mflib` gets position-independent code and hidden visibility so the module can embed it. The module is built with pybind11's `NO_EXTRAS` (no LTO, no strip). The wheel ships one native file.
+
+**Data flow.**
+1. `load_tir` calls `_core.load_tir`, which runs the normal loader (`loaded_model`, unchecked) and moves it into a `Model`; a failure is returned as an `Error`.
+2. `evaluate` broadcasts the five channels with NumPy rules and packs one Fortran-ordered `(N, 5)` float64 matrix, then calls `evaluate_batch`. `evaluate_batch` takes such a matrix without a copy (any other layout or dtype is converted once).
+3. The adapter runs `checked_evaluate_batch` (or the unchecked `evaluate_batch`) with the GIL released, then moves the resulting matrix into a capsule-owned `(N, 10)` array. There is no output copy; the flag outputs stay floats (0.0 or 1.0).
+
+**Error model.** The adapter returns errors as values (`Model | Error`) and never throws or catches; pybind11's dispatcher is its boundary. The Python layer raises `MagicFormulaError` with `code`, `message`, `file`, `line`, `key` and `row`. A wrong input shape is always `INVALID_ARGUMENT`, whatever `check` is; `check=False` skips input and output validation. Load warnings are emitted as `MagicFormulaWarning` and kept on `TireModel.warnings`.
+
+**Performance.** One virtual dispatch per batch, the same lane-templated kernels as the C++ API, no input copy for F-ordered float64 input, no output copy, GIL released during evaluation. Models are immutable, so Python threads can evaluate chunks in parallel.
+
 ## Extending to MF 6.x
 
 MF 6.0 / 6.1 / 6.2 (FITTYP 60 / 61 / 62) are currently rejected with `UNSUPPORTED_MODEL` (`model-routing.md`, routing table row "any / 60, 61, 62, 70"). Thanks to the index-mapped interface, adding one touches the layout, one model class, the bindings and the routing. `tire_model`, the checks, the CLI column mapping and the result writer need no change.
@@ -183,4 +200,5 @@ MF 6.0 / 6.1 / 6.2 (FITTYP 60 / 61 / 62) are currently rejected with `UNSUPPORTE
    - the batch-vs-point agreement test at the 1e-12 scaled tolerance, and the pipeline tests (flags, Fz <= 0, clamping, finite checks) for the new model;
    - layout tests (enum positions match the channel tables), routing tests (FITTYP 61 routes to the new model, 70 still gives `UNSUPPORTED_MODEL`), loader tests for the binding table and the pressure range;
    - a module test and a CLI test with a 6.x `.tir` file and a P column that is used; update the existing test that expects 6.x to be rejected.
-10. **Docs.** Update this file, `CLAUDE.md` and the README "Models" section in the same PR.
+10. **Python bindings.** They are layout-driven (channels, limits and output names come from the model layout), so they need no change; `evaluate(p=...)` becomes valid once the layout has a P input.
+11. **Docs.** Update this file, `CLAUDE.md` and the README "Models" section in the same PR.

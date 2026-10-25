@@ -6,6 +6,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace mf {
   /// Category of a recoverable error. Carried by `mf::error` inside `std::expected<T, mf::error>`.
@@ -23,6 +24,10 @@ namespace mf {
     NUMERICAL,         ///< a non-finite result
     INVALID_ARGUMENT,  ///< a vector, matrix or buffer whose size or pointer does not fit the model layout
   };
+
+  /// Name of `code`, spelled exactly like its enumerator ("SYNTAX", "INVALID_INPUT"). Precondition: `code` is an
+  /// enumerator of `error_code`.
+  [[nodiscard]] std::string_view error_code_name(error_code code) noexcept;
 
   /// Where a diagnostic applies. An empty file, line 0 and an empty key mean "not applicable".
   struct location {
