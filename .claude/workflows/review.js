@@ -99,7 +99,7 @@ const testPrompt = `${CONTEXT}
 
 You are the test-runner. Run the FULL verification for the repository and report. Do not edit or fix anything.
 1. conan install (Debug), cmake --preset debug, cmake --build --preset debug, ctest --preset debug --output-on-failure (all tests).
-2. Static checks: clang-format --dry-run --Werror and clang-tidy as described in the build-and-test skill.
+2. Static checks: clang-format --dry-run --Werror, clang-tidy and the registration check (build-and-test skill, "Registration check") as described in the build-and-test skill.
 3. Coverage gate: coverage preset build + ctest + gcovr with --fail-under-line 100 --fail-under-branch 100 filtered to core sources (src/, include/) as described in the coverage skill.
 Return the structured result; "report" must follow the exact build-and-test report template (failures only, uncovered file:line ranges only, no passing-test lists, no log dumps). status = PASS only if the build succeeds, all tests pass, none are skipped/disabled, static checks pass and coverage is 100/100.`
 

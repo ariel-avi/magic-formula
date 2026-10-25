@@ -64,7 +64,7 @@ const PLAN_SCHEMA = {
           id: { type: 'string', description: 'Short unique id, e.g. WP1.' },
           owner: { type: 'string', enum: OWNERS },
           depends_on: { type: 'array', items: { type: 'string' } },
-          wave: { type: 'integer', minimum: 1, description: 'Execution wave; every dependency must be in a strictly lower wave; packets in the same wave must touch disjoint files.' },
+          wave: { type: 'integer', minimum: 1, description: 'Execution wave; every dependency must be in a strictly lower wave; packets in the same wave must touch disjoint files, except shared CMakeLists.txt registration lists (several cpp-developer packets may each add entries to the same list).' },
           instructions: { type: 'string', description: 'Exhaustive, self-contained implementation instructions: exact declarations/signatures, behaviour, edge cases, what NOT to touch.' },
           files: { type: 'array', items: { type: 'string' }, description: 'Exact repo-relative paths to create or modify.' },
           tests: { type: 'array', items: { type: 'string' }, description: 'Tests to write: file, TEST(Suite, Name) and cases.' },
@@ -183,7 +183,7 @@ const pktBuildDir = (p) => `build/pkt-${String(p.id).replace(/[^A-Za-z0-9_-]/g, 
 const devRules = (p) => `DEVELOPER RULES:
 - Implement EXACTLY what the ${p ? 'packet' : 'task'} says, including the tests it specifies.${p ? " Do not touch files outside the packet's file list (other packets are being implemented in parallel on the same working tree)." : ''}
 ${p && p.owner === 'cpp-developer'
-  ? `- Do NOT edit build files (CMakeLists.txt, cmake/, presets, Conan). The build skeleton auto-registers new files (agent-workflow skill, "Build-file ownership"): put each source/test at exactly the path and name the packet gives (src/**/*.cpp, tests/unit/<unit>_test.cpp, tests/module/<feature>_test.cpp, bench/*.cpp once bench/ is wired, src/app/*.cpp) and it is built and registered with its CTest label on the next configure. If a build change the skeleton cannot provide is needed, report it as a blocker.\n`
+  ? `- Build files: the only build-file edit you make is registering files. When your packet creates, renames or deletes a C++ file, update the explicit list in the owning directory's CMakeLists.txt in this packet (agent-workflow skill, "Build-file ownership"): include/CMakeLists.txt (public headers), src/CMakeLists.txt (library sources under src/ except src/app/, and private headers), src/app/CMakeLists.txt (CLI), tests/support/CMakeLists.txt (test helpers), tests/unit/CMakeLists.txt and tests/module/CMakeLists.txt (one entry per *_test.cpp, registered through mf_add_test), bench/CMakeLists.txt, python/CMakeLists.txt. One path per line, relative to that CMakeLists.txt, LC_ALL=C sorted; create the file before listing it; make each insertion a single Edit right after re-reading the file (other packets of the wave may edit the same list), never a Write of the whole file. Do NOT touch anything else in build files (targets, dependencies, options, compile definitions, link lines, cmake/, presets, Conan); if such a change is needed, report it as a blocker.\n`
   : ''}- Do NOT run builds, tests, coverage or format/tidy checks yourself and do NOT review your own work: delegate every build/test/check run to the "test-runner" agent via the Agent tool (subagent_type "test-runner"), giving it the exact scope (preset, label or -R regex, coverage yes/no). Use its failure report to fix. Max 3 dev -> test-runner rounds, then stop and report the remaining failures as blockers.
 ${p
   ? `- PARALLEL WAVE BUILD ISOLATION: other packets of this wave build in the same working tree at the same time. Tell test-runner to use the per-packet binary dir from the build-and-test skill section "Packet-scoped runs": cmake --preset debug -B ${pktBuildDir(p)} ; cmake --build ${pktBuildDir(p)} (with --target <your test targets> when known) ; ctest --test-dir ${pktBuildDir(p)} --output-on-failure --no-tests=error -R '<regex matching only this packet's tests>'. A run that selects 0 tests is a FAIL, never green (usually a misnamed or misplaced test file). Never let it use build/debug or build/coverage (the Verify phase runs those after all waves). Compile errors in files outside your packet's file list are out of scope: they do not count against your 3 rounds, do not fix them, and list them under blockers only if they prevent your own targets from building.`
@@ -329,9 +329,9 @@ ${bullet(architecture.open_questions)}
 
 Packet rules:
 - owner: "cpp-developer" for C++ sources, headers, C++ tests and benchmarks; "general-developer" for CMake/Conan glue, scripts, CI workflows, docs and other helper files.
-- BUILD-FILE OWNERSHIP (agent-workflow skill, "Build-file ownership"): the wave-1 build-skeleton packet (owner "general-developer") MUST set up auto-registration so C++ packets never edit build files: file(GLOB_RECURSE ... CONFIGURE_DEPENDS) over src/ (all but src/app/, target mflib) and src/app/ (target mf; bench/ is wired by the packet that first adds Google Benchmark), plus a cmake/ helper mf_add_test(<file> <label>) (one executable per test file, target name = file stem, links the library and GTest::gtest_main, defines MF_TEST_DATA_DIR, gtest_discover_tests with PROPERTIES LABELS <label>) that tests/unit/CMakeLists.txt and tests/module/CMakeLists.txt call for every globbed *_test.cpp with label unit / module. State this in that packet's instructions and acceptance criteria. "cpp-developer" packets list ONLY C++ sources, headers and tests (never a CMakeLists.txt, cmake/ module, preset or Conan file) and name each new file at the path/name the auto-registration picks up (src/**/*.cpp, tests/unit/<unit>_test.cpp, tests/module/<feature>_test.cpp, bench/*.cpp once bench/ is wired, src/app/*.cpp). A build change the skeleton cannot provide (new dependency, target or compile definition) is its own "general-developer" packet in an earlier wave than the packets that need it.
+- BUILD-FILE OWNERSHIP (agent-workflow skill, "Build-file ownership"): every target lives in the CMakeLists.txt of the directory that holds its files and lists them explicitly (no file(GLOB) / file(GLOB_RECURSE)): include/ (mf_headers), src/ (mflib, incl. src/{cli,detail,io,model} and private headers), src/app/ (mf), tests/support/ (mf_test_support), tests/unit/ and tests/module/ (one mf_add_test(<file> unit|module) per *_test.cpp), bench/ (mf_bench), python/ (mf_python). The root CMakeLists.txt only composes and is never edited to add a file. A packet that creates, renames or deletes a C++ file registers it in the owning list in the same packet and lists that CMakeLists.txt in its files (one path per line, relative, LC_ALL=C sorted, file created before it is listed); this is the only build-file edit a "cpp-developer" packet makes. Registration lists are shared by design: several packets of one wave may list the same CMakeLists.txt (single Edits after re-reading, never a Write); the disjoint-files rule does not apply to them. Any other build change (new target, dependency, option, compile definition, link line, cmake/ module, preset, Conan) is its own "general-developer" packet in an earlier wave than the packets that need it.
 - Order: build skeleton -> core types -> base formulation -> parsers -> specialisations -> app -> benchmarks.
-- wave: integer >= 1. Every depends_on id must be in a strictly lower wave. Packets in the same wave run in PARALLEL on the same working tree, so their file lists MUST be disjoint.
+- wave: integer >= 1. Every depends_on id must be in a strictly lower wave. Packets in the same wave run in PARALLEL on the same working tree, so their file lists MUST be disjoint, with one exception: cpp-developer packets may all list the same CMakeLists.txt registration list (each makes a single re-read + Edit). Two general-developer packets must never share a CMakeLists.txt.
 - instructions: exhaustive and self-contained (the developer sees only the packet, the request and the architecture report): exact files, exact declarations/signatures, behaviour, edge cases, error handling, and what NOT to touch.
 - tests: test file, TEST(Suite, Behaviour_Condition_Expectation) names and the cases each covers, enough for 100% line+branch coverage of the packet's core code.
 - acceptance: checkable criteria.`,
@@ -382,20 +382,27 @@ if (wavesChanged) {
   const cyclic = [...new Set(packets.flatMap((p) => p.depends_on.filter((d) => byId.get(d).wave >= p.wave).flatMap((d) => [p.id, d])))]
   throw new Error(`feature workflow: dependency cycle in the plan (packets involved: ${cyclic.join(', ')}); aborting. Send the plan back to the planner.`)
 }
-// Build-file ownership: C++ packets rely on the skeleton's auto-registration and never list build files.
-const isBuildFile = (f) => /(^|\/)CMakeLists\.txt$|(^|\/)CMake(User)?Presets\.json$|^cmake\/|(^|\/)conanfile\.(py|txt)$|\.cmake$/.test(String(f))
+// Build-file ownership: a cpp-developer packet may list a CMakeLists.txt only to register files in its explicit list; cmake/ modules, *.cmake, presets and Conan files belong to general-developer packets.
+const isBuildFile = (f) => /(^|\/)CMake(User)?Presets\.json$|^cmake\/|(^|\/)conanfile\.(py|txt)$|\.cmake$|^CMakeLists\.txt$/.test(String(f))
 for (const p of packets) {
   const buildFiles = p.owner === 'cpp-developer' ? (p.files || []).filter(isBuildFile) : []
-  if (buildFiles.length) log(`Plan warning: cpp-developer packet ${p.id} lists build files (${buildFiles.join(', ')}); build files belong to general-developer packets (agent-workflow "Build-file ownership")`)
+  if (buildFiles.length) log(`Plan warning: cpp-developer packet ${p.id} lists build files (${buildFiles.join(', ')}); cpp-developer packets may list only CMakeLists.txt registration lists; other build files belong to general-developer packets (agent-workflow "Build-file ownership")`)
 }
 const waves = [...new Set(packets.map((p) => p.wave))].sort((a, b) => a - b)
 for (const w of waves) {
   const owners = new Map()
-  for (const p of packets.filter((x) => x.wave === w)) {
+  const wavePackets = packets.filter((x) => x.wave === w)
+  for (const p of wavePackets) {
     for (const f of p.files) {
-      if (owners.has(f)) log(`Plan warning: wave ${w} packets ${owners.get(f)} and ${p.id} both touch ${f}; parallel edits may conflict`)
-      else owners.set(f, p.id)
+      if (!owners.has(f)) owners.set(f, [p])
+      else owners.get(f).push(p)
     }
+  }
+  for (const [f, ps] of owners) {
+    if (ps.length < 2) continue
+    // registration lists are shared by design, but only between cpp-developer registration packets
+    if (/(^|\/)CMakeLists\.txt$/.test(String(f)) && String(f) !== "CMakeLists.txt" && ps.every((p) => p.owner === 'cpp-developer')) continue
+    log(`Plan warning: wave ${w} packets ${ps.map((p) => p.id).join(' and ')} both touch ${f}; parallel edits may conflict`)
   }
 }
 log(`Plan ready: ${packets.length} packets in ${waves.length} waves`)
@@ -484,7 +491,7 @@ const testPrompt = `${CONTEXT}
 
 You are the test-runner. Run the FULL verification for the repository and report. Do not edit or fix anything.
 1. conan install (Debug), cmake --preset debug, cmake --build --preset debug, ctest --preset debug --output-on-failure (all tests).
-2. Static checks: clang-format --dry-run --Werror and clang-tidy as described in the build-and-test skill.
+2. Static checks: clang-format --dry-run --Werror, clang-tidy and the registration check (build-and-test skill, "Registration check") as described in the build-and-test skill.
 3. Coverage gate: coverage preset build + ctest + gcovr with --fail-under-line 100 --fail-under-branch 100 filtered to core sources (src/, include/) as described in the coverage skill.
 Return the structured result; "report" must follow the exact build-and-test report template (failures only, uncovered file:line ranges only, no passing-test lists, no log dumps). status = PASS only if the build succeeds, all tests pass, none are skipped/disabled, static checks pass and coverage is 100/100.`
 
@@ -511,7 +518,7 @@ ${test.report}
 ${DIFF_HOWTO}
 
 Fix every build error, failing test, static-check violation and coverage gap in the report. Close coverage gaps by adding tests (in tests/unit/ or tests/module/), never by adding coverage exclusions, deleting code paths the design requires, or skipping/disabling tests.
-OWNERSHIP (see the agent-workflow skill, "Verify-phase fixes"): you, the cpp-developer, own every Verify-phase fix, including the minimal CMake/Conan/build-file change a failure requires (for example registering a test file the auto-registration missed or adding a missing source or link library to a target). Change only what the failure requires; no restructuring of build files, no new dependencies, no changes to coverage filters, thresholds or preset flags. If a failure needs more than a minimal build-file change, report it as a blocker so the orchestrator can dispatch general-developer.
+OWNERSHIP (see the agent-workflow skill, "Verify-phase fixes"): you, the cpp-developer, own every Verify-phase fix, including the minimal CMake/Conan/build-file change a failure requires (for example registering a file missing from its directory's explicit list in CMakeLists.txt, or adding a missing link library to a target). Change only what the failure requires; no restructuring of build files, no new dependencies, no changes to coverage filters, thresholds or preset flags. If a failure needs more than a minimal build-file change, report it as a blocker so the orchestrator can dispatch general-developer.
 
 ${devRules(null)}`,
     { label: `verify fix ${vround}`, phase: 'Verify', agentType: 'cpp-developer', schema: DEV_SCHEMA },

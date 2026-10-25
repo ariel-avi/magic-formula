@@ -45,6 +45,11 @@ jobs:
           conan install . --build=missing -s build_type=Debug -s compiler.cppstd=26
       - name: Configure
         run: cmake --preset debug -DCLANG_FORMAT_EXE=clang-format-19 "-DCLANG_TIDY_EXE=clang-tidy-19;--warnings-as-errors=*"
+      - name: Registration check (every C++ file is listed in a CMakeLists.txt)
+        shell: bash
+        run: |
+          diff <(git ls-files --cached --others --exclude-standard -- '*.hpp' '*.cpp' | LC_ALL=C sort -u) \
+               <(ninja -C build/debug -t commands clang-format_all | tr ' ' '\n' | grep -E '\.(hpp|cpp)$' | sed "s|^$(pwd)/||" | LC_ALL=C sort -u)
       - name: clang-format gate
         run: |
           cmake --build --preset debug --target clang-format_all

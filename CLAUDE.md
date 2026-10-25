@@ -19,20 +19,32 @@ C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19; CI also builds with MSV
 The architect may refine this layout. If they do, update this file and the affected skills in the same PR.
 
 ```
+CMakeLists.txt           composition only: project(), standard, options, cmake/ modules, find_package(Eigen3),
+                         add_subdirectory, coverage target; no source lists, no targets
 include/magic_formula/   public headers (core, coverage-gated); sub-directories io/ (mf::io), cli/ (mf::cli),
-                         detail/ (mf::detail, internal but under include/ so tests can include it; coverage-gated)
-src/                     library sources -> static library `mflib` (alias `mf::mflib`; core, coverage-gated;
-                         every src/**/*.cpp except src/app/): model/ (core formulations), io/, detail/,
+                         detail/ (mf::detail, internal but under include/ so tests can include it; coverage-gated);
+                         include/CMakeLists.txt lists every header -> INTERFACE target `mf_headers` (alias
+                         `mf::headers`: FILE_SET HEADERS, include dir, Eigen), linked PUBLIC into mflib
+src/                     library sources -> static library `mflib` (alias `mf::mflib`; core, coverage-gated),
+                         defined in src/CMakeLists.txt, which lists every source under src/ except src/app/
+                         (and any private header): model/ (core formulations), io/, detail/,
                          cli/ (CLI driver mf::cli, compiled into mflib so module tests run it in-process)
-src/app/                 only main.cpp (one call into mf::cli::run) -> executable `mf` (inside src/: coverage-gated,
+src/app/                 only main.cpp (one call into mf::cli::run) -> executable `mf`, defined in
+                         src/app/CMakeLists.txt, binary at build/<preset>/mf (inside src/: coverage-gated,
                          covered by the CTest process tests)
-tests/unit/              unit tests (CTest label: unit)
-tests/module/            module/integration tests (CTest label: module), incl. the CLI smoke test
-tests/support/           header-only test helpers (fixtures.hpp, namespace mf::test); not a test, not globbed
+tests/unit/              unit tests (CTest label: unit); each test file listed in the directory's CMakeLists.txt
+                         and registered through mf_add_test
+tests/module/            module/integration tests (CTest label: module), incl. the CLI smoke test; listed and
+                         registered the same way
+tests/support/           header-only test helpers (fixtures.hpp, namespace mf::test); not a test; INTERFACE target
+                         `mf_test_support` (alias `mf::test_support`: fixtures.hpp, MF_TEST_DATA_DIR, mflib, GTest)
+                         in tests/support/CMakeLists.txt
 tests/data/              .tir files, input tables, reference outputs (with origin notes)
-bench/                   Google Benchmark: mf_bench (bench/*.cpp; MF_BUILD_BENCH, ON in the release preset; not a CTest test, not coverage-gated)
+bench/                   Google Benchmark: mf_bench (sources listed in bench/CMakeLists.txt; always configured so they stay in
+                         clang-format_all, built only with MF_BUILD_BENCH, ON in the release preset; not a CTest test, not coverage-gated)
 python/                  Python bindings, outside the gcovr gate by layout (like bench/), not an exclusion:
-                         pyproject.toml (scikit-build-core), CMakeLists.txt (target mf_python, reached via MF_BUILD_PYTHON),
+                         pyproject.toml (scikit-build-core), CMakeLists.txt (target mf_python, sources listed explicitly,
+                         always configured, built only with MF_BUILD_PYTHON),
                          bindings/mf_python.cpp (namespace mf::python adapter, one TU, no header),
                          src/magic_formula/ (Python layer), tests/ (pytest, 100% line+branch pytest-cov gate on
                          magic_formula), examples/magic_formula_demo.ipynb (committed without outputs, run by the tests)
@@ -40,10 +52,12 @@ docs/architecture.md     architecture: layers, class hierarchy, pipeline, error 
 docs/research/           researcher findings: the cited source of truth for equations and the only place that carries
                          citations, page and equation numbers; policies.md = project rules where the sources are silent
 cmake/                   ClangFormat, ClangTidy, Coverage (verbatim from ariel-avi/lab/cpp/cmake; change the lab first);
-                         MfCompileOptions, MfTesting (project glue)
+                         MfCompileOptions, MfTesting (mf_add_test), MfQualityGates (per-directory clang-format/clang-tidy
+                         registration) (project glue)
 .clang-format, .clang-tidy  verbatim copies of ariel-avi/lab/cpp/*
 wasm/                    mf_wasm.cpp: embind adapter (namespace mf::wasm; not in mflib, not coverage-gated, built only by
-                         the wasm preset); setup-emsdk.sh, build.sh, CMakeLists.txt
+                         the wasm preset); setup-emsdk.sh, build.sh, CMakeLists.txt (sources listed in
+                         MF_WASM_SOURCES; always configured so they stay in clang-format_all)
 web/                     Vite + React app with its own package.json: src/domain/ (pure TS, 100% Vitest threshold),
                          src/wasm/ (solver.ts adapter; mf_wasm.d.ts committed contract, mf_wasm.js generated and
                          gitignored), src/components/ (inputs/, chart/, parameters/,
@@ -122,7 +136,7 @@ The main thread runs as `orchestrator` (`.claude/settings.json`: `"agent": "orch
 
 - **Main flow:** orchestrator -> architect -> planner -> developer -> test-runner -> reviewer -> orchestrator.
 - **Short loop (encouraged):** developer -> test-runner -> developer -> reviewer -> developer. Limits: dev <-> test-runner max 3 rounds (the developer runs it); dev <-> reviewer max 2 rounds (the dispatcher runs it: the workflow script, or `planner` in direct mode; developers never call `reviewer`). Parallel packets build in their own `build/pkt-<id>` dirs.
-- **Build files:** the build skeleton exists: the root `CMakeLists.txt` globs sources and `cmake/MfTesting.cmake` provides `mf_add_test`, which auto-registers `*_test.cpp` files with CTest labels. C++ packets never edit build files while implementing; see `agent-workflow`, "Build-file ownership".
+- **Build files:** no globs. Every target is defined in the `CMakeLists.txt` of the directory that holds its files, which lists them explicitly; the root `CMakeLists.txt` only composes. A packet that creates, renames or deletes a C++ file updates the explicit list in the owning directory's `CMakeLists.txt` (tests through `mf_add_test` in `tests/unit/` or `tests/module/`); that is the only build-file edit a C++ packet makes. See `agent-workflow`, "Build-file ownership".
 - **Git:** the `feature` workflow first has `general-developer` put the tree on a feature branch; the PR is opened by `general-developer` in a small ad-hoc workflow after APPROVE + PASS.
 - **Escalate to orchestrator only for:** blockers, plan-level defects, or a review verdict still open after the max rounds.
 - **Saved workflows** (`.claude/workflows/`), run with the Workflow tool by name: Workflow tool `feature` (args `{ request, branch? }`, the full design -> plan -> implement -> verify -> review pipeline) and Workflow tool `review` (args `{ scope? }`, parallel tests + review with a fix loop). Do not use the slash form `/review`: it is Claude Code's built-in review command. Ad-hoc workflow scripts are written when neither fits.

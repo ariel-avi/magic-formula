@@ -2,7 +2,7 @@
 name: build-and-test
 description: Canonical commands to install dependencies, configure, build, run tests (all / by label / by regex), run static checks and benchmarks for magic-formula, plus the exact failure-report template test-runner must return.
 when_to_use: Any time code must be built, tested, format/tidy-checked or benchmarked, and whenever a test-runner report is written or read.
-allowed-tools: Bash(conan *), Bash(cmake *), Bash(ctest *), Bash(clang-format *), Bash(clang-tidy *), Bash(git ls-files *), Bash(xargs -r clang-format *), Bash(xargs -r clang-tidy *), Bash(./build/release/bench/mf_bench *)
+allowed-tools: Bash(conan *), Bash(cmake *), Bash(ctest *), Bash(clang-format *), Bash(clang-tidy *), Bash(git ls-files *), Bash(xargs -r clang-format *), Bash(xargs -r clang-tidy *), Bash(./build/release/bench/mf_bench *), Bash(ninja *), Bash(diff *)
 user-invocable: true
 argument-hint: "[debug|release|coverage] [unit|module|-R <regex>]"
 ---
@@ -78,7 +78,20 @@ git ls-files --cached --others --exclude-standard -- 'src/*.cpp' | wc -l        
 git ls-files --cached --others --exclude-standard -- 'src/*.cpp' | xargs -r clang-tidy -p build/debug --quiet
 ```
 
-CMake targets from the lab templates (configured in the root `CMakeLists.txt`):
+### Registration check
+
+File lists are explicit (no globs), so a C++ file missing from every `CMakeLists.txt` list is silently not built, tested or formatted. This check compares the files git knows with the files the format targets cover:
+
+```bash
+diff <(git ls-files --cached --others --exclude-standard -- '*.hpp' '*.cpp' | LC_ALL=C sort -u) \
+     <(ninja -C build/debug -t commands clang-format_all | tr ' ' '\n' | grep -E '\.(hpp|cpp)$' | sed "s|^$(pwd)/||" | LC_ALL=C sort -u)
+```
+
+- Empty output = PASS. Lines starting with `<` are C++ files listed in no `CMakeLists.txt` (not built, tested or formatted). Lines starting with `>` are listed files that git does not know.
+- Prerequisites: bash (process substitution), a configured `build/debug`, and clang-format found (`CLANG_FORMAT_EXE`); without it no format targets exist and every file shows as `<`. For another binary dir, replace `build/debug`.
+- Report it under `### Static checks` as `- registration: PASS`, or with the diff lines (FAIL).
+
+CMake targets from the lab templates, assembled per directory through `cmake/MfQualityGates.cmake` (`mf_add_clang_format` / `mf_add_clang_tidy`): each directory's explicit list feeds `clang-format_<name>` (all part of `clang-format_all`), and `mflib` / `mf` also feed `clang-tidy_<target>` (part of `clang-tidy_all`):
 
 - `clang-tidy_all` runs clang-tidy on `mflib` and `mf`. Configure with `-DCLANG_TIDY_EXE="clang-tidy;--warnings-as-errors=*"` to fail on warnings. Project headers are checked too: the target passes no `-header-filter`, so header selection comes from `HeaderFilterRegex` in `.clang-tidy`. The `xargs` command above is the equivalent read-only check.
 - `clang-format_all` formats files IN PLACE. It is for developers only, never for test-runner; test-runner uses the `--dry-run --Werror` command above.
@@ -103,7 +116,7 @@ ctest --test-dir build/pkt-<packet-id> --output-on-failure --no-tests=error -R '
 
 ## Benchmarks
 
-`bench/` builds one executable, `mf_bench` (Google Benchmark, linked with `benchmark_main`), when `MF_BUILD_BENCH` is ON. The `release` preset sets it; `debug` and `coverage` leave it OFF (any preset can opt in with `-DMF_BUILD_BENCH=ON`). `mf_bench` is not a CTest test, is not part of the coverage gate and is not checked by `clang-tidy_all`; `clang-format_all` does format `bench/`.
+`bench/` is always configured (so its sources stay in `clang-format_all`) and defines one executable, `mf_bench` (Google Benchmark, linked with `benchmark_main`), only when `MF_BUILD_BENCH` is ON; the sources are listed in `MF_BENCH_SOURCES` in `bench/CMakeLists.txt`. The `release` preset sets it; `debug` and `coverage` leave it OFF (any preset can opt in with `-DMF_BUILD_BENCH=ON`). `mf_bench` is not a CTest test, is not part of the coverage gate and is not checked by `clang-tidy_all`; `clang-format_all` does format `bench/`.
 
 ```bash
 conan install . --build=missing -s build_type=Release -s compiler.cppstd=26
@@ -157,7 +170,7 @@ CC=/opt/homebrew/opt/llvm@21/bin/clang CXX=/opt/homebrew/opt/llvm@21/bin/clang++
 
 - The install is non-editable: reinstall (`pip install "./python[test]"`) after any change under `python/` before running pytest.
 - If a rebuild fails on a stale CMake cache, `rm -rf python/build` and reinstall.
-- `python/bindings/*.cpp` is covered by `clang-format_all`; a dry run is `clang-format --dry-run --Werror python/bindings/*.cpp`.
+- `python/` is always configured; `mf_python` is built only with `MF_BUILD_PYTHON`, and the source list is `MF_PYTHON_SOURCES` in `python/CMakeLists.txt`. The sources in `MF_PYTHON_SOURCES` are covered by `clang-format_all`; a dry run is `clang-format --dry-run --Werror python/bindings/*.cpp`.
 - The report template below applies with Scope `pytest`.
 - The `feature` workflow's Verify phase runs only ctest and gcovr, so the Python run must be requested explicitly.
 
@@ -183,6 +196,7 @@ Return exactly this markdown. Omit sections that have nothing to report. Never l
 ### Static checks
 - clang-format: `<file>` (N lines differ)
 - clang-tidy: `<file>:<line>` [<check-name>] <message>
+- registration: PASS | <diff lines>
 
 ### Coverage (see coverage skill)
 - Line: <x>% | Branch: <y>% (target 100/100)

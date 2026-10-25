@@ -55,11 +55,11 @@ argument-hint: "[feature <request> | review [scope]]"
 | Decompose request, dispatch, verify the result against the request, report to the user | `orchestrator` (main thread; never implements) |
 | System/class design, patterns, interfaces, error/perf/test strategy | `architect` |
 | Turn the architecture into ordered work packets and dispatch them | `planner` |
-| C++ in `include/`, `src/` (incl. `src/app/`), `tests/`, `bench/` (never build files during Implement; new files are auto-registered, see "Build-file ownership") | `cpp-developer` |
+| C++ in `include/`, `src/` (incl. `src/app/`), `tests/`, `bench/` (the only build-file edit during Implement is registering a created, renamed or deleted file in the owning directory's explicit list, see "Build-file ownership") | `cpp-developer` |
 | C++ in `python/bindings/` (the `mf::python` adapter) | `cpp-developer` |
-| Python files under `python/` (incl. `python/pyproject.toml`, `python/CMakeLists.txt` and the example notebook) | `general-developer` |
+| Python files under `python/` (incl. `python/pyproject.toml` and the example notebook) and structural changes to `python/CMakeLists.txt` (target, options, link lines) | `general-developer` (the `cpp-developer` packet that creates, renames or deletes a binding source registers it in `MF_PYTHON_SOURCES`) |
 | venv creation, `pip install ./python`, `pytest python/tests` | `test-runner` |
-| CMake/Conan glue (incl. the wave-1 skeleton with auto-registration), scripts, GitHub Actions, hooks, PR template, docs, research notes, git/PR mechanics | `general-developer` (exception: minimal build-file changes inside Verify-phase / test-failure fixes belong to `cpp-developer`, see below) |
+| CMake/Conan glue (targets, dependencies, options, compile definitions, cmake/ modules, presets), scripts, GitHub Actions, hooks, PR template, docs, research notes, git/PR mechanics | `general-developer` (exception: minimal build-file changes inside Verify-phase / test-failure fixes belong to `cpp-developer`, see below) |
 | C++ in `wasm/` (`mf_wasm.cpp`, the embind adapter) | `cpp-developer` |
 | TypeScript/React under `web/`; wasm/web build files (`wasm/CMakeLists.txt`, `wasm/*.sh`, `conan/profiles/wasm`, `web/package.json` and configs) | `general-developer` |
 | Build, ctest, coverage gate, benchmarks, clang-format/tidy checks; `npm install`/`npm ci`, Vitest, `wasm/setup-emsdk.sh`, `wasm/build.sh` | `test-runner` |
@@ -74,7 +74,7 @@ argument-hint: "[feature <request> | review [scope]]"
 |-------|----------|---------|
 | orchestrator | user request | concise user report + requirement checklist with evidence per item |
 | architect | request, requirement checklist, constraints | architecture report: Context & requirements, Constraints, Component diagram, Class hierarchy & interfaces (signatures), Patterns & principles (justified), Data flow, Error handling, Performance, Test & coverage strategy, Risks/open questions, Hand-off notes for planner |
-| planner | architecture report | packets `{id, owner, depends_on, wave, instructions, files, tests, acceptance}`. Files are disjoint within a wave. Order: build skeleton -> core types -> base formulation -> parsers -> specialisations -> app -> benchmarks |
+| planner | architecture report | packets `{id, owner, depends_on, wave, instructions, files, tests, acceptance}`. Files are disjoint within a wave, except the shared CMakeLists.txt registration lists. Order: build skeleton -> core types -> base formulation -> parsers -> specialisations -> app -> benchmarks |
 | cpp-developer / general-developer | one packet (exact files, signatures, behaviour, tests, acceptance, do-not-touch list) | files changed, tests written, last test-runner status, plan deviations (with reason), blockers |
 | test-runner | preset or binary dir (`build/pkt-<id>` in parallel waves) + scope (all / label / regex) + which gates | the single report template from `build-and-test` (`## Test report: PASS / FAIL / BLOCKED`, failures only) |
 | project-explorer | precise question (and source location for reading tasks) | compact structured answer with file:line or page/section/equation references |
@@ -98,7 +98,7 @@ Workflows must `log()` every time a limit truncates a loop. The orchestrator the
 
 ## Parallel waves and build isolation
 
-Packets in one wave run in parallel on **one working tree** (disjoint file sets, no worktrees). To avoid concurrent CMake/Ninja runs in one build directory and failures caused by other packets' half-written files:
+Packets in one wave run in parallel on **one working tree** (disjoint file sets except the shared registration lists, no worktrees). To avoid concurrent CMake/Ninja runs in one build directory and failures caused by other packets' half-written files:
 
 - Every packet-scoped test-runner run uses its own binary dir `build/pkt-<packet-id>` and a `-R` scope limited to the packet's tests (`build-and-test`, "Packet-scoped runs"). Per-packet reviewers that request runs use the same dir.
 - Compile errors in files owned by another packet of the same wave are out of scope for that developer and do not use up its 3 test-runner rounds.
@@ -108,14 +108,22 @@ Packets in one wave run in parallel on **one working tree** (disjoint file sets,
 
 One rule, stated the same way in `cpp-developer`, `planner`, `cpp-conventions` and the `feature` planner prompt:
 
-- The **wave-1 build-skeleton packet** (owner `general-developer`; planned once, when the repo has no build skeleton yet, then reused by every later feature) sets up auto-registration, so C++ packets never edit build files:
-  - library sources come from `file(GLOB_RECURSE … CONFIGURE_DEPENDS)` over `src/` (all but `src/app/`, target `mflib`), the CLI from `src/app/` (target `mf`); `bench/` is wired by the packet that first adds Google Benchmark;
-  - `cmake/MfTesting.cmake` provides `mf_add_test(<file> <label>)`, which builds one executable per test file (target name = file stem, e.g. `pac2002_fy_test`), links the library and `GTest::gtest_main`, defines `MF_TEST_DATA_DIR`, and calls `gtest_discover_tests(… PROPERTIES LABELS <label>)`;
-  - `tests/unit/CMakeLists.txt` and `tests/module/CMakeLists.txt` glob `*_test.cpp` (`CONFIGURE_DEPENDS`) and call `mf_add_test` with label `unit` / `module`.
-- **`cpp-developer` packets** (Implement phase) list only C++ sources, headers and tests, never a CMakeLists.txt, `cmake/` module, preset or Conan file. A new file is built and registered on the next configure because it sits at the path the packet names. So packets of one wave never share a build file.
-- A build change the skeleton cannot provide (new dependency, new target kind, compile definition) is a separate `general-developer` packet in an earlier wave than the packets that need it. A developer who finds it missing reports a blocker and does not edit the file.
+- Every build target lives in the `CMakeLists.txt` of the directory that holds its files, and that file lists them explicitly: no `file(GLOB)` / `file(GLOB_RECURSE)` anywhere. The owning lists are:
+  - `include/CMakeLists.txt`: `MF_PUBLIC_HEADERS`, the INTERFACE target `mf_headers` (alias `mf::headers`: FILE_SET HEADERS, include dir, Eigen), linked PUBLIC into `mflib`;
+  - `src/CMakeLists.txt`: `MF_LIB_SOURCES`, target `mflib` (alias `mf::mflib`); covers `src/{cli,detail,io,model}/`, `src/*.cpp` and any private header under `src/`, but not `src/app/`;
+  - `src/app/CMakeLists.txt`: `MF_APP_SOURCES`, executable `mf` (binary at `build/<preset>/mf`);
+  - `tests/support/CMakeLists.txt`: `MF_TEST_SUPPORT_HEADERS`, the INTERFACE target `mf_test_support` (alias `mf::test_support`: `fixtures.hpp`, `MF_TEST_DATA_DIR`, `mf::mflib`, `GTest::gtest`);
+  - `tests/unit/CMakeLists.txt` and `tests/module/CMakeLists.txt`: `MF_UNIT_TESTS` / `MF_MODULE_TESTS`, one `mf_add_test(<file> unit|module)` per `*_test.cpp` (`cmake/MfTesting.cmake`; target name = file stem; links `mf::mflib`, `mf::test_support`, `GTest::gtest_main`);
+  - `bench/CMakeLists.txt`: `MF_BENCH_SOURCES`, `mf_bench` (always configured; target only with `MF_BUILD_BENCH`);
+  - `python/CMakeLists.txt`: `MF_PYTHON_SOURCES`, `mf_python` (always configured; target only with `MF_BUILD_PYTHON`);
+  - `wasm/CMakeLists.txt`: `MF_WASM_SOURCES`, `mf_wasm` (always configured; target only with `MF_BUILD_WASM`, wasm preset).
+
+  The root `CMakeLists.txt` only composes and is never edited to add a file. Each list also feeds `clang-format_all` (and `clang-tidy_all` for `mflib` and `mf`) through `cmake/MfQualityGates.cmake`.
+- **Registration:** the packet that creates, renames or deletes a C++ file updates the owning list in the same packet. One path per line, relative to that `CMakeLists.txt`, `LC_ALL=C` sorted; create the file before listing it, because a listed file that does not exist fails configure. This is the only build-file edit a `cpp-developer` makes during Implement.
+- Registration lists are shared by design: several packets of one wave may add entries to the same `CMakeLists.txt`. Make each insertion a single Edit right after re-reading the file, never a Write of the whole file. The planner lists the owning `CMakeLists.txt` in each such packet's `files`; the disjoint-files rule does not apply to these list edits.
+- Everything else in a build file is a separate `general-developer` packet in an earlier wave than the packets that need it: new targets, dependencies, options, compile definitions, link lines, `cmake/` modules, presets and Conan. A developer who finds such a change missing reports a blocker and does not edit the file.
 - Exception: Verify-phase and test-failure fixes (below).
-- Packet-scoped and label/regex ctest runs pass `--no-tests=error`. A run that selects 0 tests is a FAIL (for example a misnamed or misplaced test file that was never registered).
+- An unlisted file is never built, tested or formatted. Two checks catch it. Packet-scoped and label/regex ctest runs pass `--no-tests=error`, so a run that selects 0 tests is a FAIL. The registration check (`build-and-test`, "Static checks") diffs `git ls-files` against the `clang-format_all` file list.
 
 ## Subagent depth limit
 
@@ -130,7 +138,7 @@ Keep any ad-hoc workflow or hand-off within the limit. An agent that is already 
 
 ## Verify-phase fixes
 
-Fixes for full-suite failures (the `feature` Verify phase, and test-runner failures in the `review` workflow) are owned by **`cpp-developer`**, including the minimal CMake/build-file change a failure requires (register a test or source in a target, fix a link line). No build restructuring, no new dependencies, no changes to coverage filters, thresholds or preset flags. A failure that needs more than that is reported as a blocker and the orchestrator dispatches `general-developer`. Review findings on non-C++ files in the `review` workflow still go to `general-developer`; the cpp-developer is told not to touch those files.
+Fixes for full-suite failures (the `feature` Verify phase, and test-runner failures in the `review` workflow) are owned by **`cpp-developer`**, including the minimal CMake/build-file change a failure requires (register a file missing from its directory's explicit list, fix a link line). No build restructuring, no new dependencies, no changes to coverage filters, thresholds or preset flags. A failure that needs more than that is reported as a blocker and the orchestrator dispatches `general-developer`. Review findings on non-C++ files in the `review` workflow still go to `general-developer`; the cpp-developer is told not to touch those files.
 
 ## Python bindings verification
 

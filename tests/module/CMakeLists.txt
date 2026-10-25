@@ -1,4 +1,16 @@
-file(GLOB MF_MODULE_TESTS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*_test.cpp")
+# Module tests (CTest label module): one executable per file (target name = file stem). A new test file is added to
+# MF_MODULE_TESTS (one path per line, LC_ALL=C sorted); the list also feeds clang-format_all.
+set(MF_MODULE_TESTS
+        cli_test.cpp
+        fixtures_test.cpp
+        mfeval_reference_test.cpp)
+
+mf_add_clang_format(mf_module_tests FILES ${MF_MODULE_TESTS})
+
+if (NOT MF_BUILD_TESTS)
+    return()
+endif ()
+
 foreach (_test_source IN LISTS MF_MODULE_TESTS)
     mf_add_test("${_test_source}" module)
 endforeach ()
