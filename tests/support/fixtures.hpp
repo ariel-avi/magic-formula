@@ -55,7 +55,7 @@ namespace mf::test {
     return std::bit_cast<std::uint64_t>(value);
   }
 
-  /// Path of a file in tests/data (MF_TEST_DATA_DIR is defined by `mf_add_test`).
+  /// Path of a file in tests/data (MF_TEST_DATA_DIR is a usage requirement of the CMake target `mf::test_support`).
   [[nodiscard]] inline std::filesystem::path data_file(std::string_view name) {
     return std::filesystem::path{MF_TEST_DATA_DIR} / std::filesystem::path{name};
   }
