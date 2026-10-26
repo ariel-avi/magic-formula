@@ -111,4 +111,88 @@ describe('wasm solver smoke', () => {
     expect(Math.abs(after) / Math.abs(before)).toBeLessThan(2.5);
     expect(Math.sign(after)).toBe(Math.sign(before));
   });
+
+  describe('coordinate systems', () => {
+    const batchFor = (model: RawModel, rows: Record<string, number>[]): Float64Array => {
+      const data = new Float64Array(rows.length * model.inputs.length);
+      model.inputs.forEach((channel, k) => {
+        rows.forEach((row, r) => {
+          data[k * rows.length + r] = row[channel.name] ?? 0;
+        });
+      });
+      return data;
+    };
+    const isoRows = [0.02, 0.05, 0.1].map((SA) => ({ SA, FZ: 4000, VX: 16.6 }));
+    const saeRows = isoRows.map((row) => ({ ...row, FZ: -row.FZ }));
+
+    const classify = (mf: MfWasmModule, text: string, name: string) => {
+      const inspection = mf.inspect(text, name);
+      expect(inspection.ok).toBe(true);
+      if (!inspection.ok) throw new Error('inspect failed');
+      return inspection.coordinates;
+    };
+
+    it('identifies the repo model as mixed, with every indicator reading', async () => {
+      const mf = await createMfModule();
+      const id = classify(mf, readData('pac2002_S.tir'), 'pac2002_S.tir');
+      expect(id?.classification).toBe('MIXED');
+      expect(id?.readings).toHaveLength(29);
+    });
+
+    it('identifies the ISO and SAE fixtures', async () => {
+      const mf = await createMfModule();
+      expect(classify(mf, readData('pac2002_S_iso.tir'), 'pac2002_S_iso.tir')?.classification).toBe('ISO');
+      expect(classify(mf, readData('pac2002_S_sae.tir'), 'pac2002_S_sae.tir')?.classification).toBe('SAE');
+    });
+
+    it('converts an ISO model to SAE by coefficient sign flips', async () => {
+      const mf = await createMfModule();
+      const converted = mf.convertModel(readData('pac2002_S_iso.tir'), 'pac2002_S_iso.tir', 'SAE');
+      expect(converted.ok).toBe(true);
+      if (!converted.ok) return;
+      expect(converted.text).toMatch(/FNOMIN\s*=\s*-4000/);
+      expect(converted.applied.vertical).toBe(true);
+      expect(classify(mf, converted.text, 'converted.tir')?.classification).toBe('SAE');
+    });
+
+    it('evaluates the SAE model on FZ-negated rows as the sign-flipped ISO result', async () => {
+      const mf = await createMfModule();
+      const isoText = readData('pac2002_S_iso.tir');
+      const saeText = readData('pac2002_S_sae.tir');
+      const model = loadModel(mf, isoText, 'pac2002_S_iso.tir');
+      const iso = mf.evaluate(isoText, batchFor(model, isoRows), false);
+      const sae = mf.evaluate(saeText, batchFor(model, saeRows), false);
+      expect(iso.ok && sae.ok).toBe(true);
+      if (!iso.ok || !sae.ok) return;
+      const rows = isoRows.length;
+      const fy = model.outputs.findIndex((c) => c.name === 'FY');
+      for (let r = 0; r < rows; r += 1) {
+        const a = sae.outputs[fy * rows + r]!;
+        const b = iso.outputs[fy * rows + r]!;
+        expect(Math.abs(a - -b)).toBeLessThanOrEqual(1e-12 * (4000 + Math.abs(b)));
+      }
+    });
+
+    it('warns once about FZ < 0 rows of an ISO table', async () => {
+      const mf = await createMfModule();
+      const text = readData('pac2002_S_iso.tir');
+      const model = loadModel(mf, text, 'pac2002_S_iso.tir');
+      const rows = [...isoRows];
+      rows[1] = { ...rows[1]!, FZ: -4000 };
+      const result = mf.evaluate(text, batchFor(model, rows), false);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0]!.message.startsWith('FZ < 0 in 1 row(s) of an ISO table')).toBe(true);
+      expect(result.warnings[0]!.row).toBe(1);
+    });
+
+    it('rejects an unknown target system', async () => {
+      const mf = await createMfModule();
+      const result = mf.convertModel(readData('pac2002_S_iso.tir'), 'x.tir', 'NED' as never);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe('INVALID_ARGUMENT');
+    });
+  });
 });

@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace {
   mf::location make_location(const std::string &file, std::size_t line, const std::string &key) {
@@ -136,6 +137,41 @@ TEST(error_code, InvalidArgument_DistinctFromNumerical) {
   EXPECT_NE(mf::error_code::INVALID_ARGUMENT, mf::error_code::NUMERICAL);
   const auto result = mf::make_error(mf::error_code::INVALID_ARGUMENT, "size");
   EXPECT_EQ(result.error().code, mf::error_code::INVALID_ARGUMENT);
+}
+
+TEST(error, CopyAndMove_AssignedAndConstructed_PreserveAllFields) {
+  mf::error source;
+  source.code = mf::error_code::SYNTAX;
+  source.message = "bad";
+  source.where = make_location("f.tir", 3, "KEY");
+
+  mf::error copy_assigned;
+  copy_assigned = source;
+  EXPECT_EQ(copy_assigned.code, mf::error_code::SYNTAX);
+  EXPECT_EQ(copy_assigned.message, "bad");
+  EXPECT_EQ(copy_assigned.where.file, "f.tir");
+  EXPECT_EQ(copy_assigned.where.line, 3U);
+  EXPECT_EQ(copy_assigned.where.key, "KEY");
+
+  const mf::error copy_constructed(source);
+  EXPECT_EQ(copy_constructed.message, "bad");
+
+  mf::error move_assigned;
+  move_assigned = std::move(copy_assigned);
+  EXPECT_EQ(move_assigned.message, "bad");
+
+  const mf::error move_constructed(std::move(move_assigned));
+  EXPECT_EQ(move_constructed.where.key, "KEY");
+
+  mf::location where_assigned;
+  where_assigned = source.where;
+  EXPECT_EQ(where_assigned.file, "f.tir");
+
+  mf::warning warned;
+  warned.message = "w";
+  mf::warning warning_assigned;
+  warning_assigned = warned;
+  EXPECT_EQ(warning_assigned.message, "w");
 }
 
 TEST(error, MakeError_DefaultLocation_IsEmpty) {

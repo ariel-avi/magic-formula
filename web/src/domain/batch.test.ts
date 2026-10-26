@@ -3,7 +3,7 @@ import { buildBatch, describeBatchRow } from './batch';
 import type { SweepSpec } from './chart-spec';
 import type { InputChannel } from './model';
 
-const channel = (name: string, unit: string): InputChannel => ({ name, unit, minimum: 0, minimumInclusive: true });
+const channel = (name: string, unit: string): InputChannel => ({ name, unit, minimum: 0, minimumInclusive: true, negatedBy: name === 'FZ' ? 'VERTICAL' : name === 'SA' ? 'LATERAL' : 'NONE' });
 const layout = [channel('FZ', 'N'), channel('SA', 'rad'), channel('SR', '-'), channel('IA', 'rad'), channel('VX', 'm/s')];
 
 const spec: SweepSpec = {

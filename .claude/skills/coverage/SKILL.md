@@ -39,6 +39,8 @@ gcovr --root . --object-directory build/coverage --gcov-executable gcov-14 \
 
 For Clang use `--gcov-executable "llvm-cov-19 gcov"`.
 
+The authoritative gate is gcc-14 (CI). `llvm-cov gcov` (Clang, including Homebrew LLVM 21 on macOS) counts compiler-generated branches that gcc does not, so it reports far lower branch coverage (about 57%, even for trivial files) with lines at 100%; that is toolchain accounting, not missing tests. Run the gate on macOS with Homebrew GCC: `conan install` with `CC=gcc-14 CXX=g++-14`, then `cmake --preset coverage -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 -B build/cov-gcc` and the matching build and `coverage` target (gcov-14 is picked up automatically).
+
 Use the gcovr version listed in the build-and-test prerequisites. Do not edit thresholds or filters to make a gate pass.
 
 ## Reporting uncovered code

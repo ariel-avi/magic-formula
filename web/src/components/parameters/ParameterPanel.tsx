@@ -36,7 +36,7 @@ export function ParameterPanel({ original, entries, onEdit }: ParameterPanelProp
   };
 
   return (
-    <section data-testid="parameter-panel" aria-label="Parameters" className="flex min-h-0 flex-col xl:flex-1">
+    <section data-testid="parameter-panel" aria-label="Parameters" className="flex min-h-0 flex-col xl:min-h-[30rem] xl:flex-1 xl:shrink-0">
       <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
         <h2 className="text-[15px] font-semibold">Parameters</h2>
         <Input

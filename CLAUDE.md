@@ -12,7 +12,7 @@ A C++ library and CLI that implement Pacejka Magic Formula tire models.
 
 ## Tech stack
 
-C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19; CI also builds with MSVC on Windows and Homebrew LLVM 21 on macOS) · CMake >= 4.0 · Conan 2 · Eigen (vectorised batch evaluation) · GoogleTest · Google Benchmark · CTest · gcovr (coverage) · clang-format / clang-tidy · Python bindings: Python >= 3.10, pybind11 3, scikit-build-core, NumPy, pytest / pytest-cov, Jupyter (nbclient) · Emscripten 5.0.7 (project-local emsdk in `.emsdk/`) for the WebAssembly module · web app: Node 24, npm, TypeScript (strict), React, Vite, Tailwind CSS v4, shadcn/ui, Recharts, Vitest, Playwright.
+C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19; CI also builds with MSVC on Windows and Homebrew LLVM 21 on macOS) · CMake >= 4.0 · Conan 2 · Eigen (vectorised batch evaluation) · GoogleTest · Google Benchmark · CTest · gcovr (coverage) · clang-format / clang-tidy · Python bindings: Python >= 3.10, pybind11 3, scikit-build-core, NumPy, pytest / pytest-cov, Jupyter (nbclient) · Emscripten 5.0.7 (project-local emsdk in `.emsdk/`) for the WebAssembly module · web app: Node 24, npm, TypeScript (strict), React, Vite, Tailwind CSS v4, shadcn/ui, Recharts, three.js (lazy-loaded 3D convention view), Vitest, Playwright.
 
 ## Layout (contract)
 
@@ -60,8 +60,8 @@ wasm/                    mf_wasm.cpp: embind adapter (namespace mf::wasm; not in
                          MF_WASM_SOURCES; always configured so they stay in clang-format_all)
 web/                     Vite + React app with its own package.json: src/domain/ (pure TS, 100% Vitest threshold),
                          src/wasm/ (solver.ts adapter; mf_wasm.d.ts committed contract, mf_wasm.js generated and
-                         gitignored), src/components/ (inputs/, chart/, parameters/,
-                         shell components), src/components/ui/ (shadcn), e2e/ (Playwright; playwright.config.ts,
+                         gitignored), src/components/ (inputs/, chart/, coordinates/ (CoordinateSystemPanel and
+                         the lazy TireScene), parameters/, shell components), src/components/ui/ (shadcn), e2e/ (Playwright; playwright.config.ts,
                          tsconfig.e2e.json)
 conan/profiles/wasm      Emscripten host profile (tests off) used by wasm/build.sh
 .emsdk/                  project-local Emscripten SDK (gitignored; created by wasm/setup-emsdk.sh)

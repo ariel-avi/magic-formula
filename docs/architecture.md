@@ -8,29 +8,33 @@ Dependencies point downwards only. The core model knows nothing about files or t
 
 | Layer | Headers (`include/magic_formula/`) | Sources (`src/`) | Namespace | Role |
 |-------|------|------|-----------|------|
-| core model | `tire_model.hpp`, `model_layout.hpp`, `mf5x_layout.hpp`, `model_checks.hpp`, `mf5x_model.hpp`, `pac2002_model.hpp`, `mf52_model.hpp`, `mf5x_forms.hpp`, `mf5x_coefficients.hpp`, `evaluation_types.hpp`, `error.hpp` | `model/`, `error.cpp` | `mf`, `mf::mf5x` | Abstract formulation, the index maps, the two concrete models, the free check functions. No I/O, no printing. |
-| detail | `detail/lanes.hpp`, `detail/mf5x_kernels.hpp`, `detail/text.hpp` | `detail/` | `mf::detail` | Internal, lane-templated equation kernels and helpers. Under `include/` so tests can include them; production code includes `detail/mf5x_kernels.hpp` only from `src/model/mf5x_model.cpp`. |
-| io | `io/*.hpp` | `io/` | `mf::io` | `.tir` lexing (`tir_document`, `tir_reader`), unit check, model routing, key-to-coefficient bindings, the model loader (factory), the `.tir` text editor (`tir_editor`: `replace_value` changes only the bytes of one value, using each entry's `value_offset`/`value_length` span, and re-parses to check the result), the input-table parser (header, mandatory unit line, rows) and its mapping onto a model's input channels, the CSV result writer. |
+| core model | `tire_model.hpp`, `sign_transform.hpp`, `coordinate_system.hpp`, `coordinate_identification.hpp`, `model_layout.hpp`, `mf5x_layout.hpp`, `mf5x_signs.hpp`, `model_checks.hpp`, `mf5x_model.hpp`, `pac2002_model.hpp`, `mf52_model.hpp`, `mf5x_forms.hpp`, `mf5x_coefficients.hpp`, `evaluation_types.hpp`, `error.hpp` | `model/`, `error.cpp` | `mf`, `mf::mf5x` | Abstract formulation, the index maps, the two concrete models, the free check functions, the sign transforms, the data conversion between ISO and SAE, the coordinate-system identification and the model conversion. No I/O, no printing. |
+| detail | `detail/lanes.hpp`, `detail/mf5x_kernels.hpp`, `detail/identification_probes.hpp`, `detail/text.hpp` | `detail/` | `mf::detail` | Internal, lane-templated equation kernels, the identification probe planning and reading (`plan_probes`, `read_probes`) and helpers. Under `include/` so tests can include them; production code includes `detail/mf5x_kernels.hpp` only from `src/model/mf5x_model.cpp`. |
+| io | `io/*.hpp` | `io/` | `mf::io` | `.tir` lexing (`tir_document`, `tir_reader`), unit check, model routing, key-to-coefficient bindings, the model loader (factory), the `.tir` text editor (`tir_editor`: `replace_value` changes only the bytes of one value, using each entry's `value_offset`/`value_length` span, and re-parses to check the result), the `.tir` text conversion between ISO and SAE (`tir_conversion`: `convert_tir`), the input-table parser (header, mandatory unit line, rows) and its mapping onto a model's input channels, the CSV result writer. |
 | cli | `cli/cli.hpp` | `cli/cli.cpp` | `mf::cli` | Command-line parsing and the `run` driver. Compiled into `mflib` so module tests can run it in-process. |
-| wasm adapter | none | `wasm/mf_wasm.cpp` (outside `src/`) | `mf::wasm` | embind adapter that only converts types and calls `io::tir_document::parse`, `io::load_tire_model`, `io::replace_value` and `checked_evaluate_batch`. Not part of `mflib`, not coverage-gated, built only by the `wasm` preset. |
+| wasm adapter | none | `wasm/mf_wasm.cpp` (outside `src/`) | `mf::wasm` | embind adapter that only converts types and calls `io::tir_document::parse`, `io::load_tire_model`, `io::replace_value`, `io::convert_tir`, `tire_model::find_coordinate_system`, `checked_evaluate_batch` and `load_side_warning`; `inspect` returns the full identification, `convertModel(text, fileName, target)` returns the converted `.tir` text with the changed entries, `evaluate(text, inputs, uncombined)` takes raw inputs and returns the load-side warnings. Not part of `mflib`, not coverage-gated, built only by the `wasm` preset. |
 | app | none | `app/main.cpp` | none | One call into `mf::cli::run`. Builds the executable `mf`. |
 | python adapter | none | `python/bindings/mf_python.cpp` | `mf::python` | pybind11 module, target `mf_python` -> `magic_formula._core`. Statically embeds `mflib`; not part of `mflib` and outside the gcovr gate by layout. |
-| python layer | none | `python/src/magic_formula/` | none | `load_tir`, `parse_tir`, `TireModel`, `Channel`, `MagicFormulaError`, `MagicFormulaWarning`. Own 100% pytest-cov gate. |
+| python layer | none | `python/src/magic_formula/` | none | `load_tir`, `parse_tir`, `TireModel` (with `find_coordinate_system`, `convert_coordinate_system`, `convert_inputs`, `convert_outputs`), `CoordinateIdentification`, `AxisDecision`, `IndicatorReading`, `Channel`, `MagicFormulaError`, `MagicFormulaWarning`. Own 100% pytest-cov gate. |
 
-The library target is `mflib` (alias `mf::mflib`), built from the sources listed explicitly in `src/CMakeLists.txt`. The public headers are the INTERFACE target `mf_headers` (alias `mf::headers`) in `include/CMakeLists.txt`; it carries the include directory and Eigen, and `mflib` links it PUBLIC. The CLI executable `mf` is defined in `src/app/CMakeLists.txt`. The test helpers are the INTERFACE target `mf::test_support` (`tests/support/CMakeLists.txt`), which provides `MF_TEST_DATA_DIR`. Eigen 5.0.1 is a PUBLIC dependency: it appears in the public signatures, so every consumer receives it through `mf::headers` and `mflib`. The web app (`web/`, React + Vite) is a consumer of the wasm adapter, not a layer of the library: it holds the `.tir` text, re-parses it on each evaluate call, and contains no tire equations. See the README, "Web frontend (WebAssembly)". Errors are values (see "Options and error model"); only `mf::cli::run` catches exceptions.
+The library target is `mflib` (alias `mf::mflib`), built from the sources listed explicitly in `src/CMakeLists.txt`. The public headers are the INTERFACE target `mf_headers` (alias `mf::headers`) in `include/CMakeLists.txt`; it carries the include directory and Eigen, and `mflib` links it PUBLIC. The CLI executable `mf` is defined in `src/app/CMakeLists.txt`. The test helpers are the INTERFACE target `mf::test_support` (`tests/support/CMakeLists.txt`), which provides `MF_TEST_DATA_DIR`. Eigen 5.0.1 is a PUBLIC dependency: it appears in the public signatures, so every consumer receives it through `mf::headers` and `mflib`. The web app (`web/`, React + Vite) is a consumer of the wasm adapter, not a layer of the library: it holds the `.tir` text, re-parses it on each evaluate call, and contains no tire equations. See the README, "Web frontend (WebAssembly)". The web app shows the identified axis system in a coordinate panel (`web/src/components/coordinates/`: `CoordinateSystemPanel` with the identified label, the indicator table, the warnings and the ISO / SAE toggle that converts the model's coefficients, and the lazy-loaded three.js `TireScene` that draws the convention). Errors are values (see "Options and error model"); only `mf::cli::run` catches exceptions.
 
 ## Class hierarchy
 
 ```
-tire_model                  abstract; non-virtual interface (NVI) with 4 evaluate forms
-  `-- mf5x_model            abstract; owns coefficients and forms; compute / compute_batch are final
-        |-- pac2002_model   final; PAC2002
-        `-- mf52_model      final; MF 5.2 (FITTYP 6)
+tire_model                  abstract; non-virtual interface (NVI) with 4 evaluate forms;
+                            pure virtual reference_input(); private pure virtual rebuild();
+                            non-virtual find_coordinate_system() (two overloads), loaded_side(),
+                            transformed(), convert_coordinate_system()
+  `-- mf5x_model            abstract; owns coefficients and forms; compute / compute_batch are final;
+        |                   rebuild is final and calls the private pure virtual with_parameters()
+        |-- pac2002_model   final; PAC2002; with_parameters final
+        `-- mf52_model      final; MF 5.2 (FITTYP 6); with_parameters final
 ```
 
-- **`tire_model`** is abstract. Its four public `evaluate` forms are non-virtual and own the error policy. Pure virtual: `name`, `input_length`, `output_length`, `layout`, and the private hooks `compute` (one point) and `compute_batch` (a block of points). It stores the limits vector, the `model_metadata`, the `model_options` and the per-point input and output lengths given to its protected constructor (they size the evaluate views without a virtual call), exposes `limits`, `metadata` and `options`, and is immutable after construction, so concurrent `evaluate` calls are safe. Models are built through static `create` functions that return `std::expected`, not through public constructors.
-- **`mf5x_model`** is abstract. It owns an `mf5x_coefficients` (117 doubles named like the `.tir` keys) and an `mf5x_forms`. `input_length`, `output_length`, `compute` and `compute_batch` are final: the evaluation order is fixed and runs `detail::mf5x_pipeline` on lanes. It aliases `input_index`, `output_index` and `limit_index` from `mf::mf5x`.
-- **`pac2002_model`** and **`mf52_model`** are final. They differ only in `name`, `layout` (the Vx domain), `create` and the `mf5x_forms` they pass up (see "MF 5.x pipeline").
+- **`tire_model`** is abstract. Its four public `evaluate` forms are non-virtual and own the error policy. Pure virtual: `name`, `input_length`, `output_length`, `layout`, `reference_input` (the input vector of the reference operating point: nominal load, zero slips and inclination, reference speed, and the nominal pressure for formulations with a pressure input), the private hooks `compute` (one point) and `compute_batch` (a block of points), and the private `rebuild(sign_transforms, limits)` (a new model of the same formulation with transformed coefficients). Non-virtual, written once on the base (Template Method): `find_coordinate_system()` (default indicator table) and `find_coordinate_system(span<indicator_definition>)`, `loaded_side()`, `transformed(sign_transforms)` and `convert_coordinate_system(target)`, which returns a `model_conversion{model, applied, identification}`. It stores the limits vector, the `model_metadata`, the `model_options` and the per-point input and output lengths given to its protected constructor (they size the evaluate views without a virtual call), exposes `limits`, `metadata` and `options`, and is immutable after construction, so concurrent `evaluate` calls are safe. Models are built through static `create` functions that return `std::expected`, not through public constructors.
+- **`mf5x_model`** is abstract. It owns an `mf5x_coefficients` (117 doubles named like the `.tir` keys) and an `mf5x_forms`. `input_length`, `output_length`, `reference_input` (FNOMIN*LFZO, zero slips and inclination, LONGVL), `compute` and `compute_batch` are final: the evaluation order is fixed and runs `detail::mf5x_pipeline` on lanes. `rebuild` is final: it applies `mf5x::transform_coefficients` and calls the private pure virtual `with_parameters(mf5x_parameters)`, which the two concrete models implement by constructing a model of their own type (forms, options and metadata are copied, not recomputed; the flips preserve every validated invariant, so `create` is not re-run). It aliases `input_index`, `output_index` and `limit_index` from `mf::mf5x`.
+- **`pac2002_model`** and **`mf52_model`** are final. They differ only in `name`, `layout` (the Vx domain), `create`, `with_parameters` and the `mf5x_forms` they pass up (see "MF 5.x pipeline").
 - **`mf5x_parameters`** = coefficients + limits vector + `model_metadata`. `mf5x_model::validate_parameters` runs `validate_coefficients` and then `validate_limits(limits, mf5x::LIMITS)` and returns the first error unchanged.
 
 Free functions (all in `mf`):
@@ -41,8 +45,39 @@ Free functions (all in `mf`):
 | `check_output`, `check_outputs` | `model_checks.hpp` | size, finite results (one point, a matrix) |
 | `check_buffers`, `check_batch_buffers` | `model_checks.hpp` | null pointers and lengths of the raw forms |
 | `checked_evaluate_batch` | `model_checks.hpp` | `validate_inputs`, `evaluate_batch`, `check_outputs`; used by the CLI |
+| `contains`, `sign_transform_name` | `sign_transform.hpp` | the `sign_transform` enum (`NONE`, `VERTICAL`, `LATERAL`) and the `sign_transforms` set |
+| `apply_sign_transforms`, `transform_limits`, `limit_signs_well_formed` | `model_layout.hpp` | exact sign flips of the channels (and negate-and-swap of the limit pairs) that declare `negated_by` in the set; self-inverse |
+| `transform_coefficients`, `COEFFICIENT_SIGNS` | `mf5x_signs.hpp` | the MF 5.x coefficient table (15 VERTICAL + 15 LATERAL) and the flip of an `mf5x_coefficients` |
+| `coordinate_system_name`, `parse_coordinate_system`, `data_transforms` | `coordinate_system.hpp` | `coordinate_system` is `ISO` or `SAE`; the data transforms between two systems |
+| `convert_inputs`, `convert_outputs` | `coordinate_system.hpp` | data conversion utility (never used inside evaluation): FZ on the inputs, FY, MZ and MY on the outputs |
+| `census_fz`, `load_side_warning` | `coordinate_system.hpp` | FZ sign counts; the one warning for rows on the unloaded side of a system |
+| `make_reading`, `decide_axis`, `effective_signs`, `classify_system`, `plan_conversion`, `assemble_identification`, `identification_warnings` | `coordinate_identification.hpp` | the pure functions of the identification; `IDENTIFICATION_INDICATORS` is the data-driven indicator table |
+| `plan_probes`, `read_probes` | `detail/identification_probes.hpp` | the probe matrix of an indicator table for a layout, and the readings from the evaluated outputs |
+| `convert_tir`, `negate_number_text` | `io/tir_conversion.hpp` | `.tir` text conversion to a target system |
 | `default_limits`, `validate_limits`, `limit_pairs_well_formed` | `model_layout.hpp` | limits vector from a layout; LOWER <= UPPER check; layout well-formedness |
 | `make_error`, `to_string` | `error.hpp` | error construction and formatting |
+
+## Coordinate systems
+
+ISO is x forward, y left, z up (a loaded tire has FZ > 0 and dFy/dSA > 0). SAE is x forward, y right, z down (FZ < 0 and dFy/dSA < 0). SA, SR and IA have the same definition in both. **The equations never change and the evaluation never converts**: raw inputs go straight in. A coefficient set belongs to one system, and converting a model between systems means flipping coefficient signs. The definitions, the flip tables and the identification rationale are in [`research/coordinate-systems.md`](research/coordinate-systems.md); the project choices are in `research/policies.md` section 8.
+
+**Sign transforms (data on the layout).** `sign_transform` is `NONE`, `VERTICAL` (ISO <-> SAE) or `LATERAL` (the slip-angle convention); `sign_transforms{vertical, lateral}` is a plan. Every input channel, output channel and limit pair of a `model_layout` declares `negated_by`, the one transform that negates it (MF 5.x: FZ VERTICAL, SA LATERAL; FY, MZ, MY VERTICAL; FZMIN/FZMAX VERTICAL; ALPMIN/ALPMAX LATERAL). `apply_sign_transforms` negates the declared columns; `transform_limits` turns a transformed pair into (-upper, -lower). Both are exact and self-inverse, and the two transforms commute. The per-coefficient table of a family is data too: `mf5x::COEFFICIENT_SIGNS` (key, member pointer, transform), with `transform_coefficients`. Adding a quantity or a family adds rows, not code.
+
+**Equations.** Three sign-agnostic generalisations make the property `evaluate(transformed(T), T_in(x)) == T_out(evaluate(x))` hold: FNOMIN must be non-zero, the unloaded rule is `fz*sgn(FNOMIN) > 0` (one `copysign` per pipeline call), and the PAC2002 shift-form My carries `sgn(FNOMIN)`. With FNOMIN > 0 everything reduces to the earlier behaviour.
+
+**Data conversion.** `convert_inputs` and `convert_outputs` (`coordinate_system.hpp`) apply the data transforms between two systems: FZ flips on the inputs and FY, MZ and MY on the outputs; SA, SR, IA, VX, FX, MX and the flags stay. They are a boundary utility for the CLI, the UI and Python.
+
+**Identification.** `tire_model::find_coordinate_system()` is a Template Method: the base class owns the algorithm and the formulation supplies only `reference_input()` (FZ = FNOMIN*LFZO with its sign). The steps:
+1. `detail::plan_probes` turns the indicator table (`IDENTIFICATION_INDICATORS`, 11 rows: FZ0, dFy/dIA and My on the vertical axis; dFy/dSA, the Fy secants at 1, 3 and 6 degrees, the Fy odd part at 20 degrees and dMz/dSA on the lateral axis; dFx/dSR and the Fx secant at 5 % as checks) into one probe matrix at 0.5, 1 and 1.5 times F'z0 (about 55 rows).
+2. One unchecked `compute_batch` evaluates it; the member is total and never throws `model_failure`.
+3. `detail::read_probes` produces one `indicator_reading` per slot; a reading is a vote, below the threshold, not finite, clamped or on a missing channel (`make_reading`).
+4. `decide_axis` takes a weighted vote per axis (minimum valid weight 0.25, minimum confidence 0.6); `effective_signs` lets an undetermined axis take the other axis's sign (ISO when both are undetermined); `classify_system` gives ISO, SAE or MIXED; `identification_warnings` reports undetermined axes, dissent, MIXED and failed checks.
+
+All decisions live in these pure functions, so the member itself has no branches. The result `coordinate_identification` exposes every reading, both axis decisions, the effective signs, the classification and the warnings.
+
+**Model conversion.** `transformed(plan)` calls `rebuild(plan, transform_limits(limits(), layout().limits, plan))`; `convert_coordinate_system(target)` identifies the model, plans with `plan_conversion` ((+,-) to ISO is {LATERAL}; ISO <-> SAE is {VERTICAL}; and so on) and returns the transformed copy with the plan and the source identification. `loaded_side()` is SAE when the reference FZ is negative. `io::convert_tir` does the same on `.tir` text: it parses, loads, plans, then splices the negated value texts at the entries' value offsets; the converted text loads to a model whose coefficients equal `transformed(applied)` value for value (signed zeros may differ: zero values are left as written, +0.0, where `transformed()` gives -0.0).
+
+**Deleted.** `mf::solve` and the v1 `solve_result` no longer exist (`solver.hpp`, `solver.cpp` and their unit test are removed): each front end calls `checked_evaluate_batch` and `load_side_warning` itself, so the evaluation API carries no system option.
 
 ## Index-mapped inputs, outputs and limits
 
@@ -58,9 +93,9 @@ The five flag outputs hold 0.0 or 1.0. The enums are unscoped on purpose: an enu
 
 The descriptor tables of `model_layout.hpp` give the same positions as data, so generic code (checks, the CLI, the writer) needs no per-model knowledge. `model_layout` holds three spans:
 
-- `input_channel`: `name` (also the table column), `unit`, and the domain `minimum` with `minimum_inclusive` (PAC2002 VX >= 0, MF 5.2 VX > 0, everything else unrestricted).
-- `output_channel`: `name` and `unit` (flags use "-").
-- `limit_channel`: the `.tir` `key`, a `limit_role` (`LOWER`, `UPPER` or `VALUE`; a LOWER is always directly followed by its UPPER) and the `default_value` (-inf for LOWER, +inf for UPPER, 1 m/s for VXLOW).
+- `input_channel`: `name` (also the table column), `unit`, the domain `minimum` with `minimum_inclusive` (PAC2002 VX >= 0, MF 5.2 VX > 0, everything else unrestricted) and `negated_by`.
+- `output_channel`: `name`, `unit` (flags use "-") and `negated_by` (flags `NONE`).
+- `limit_channel`: the `.tir` `key`, a `limit_role` (`LOWER`, `UPPER` or `VALUE`; a LOWER is always directly followed by its UPPER) the `default_value` (-inf for LOWER, +inf for UPPER, 1 m/s for VXLOW) and `negated_by` (the transform under which a LOWER/UPPER pair becomes (-upper, -lower); `NONE` for VALUE rows).
 
 The CSV result header has 15 columns, the input channels then the output channels:
 
@@ -91,7 +126,8 @@ The raw batch buffers are column-major (the layout of an `Eigen::MatrixXd`): `in
 The free checks of `model_checks.hpp` are public and return `std::expected`, so a caller can validate explicitly with a model built without the flag. `checked_evaluate_batch` combines them around `evaluate_batch` and is what the CLI uses; input errors are reported before numerical errors.
 
 - Recoverable problems are values: `std::expected<T, mf::error>`, or `std::expected<T, mf::batch_error>` (row index + error) for batches. `mf::error` = `error_code` + message + `location` (file, 1-based line, key). Codes: `IO`, `SYNTAX`, `INVALID_NUMBER`, `DUPLICATE_KEY`, `MISSING_KEY`, `INVALID_VALUE`, `UNSUPPORTED_UNIT`, `UNSUPPORTED_MODEL`, `NOT_IMPLEMENTED`, `INVALID_ARGUMENT` (wrong size, null buffer, bad limits vector), `INVALID_INPUT` (non-finite or out-of-domain input, naming the channel), `NUMERICAL` (non-finite output, naming the channel).
-- Warnings are data (`mf::warning`), returned by the loader; the library never prints. The CLI prints them as `mf: warning: ...`.
+- Warnings are data (`mf::warning`), returned by the loader; table-level warnings are `mf::batch_warning` (row index + warning), returned by `load_side_warning`; the identification warnings come from `identification_warnings`. The library never prints. The CLI prints them as `mf: warning: ...`.
+- `find_coordinate_system`, `transformed`, `convert_coordinate_system` and `loaded_side` are total: the identification carries its diagnostics (undetermined axes, warnings) as data and never fails. `io::convert_tir` returns `std::expected` and passes load errors through unchanged.
 - Kernels, `compute` and `compute_batch` are total and `noexcept`; bad numerics surface through `check_output(s)`.
 - `mf::model_failure` is the one library exception besides `std::bad_alloc`, and only the `evaluate*` functions of a model built with the flag throw it. `mf::cli::run` is the single place that catches exceptions.
 
@@ -99,11 +135,11 @@ The free checks of `model_checks.hpp` are public and return `std::expected`, so 
 
 `mf5x_model::compute` / `compute_batch` run `detail::mf5x_pipeline` (`include/magic_formula/detail/mf5x_kernels.hpp`), the same for every MF 5.x model:
 
-1. `mf5x_condition`: the VXLOW flag (`Vx < VXLOW`, Vx is never modified); the contact mask (raw Fz > 0 and clamped Fz > 0); branch-free clamps of Fz, SR, SA and IA to their limits (an infinite bound never moves a value); the clamp flags, masked by raw contact (a point with raw Fz <= 0 reports 0.0).
+1. `mf5x_condition`: the VXLOW flag (`Vx < VXLOW`, Vx is never modified); the contact mask (raw Fz and clamped Fz on the loaded side: `fz*sgn(FNOMIN) > 0`); branch-free clamps of Fz, SR, SA and IA to their limits (an infinite bound never moves a value); the clamp flags, masked by raw contact (a point on the unloaded side reports 0.0).
 2. `mf5x_evaluate`: the slip state (`evaluate_slip_state`), then the forms. Combined mode: the combined forces, the equivalent slip angles, Mz, Mx and My. Uncombined mode: Fx0, Fy0 and Mz0, with Mx and My.
 3. `contact.select(force, +0.0)` for Fx, Fy, Mz, Mx and My: a point without contact has exactly +0.0 forces and moments. The flags are copied from the conditioning.
 
-The echoed inputs are never clamped; only the model's internal copy is. Clamping, the Fz <= 0 zero rule and the flags stay on the hot path as selects, with no branch.
+The echoed inputs are never clamped; only the model's internal copy is. Clamping, the unloaded zero rule and the flags stay on the hot path as selects, with no branch.
 
 The PAC2002 / MF 5.2 differences are the closed set `mf5x_forms` (`mf5x_forms.hpp`), chosen at construction (see `research/pac2002-vs-mf52.md`):
 
@@ -160,12 +196,16 @@ The constexpr `UNITS` table in the parser is the single source of the accepted u
 
 `mf::cli::run`:
 
-1. parses the command line;
-2. loads the `.tir` file unchecked (`throw_if_model_failure` off);
-3. `io::read_model_inputs`: reads the table (header, mandatory unit line, rows; units converted to SI once) and arranges its columns in the model's `input_index` order; a table column that the model has no input for (P for MF 5.x) goes to `ignored_columns`;
-4. `checked_evaluate_batch`: input validation, the batch evaluation and the output check, on the whole table;
-5. diagnostics on `err`: load warnings, `--verbose` information, one warning per ignored column, then one warning per flag output that is set (first table line and row count);
-6. `io::write_results`: the 15-column CSV on `out`.
+1. parses the command line (`--system=iso|sae`, `--table-system=iso|sae`; the last occurrence wins; a bad value is a usage error);
+2. loads the `.tir` file unchecked (`throw_if_model_failure` off) and identifies it (`find_coordinate_system()`);
+3. with `--system`, converts the model (`convert_coordinate_system`, coefficient flips, only when its identified system differs); without it the model is evaluated as loaded, with no conversion;
+4. identifies the evaluated model and takes its `loaded_side()`;
+5. `io::read_model_inputs`: reads the table (header, mandatory unit line, rows; units converted to SI once) and arranges its columns in the model's `input_index` order; a table column that the model has no input for (P for MF 5.x) goes to `ignored_columns`;
+6. the table system is `--table-system` or the evaluated model's loaded side; when it differs, `convert_inputs` flips a copy of the table to the loaded side (the data conversion);
+7. `checked_evaluate_batch` evaluates the raw values; an error is relocated to the table file and line;
+8. `convert_outputs` brings the results back to the table system;
+9. diagnostics on `err`, in this order: load warnings, the identification warnings of the evaluated model (always), `--verbose` information (the source identification with every reading, the conversion applied, the table system), one warning per ignored column, the load-side warning of the table (`load_side_warning`), then one warning per flag output that is set;
+10. `io::write_results`: the 15-column CSV on `out`, the inputs echoed as read and the outputs in the table system.
 
 Output is all-or-nothing: nothing reaches stdout unless every row evaluated successfully. Exit codes 0 / 1 / 2.
 
@@ -178,11 +218,23 @@ Output is all-or-nothing: nothing reaches stdout unless every row evaluated succ
 **Data flow.**
 1. `load_tir` calls `_core.load_tir`, which runs the normal loader (`loaded_model`, unchecked) and moves it into a `Model`; a failure is returned as an `Error`.
 2. `evaluate` broadcasts the five channels with NumPy rules and packs one Fortran-ordered `(N, 5)` float64 matrix, then calls `evaluate_batch`. `evaluate_batch` takes such a matrix without a copy (any other layout or dtype is converted once).
-3. The adapter runs `checked_evaluate_batch` (or the unchecked `evaluate_batch`) with the GIL released, then moves the resulting matrix into a capsule-owned `(N, 10)` array. There is no output copy; the flag outputs stay floats (0.0 or 1.0).
+3. The adapter runs `checked_evaluate_batch` (or the shape check and `evaluate_batch` with `check=False`) and `load_side_warning` with the GIL released, then moves the resulting matrix into a capsule-owned `(N, 10)` array. There is no output copy; the flag outputs stay floats (0.0 or 1.0).
+
+**Coordinate systems.** `TireModel.find_coordinate_system()` returns a `CoordinateIdentification` (classification, per-axis `AxisDecision`, every `IndicatorReading`, warnings); `convert_coordinate_system(target)` returns a new `TireModel` with flipped coefficients; `convert_inputs` / `convert_outputs` expose the data conversion. `evaluate_batch(inputs, *, check=True)` and `evaluate(*, check=True, **inputs)` evaluate raw values and re-emit the load-side warnings as `MagicFormulaWarning`.
 
 **Error model.** The adapter returns errors as values (`Model | Error`) and never throws or catches; pybind11's dispatcher is its boundary. The Python layer raises `MagicFormulaError` with `code`, `message`, `file`, `line`, `key` and `row`. A wrong input shape is always `INVALID_ARGUMENT`, whatever `check` is; `check=False` skips input and output validation. Load warnings are emitted as `MagicFormulaWarning` and kept on `TireModel.warnings`.
 
 **Performance.** One virtual dispatch per batch, the same lane-templated kernels as the C++ API, no input copy for F-ordered float64 input, no output copy, GIL released during evaluation. Models are immutable, so Python threads can evaluate chunks in parallel.
+
+## Design patterns
+
+| Pattern | Where | Why |
+|---------|-------|-----|
+| Template Method (with the NVI) | `find_coordinate_system`, `transformed`, `convert_coordinate_system` on `tire_model`; `mf5x_model::rebuild` with the second-level hook `with_parameters` | The algorithms are written once on the base; the formulation supplies only what it alone knows: its nominal point, its coefficient storage and its constructor. |
+| Prototype-style rebuild | `rebuild` / `with_parameters` | A new immutable model with modified parameters, keeping forms, options and metadata, with no setters (immutability and thread safety stay). |
+| Table-driven design (open/closed) | `negated_by` on channels and limit pairs, `mf5x::COEFFICIENT_SIGNS`, `IDENTIFICATION_INDICATORS` | The sign behaviour of a quantity is data, like its unit. A new family adds rows, not code, and each row is unit-testable. |
+| Pure functions and lookup tables | the identification functions, `load_side_warning`, `plan_probes`, `read_probes`, `negate_number_text` | Every branch is reachable with literal inputs, so the model-dependent members have no branches. |
+| Errors and warnings as values | identification diagnostics, `convert_tir`, `load_side_warning` | Matches the error model; only `cli::run` catches. |
 
 ## Extending to MF 6.x
 
@@ -198,9 +250,16 @@ MF 6.0 / 6.1 / 6.2 (FITTYP 60 / 61 / 62) are currently rejected with `UNSUPPORTE
 8. **Open items (to be resolved by research before implementation).** The pressure unit and name (the unit line accepts only Pa for P today; another pressure unit is one row of the parser's unit table), whether and how pressure is clamped to PRESMIN / PRESMAX, and the value to use when the table has no P column.
 9. **Tests to add.** 100% line and branch on core, nothing skipped:
    - unit tests for each new kernel and for the coefficient validation (every branch), on both lane types, with every `select` predicate driven both ways;
-   - the batch-vs-point agreement test at the 1e-12 scaled tolerance, and the pipeline tests (flags, Fz <= 0, clamping, finite checks) for the new model;
+   - the batch-vs-point agreement test at the 1e-12 scaled tolerance, and the pipeline tests (flags, the unloaded rule, clamping, finite checks) for the new model;
    - layout tests (enum positions match the channel tables), routing tests (FITTYP 61 routes to the new model, 70 still gives `UNSUPPORTED_MODEL`), loader tests for the binding table and the pressure range;
    - a module test and a CLI test with a 6.x `.tir` file and a P column that is used; update the existing test that expects 6.x to be rejected.
 10. **Build registration.** Register every new header in `include/CMakeLists.txt` (`MF_PUBLIC_HEADERS`), every new source in `src/CMakeLists.txt` (`MF_LIB_SOURCES`) and every new test in `tests/unit/CMakeLists.txt` or `tests/module/CMakeLists.txt`. These are explicit, `LC_ALL=C` sorted lists with no globs; an unlisted file is not built and fails the registration check (`build-and-test` skill).
-11. **Python bindings.** They are layout-driven (channels, limits and output names come from the model layout), so they need no change; `evaluate(p=...)` becomes valid once the layout has a P input.
-12. **Docs.** Update this file, `CLAUDE.md` and the README "Models" section in the same PR.
+11. **Coordinate systems.** Keep the channel-name contract that the identification relies on: inputs `FZ`, `SA`, `SR`, `IA`; outputs `FX`, `FY`, `MZ`, `MY`; clamp flags named `*_CLAMPED`. Then, in order:
+    1. Declare `negated_by` on every new input and output channel and limit pair (for example turn slip and Vy per research; pressure, PRESMIN/PRESMAX and the flags are `NONE`).
+    2. Add an `mf6x::COEFFICIENT_SIGNS` table, derived from the equations and verified with the property pattern of `tests/unit/coordinate_conversion_test.cpp` (random coefficient sets, both transforms, round trip exact).
+    3. Implement `rebuild` and `with_parameters` for the new model (or reuse an `mf6x_model` base that owns them).
+    4. Select the coefficient table by model kind in `io::convert_tir`.
+    5. Make `reference_input()` return the nominal operating point, including the nominal pressure when the layout has a P input.
+    6. Append indicator rows to the table, or add a virtual `identification_indicators()` hook if a row must be family-specific (`find_coordinate_system(span)` already takes a table).
+12. **Python bindings.** They are layout-driven (channels, limits and output names come from the model layout), so they need no change; `evaluate(p=...)` becomes valid once the layout has a P input.
+13. **Docs.** Update this file, `CLAUDE.md` and the README "Models" section in the same PR.

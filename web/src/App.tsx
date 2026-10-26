@@ -2,26 +2,30 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AppHeader } from '@/components/AppHeader';
 import { EmptyState } from '@/components/EmptyState';
 import { ChartView } from '@/components/chart/ChartView';
+import { CoordinateSystemPanel } from '@/components/coordinates/CoordinateSystemPanel';
 import { InputEditor } from '@/components/inputs/InputEditor';
 import { ModelSummary } from '@/components/parameters/ModelSummary';
 import { ParameterPanel } from '@/components/parameters/ParameterPanel';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Input } from '@/components/ui/input';
 import type { ChartSpec } from '@/domain/chart-spec';
+import { convertSpec, describeConversion } from '@/domain/coordinates';
 import { defaultChartSpec } from '@/domain/defaults';
 import { describeError } from '@/domain/errors';
-import type { TirEntry, TirInspection } from '@/domain/model';
+import type { CoordinateSystem, TirEntry, TirInspection } from '@/domain/model';
 import { channelsChanged, referencesMissing } from '@/domain/chart';
 import { EXAMPLES } from '@/examples';
 import { downloadText } from '@/lib/download';
 import type { MfWasmModule } from '@/wasm/mf_wasm.js';
-import { inspectTir, loadSolver, setEntry } from '@/wasm/solver';
+import { convertModel, inspectTir, loadSolver, setEntry } from '@/wasm/solver';
 
 interface Document {
   fileName: string;
   text: string;
   original: TirEntry[];
   inspection: TirInspection;
+  /** Identity of the loaded file; parameter edits keep it. */
+  loadId: number;
 }
 
 export function App() {
@@ -34,6 +38,9 @@ export function App() {
     setSpec(next);
     setSpecEpoch((epoch) => epoch + 1);
   };
+  const [conversionNote, setConversionNote] = useState<string | null>(null);
+  const selectedSweep = useRef<string | undefined>(undefined);
+  const loadCounter = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -48,8 +55,19 @@ export function App() {
       return;
     }
     setError(null);
-    setDocument({ fileName, text, original: result.value.entries, inspection: result.value });
-    resetSpec(result.value.model === null ? null : defaultChartSpec(result.value.model, result.value.entries, 'chart'));
+    loadCounter.current += 1;
+    setDocument({
+      fileName,
+      text,
+      original: result.value.entries,
+      inspection: result.value,
+      loadId: loadCounter.current,
+    });
+    setConversionNote(null);
+    selectedSweep.current = undefined;
+    resetSpec(
+      result.value.model === null ? null : defaultChartSpec(result.value.model, result.value.entries, 'chart'),
+    );
   };
 
   const onFile = async (file: File | undefined) => {
@@ -85,6 +103,32 @@ export function App() {
       resetSpec(defaultChartSpec(next, inspected.value.entries, 'chart'));
     }
     return null;
+  };
+
+  const convert = (target: CoordinateSystem) => {
+    if (mf === null || document === null) {
+      return;
+    }
+    const converted = convertModel(mf, document.text, document.fileName, target);
+    if (!converted.ok) {
+      setError(`${document.fileName}: ${describeError(converted.error)}`);
+      return;
+    }
+    const inspected = inspectTir(mf, converted.value.text, document.fileName);
+    if (!inspected.ok) {
+      setError(`${document.fileName}: ${describeError(inspected.error)}`);
+      return;
+    }
+    setError(null);
+    setDocument({ ...document, text: converted.value.text, inspection: inspected.value });
+    const inputs = document.inspection.model?.inputs;
+    if (spec !== null && inputs !== undefined) {
+      const next = convertSpec(spec, inputs, converted.value.applied);
+      if (next !== spec) {
+        resetSpec(next);
+      }
+    }
+    setConversionNote(describeConversion(target, converted.value));
   };
 
   const save = () => {
@@ -149,6 +193,10 @@ export function App() {
                 entries={document.inspection.entries}
                 spec={spec}
                 onChange={setSpec}
+                initialSelectedId={selectedSweep.current}
+                onSelect={(id) => {
+                  selectedSweep.current = id;
+                }}
               />
             ) : (
               <p className="p-3 text-sm text-muted-foreground">
@@ -170,9 +218,17 @@ export function App() {
           <aside
             data-testid="model-pane"
             aria-label="Tire model"
-            className="flex min-w-0 flex-col bg-card lg:col-span-2 xl:col-span-1 xl:min-h-0 xl:border-l"
+            className="flex min-w-0 flex-col bg-card lg:col-span-2 xl:col-span-1 xl:min-h-0 xl:overflow-y-auto xl:border-l"
           >
             <ModelSummary model={model} warnings={warnings} />
+            {model !== null && (
+              <CoordinateSystemPanel
+                key={document.loadId}
+                identification={document.inspection.coordinates}
+                conversionNote={conversionNote}
+                onConvert={convert}
+              />
+            )}
             <ParameterPanel original={document.original} entries={document.inspection.entries} onEdit={edit} />
           </aside>
         </main>

@@ -27,6 +27,12 @@
   --chart-grid: oklch(0.915 0.012 165);
   --chart-axis: oklch(0.62 0.02 255);
   --chart-cursor: oklch(0.5 0.02 255);
+  --scene-ground: #e7e5e4;
+  --scene-tire: #3f3f46;
+  --scene-axis: #1d4ed8;
+  --scene-force: #b91c1c;
+  --scene-moment: #7c3aed;
+  --scene-angle: #047857;
 }
 
 .dark {
@@ -52,6 +58,12 @@
   --chart-grid: oklch(0.32 0.02 250);
   --chart-axis: oklch(0.55 0.02 250);
   --chart-cursor: oklch(0.72 0.02 250);
+  --scene-ground: #27272a;
+  --scene-tire: #a1a1aa;
+  --scene-axis: #60a5fa;
+  --scene-force: #f87171;
+  --scene-moment: #c4b5fd;
+  --scene-angle: #34d399;
 }
 
 @theme inline {

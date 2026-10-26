@@ -15,6 +15,7 @@ const inputs: InputChannel[] = ['FZ', 'SA', 'SR', 'IA', 'VX'].map((name) => ({
   unit: '-',
   minimum: 0,
   minimumInclusive: true,
+  negatedBy: name === 'FZ' ? 'VERTICAL' : name === 'SA' ? 'LATERAL' : 'NONE',
 }));
 const step = (variable: string, values: number[], colourMode: StepSpec['colourMode']): StepSpec => ({
   variable,

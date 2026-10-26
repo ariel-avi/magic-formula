@@ -3,8 +3,10 @@
 #include <Eigen/Core>
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <gtest/gtest.h>
 #include <ios>
@@ -227,12 +229,38 @@ namespace {
 
   /// Fixed text of the pressure warning for MF 5.2.
   constexpr std::string_view PRESSURE_WARNING_MF52 = "column P is ignored: MF 5.2 has no P input";
+
+  /// The start of the identification warning of the S-derived models (vertical axis ISO, lateral axis SAE).
+  constexpr std::string_view MIXED_WARNING_START = "mf: warning: coordinate system: the coefficients mix conventions";
+
+  /// The whole identification warning of the S-derived models.
+  constexpr std::string_view MIXED_WARNING =
+      "mf: warning: coordinate system: the coefficients mix conventions: the vertical axis is ISO (a loaded tire has "
+      "FZ > 0) but the lateral axis is SAE (dFy/dSA < 0); convert the model to ISO or SAE\n";
+
+  /// The S-derived models have a loaded-ISO vertical axis and an SAE lateral axis: exactly one identification warning,
+  /// the mixed-conventions one.
+  void expect_mixed_warning(const std::string &err) {
+    EXPECT_EQ(count_of(err, "mf: warning: coordinate system: "), 1U) << err;
+    EXPECT_EQ(count_of(err, MIXED_WARNING), 1U) << err;
+  }
+
+  /// The warning of an ISO table that mixes FZ signs, one row of the opposite sign.
+  std::string mixed_iso_fz_warning(std::string_view table, std::size_t line) {
+    return "mf: warning: " + data_file(table).string() + ":" + std::to_string(line) +
+           ": FZ < 0 in 1 row(s) of an ISO table: a loaded tire has FZ > 0 in ISO; these rows are lift-off (zero "
+           "forces and moments) (the table mixes FZ signs)\n";
+  }
 } // namespace
 
 TEST(cli_run, Run_PacSVectors_PrintsExpectedRows) {
   const run_result result = run_files("inputs_s_vectors.csv", "pac2002_S.tir");
   EXPECT_EQ(result.code, mf::cli::EXIT_OK);
-  EXPECT_TRUE(result.err.empty()) << result.err;
+  // The coefficients mix conventions (FNOMIN > 0 but dFy/dSA < 0), and the FZ = -100 row (line 10) of the ISO table is
+  // a lift-off.
+  expect_mixed_warning(result.err);
+  EXPECT_TRUE(result.err.ends_with(mixed_iso_fz_warning("inputs_s_vectors.csv", 10))) << result.err;
+  EXPECT_EQ(count_of(result.err, "mf: warning: "), 2U) << result.err;
 
   const std::vector<std::string> lines = lines_of(result.out);
   ASSERT_EQ(lines.size(), 7U);
@@ -274,7 +302,10 @@ TEST(cli_run, Run_Mf52Vectors_PrintsM1M2M5) {
   // The PAC2002-only camber factors of the file give one warning.
   EXPECT_TRUE(result.err.contains("mf: warning: ")) << result.err;
   EXPECT_TRUE(result.err.contains("LGAX, LGAY, LGAZ")) << result.err;
-  EXPECT_EQ(count_of(result.err, "mf: warning: "), 1U) << result.err;
+  // The load warning, the identification warning and the load-side warning.
+  expect_mixed_warning(result.err);
+  EXPECT_TRUE(result.err.ends_with(mixed_iso_fz_warning("inputs_s_vectors.csv", 10))) << result.err;
+  EXPECT_EQ(count_of(result.err, "mf: warning: "), 3U) << result.err;
 
   const std::vector<result_row> rows = rows_of(result.out);
   ASSERT_EQ(rows.size(), 6U);
@@ -292,7 +323,10 @@ TEST(cli_run, Run_Mf52UserPff_ExitsZeroWithFiniteRowsEqualToMf52Run) {
   // PROPERTY_FILE_FORMAT = 'USER' with FITTYP 6 routes to MF 5.2: same numbers, no warning.
   const run_result user = run_files("inputs_s_vectors.csv", "mf52_user_pff.tir");
   EXPECT_EQ(user.code, mf::cli::EXIT_OK) << user.err;
-  EXPECT_TRUE(user.err.empty()) << user.err;
+  // No load warning: only the identification warning and the load-side warning.
+  expect_mixed_warning(user.err);
+  EXPECT_TRUE(user.err.ends_with(mixed_iso_fz_warning("inputs_s_vectors.csv", 10))) << user.err;
+  EXPECT_EQ(count_of(user.err, "mf: warning: "), 2U) << user.err;
 
   const std::vector<result_row> rows = rows_of(user.out);
   ASSERT_EQ(rows.size(), 6U);
@@ -313,7 +347,10 @@ TEST(cli_run, Run_DegreesTable_EqualsCsvRun) {
   const run_result degrees = run_files("inputs_degrees.txt", "pac2002_S.tir");
   ASSERT_EQ(reference.code, mf::cli::EXIT_OK);
   ASSERT_EQ(degrees.code, mf::cli::EXIT_OK) << degrees.err;
-  EXPECT_TRUE(degrees.err.empty()) << degrees.err;
+  // The FZ = -100 row is on line 14 of this table.
+  expect_mixed_warning(degrees.err);
+  EXPECT_TRUE(degrees.err.ends_with(mixed_iso_fz_warning("inputs_degrees.txt", 14))) << degrees.err;
+  EXPECT_EQ(count_of(degrees.err, "mf: warning: "), 2U) << degrees.err;
   EXPECT_EQ(lines_of(degrees.out).front(), mf::io::results_header(mf::mf5x::PAC2002_LAYOUT));
 
   const std::vector<result_row> expected = rows_of(reference.out);
@@ -343,7 +380,8 @@ TEST(cli_run, Run_DegreesTable_EqualsCsvRun) {
 TEST(cli_run, Run_Uncombined_PrintsPureForces) {
   const run_result result = run_files("inputs_s_vectors.csv", "pac2002_S.tir", {"--uncombined"});
   EXPECT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
-  EXPECT_TRUE(result.err.empty()) << result.err;
+  expect_mixed_warning(result.err);
+  EXPECT_EQ(count_of(result.err, "mf: warning: "), 2U) << result.err;
   const std::vector<result_row> rows = rows_of(result.out);
   ASSERT_EQ(rows.size(), 6U);
   // Row 3 has kappa = 0.1 and alpha = 0.1; pure slip leaves Fx0 of V2 uncut by the combined-slip weighting.
@@ -360,15 +398,19 @@ TEST(cli_run, Run_Verbose_PrintsModelMetadataAndIgnoredKeys) {
   EXPECT_TRUE(result.err.contains(
       "mf: info: ignored keys (7): FILE_TYPE, FILE_VERSION, FILE_FORMAT, LCZ, LSGKP, LSGAL, LGYR\n"))
       << result.err;
-  EXPECT_EQ(count_of(result.err, "mf: info: "), 3U) << result.err;
-  EXPECT_EQ(count_of(result.err, "mf: warning: "), 0U) << result.err;
+  // The model line, the metadata line, the ignored keys, the identification line, 29 readings and the table line.
+  EXPECT_EQ(count_of(result.err, "mf: info: "), 3U + 1U + 29U + 1U) << result.err;
+  // The identification warning and the load-side warning of the FZ = -100 row.
+  EXPECT_EQ(count_of(result.err, "mf: warning: "), 2U) << result.err;
   EXPECT_EQ(lines_of(result.out).size(), 7U);
 }
 
 TEST(cli_run, Run_PressureColumn_WarnsOnceAndSucceeds) {
   const run_result result = run_files("inputs_pressure.csv", "pac2002_S.tir");
   EXPECT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
-  EXPECT_EQ(count_of(result.err, "mf: warning: "), 1U) << result.err;
+  // The identification warning and the pressure warning.
+  EXPECT_EQ(count_of(result.err, "mf: warning: "), 2U) << result.err;
+  expect_mixed_warning(result.err);
   EXPECT_EQ(count_of(result.err, PRESSURE_WARNING), 1U) << result.err;
   EXPECT_TRUE(result.err.contains(data_file("inputs_pressure.csv").string() + ": " + std::string(PRESSURE_WARNING)))
       << result.err;
@@ -398,7 +440,8 @@ TEST(cli_run, Run_Ranges_OneWarningPerVariable) {
   EXPECT_TRUE(result.err.contains(table + ":9: FZ outside the property-file range in 2 row(s); "
                                           "evaluated at the limit\n"))
       << result.err;
-  EXPECT_EQ(count_of(result.err, "mf: warning: "), 4U) << result.err;
+  // The four range warnings and the identification warning.
+  EXPECT_EQ(count_of(result.err, "mf: warning: "), 5U) << result.err;
 
   const std::expected<mf::io::loaded_model, mf::error> loaded =
       mf::io::load_tire_model_file(data_file("pac2002_S_rng.tir"));
@@ -453,7 +496,8 @@ TEST(cli_run, Run_LowSpeedPac2002_WarnsVxlowOnce) {
   EXPECT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
   const std::string table = data_file("inputs_low_speed.csv").string();
   EXPECT_TRUE(result.err.contains(table + ":4: VX below VXLOW in 2 row(s); VXLOW is not applied\n")) << result.err;
-  EXPECT_EQ(count_of(result.err, "mf: warning: "), 1U) << result.err;
+  // The identification warning and the VXLOW warning.
+  EXPECT_EQ(count_of(result.err, "mf: warning: "), 2U) << result.err;
   EXPECT_EQ(rows_of(result.out).size(), 2U);
 }
 
@@ -591,7 +635,8 @@ TEST(cli_run, Run_FailingOutputStream_ReportsCannotWrite) {
   failing_buffer buffer;
   std::ostream out(&buffer);
   std::ostringstream err;
-  const std::vector<std::string> arguments = file_arguments("inputs_s_vectors.csv", "pac2002_S.tir");
+  // A table and a model without any warning, so that stderr holds only the output failure.
+  const std::vector<std::string> arguments = file_arguments("inputs_sae.csv", "pac2002_S_sae.tir");
   std::vector<std::string_view> argv{"mf"};
   argv.insert(argv.end(), arguments.begin(), arguments.end());
   const int code = mf::cli::run(argv, out, err);
@@ -605,7 +650,7 @@ TEST(cli_run, Run_ThrowingOutputStream_CaughtExit1) {
   std::ostream out(&buffer);
   out.exceptions(std::ios::badbit);
   std::ostringstream err;
-  const std::vector<std::string> arguments = file_arguments("inputs_s_vectors.csv", "pac2002_S.tir");
+  const std::vector<std::string> arguments = file_arguments("inputs_sae.csv", "pac2002_S_sae.tir");
   std::vector<std::string_view> argv{"mf"};
   argv.insert(argv.end(), arguments.begin(), arguments.end());
   const int code = mf::cli::run(argv, out, err);
@@ -645,7 +690,8 @@ TEST(cli, Run_RangesFixture_FlagColumnsMatchWarnings) {
   EXPECT_TRUE(result.err.contains(sa)) << result.err;
   EXPECT_TRUE(result.err.contains(ia)) << result.err;
   EXPECT_TRUE(result.err.contains(fz)) << result.err;
-  EXPECT_EQ(count_of(result.err, "mf: warning: "), 4U) << result.err;
+  // The four range warnings and the identification warning.
+  EXPECT_EQ(count_of(result.err, "mf: warning: "), 5U) << result.err;
   const std::size_t at_fz = result.err.find(fz);
   const std::size_t at_sr = result.err.find(sr);
   const std::size_t at_sa = result.err.find(sa);
@@ -679,7 +725,10 @@ TEST(cli, Run_PressureColumn_Pac2002Wording) {
   const run_result result = run_files("inputs_pressure.csv", "pac2002_S.tir");
   ASSERT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
   const std::string table = data_file("inputs_pressure.csv").string();
-  EXPECT_EQ(result.err, "mf: warning: " + table + ": " + std::string(PRESSURE_WARNING) + "\n");
+  expect_mixed_warning(result.err);
+  EXPECT_TRUE(result.err.ends_with("mf: warning: " + table + ": " + std::string(PRESSURE_WARNING) + "\n"))
+      << result.err;
+  EXPECT_EQ(count_of(result.err, "mf: warning: "), 2U) << result.err;
   const std::vector<result_row> rows = rows_of(result.out);
   ASSERT_EQ(rows.size(), 1U);
   expect_no_flags(rows[0]);
@@ -692,11 +741,29 @@ TEST(cli, Run_PressureColumn_Mf52Wording) {
   EXPECT_TRUE(result.err.contains(table + ": " + std::string(PRESSURE_WARNING_MF52) + "\n")) << result.err;
   EXPECT_EQ(count_of(result.err, PRESSURE_WARNING_MF52), 1U) << result.err;
   EXPECT_EQ(count_of(result.err, PRESSURE_WARNING), 0U) << result.err;
-  // The second warning is the load warning of the file (PAC2002-only camber factors).
-  EXPECT_EQ(count_of(result.err, "mf: warning: "), 2U) << result.err;
+  // The other warnings are the load warning of the file (PAC2002-only camber factors) and the identification warning.
+  expect_mixed_warning(result.err);
+  EXPECT_EQ(count_of(result.err, "mf: warning: "), 3U) << result.err;
   const std::vector<result_row> rows = rows_of(result.out);
   ASSERT_EQ(rows.size(), 1U);
   expect_no_flags(rows[0]);
+}
+
+TEST(cli, Run_PressureColumnAndMixedFz_IgnoredColumnWarningBeforeLoadSideWarning) {
+  const run_result result = run_files("inputs_pressure_mixed_fz.csv", "pac2002_S.tir");
+  ASSERT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
+  const std::string table = data_file("inputs_pressure_mixed_fz.csv").string();
+  const std::string pressure = "mf: warning: " + table + ": " + std::string(PRESSURE_WARNING) + "\n";
+  const std::string load_side = mixed_iso_fz_warning("inputs_pressure_mixed_fz.csv", 5);
+  const std::size_t identification = result.err.find(MIXED_WARNING_START);
+  const std::size_t pressure_at = result.err.find(pressure);
+  const std::size_t load_side_at = result.err.find(load_side);
+  ASSERT_NE(identification, std::string::npos) << result.err;
+  ASSERT_NE(pressure_at, std::string::npos) << result.err;
+  ASSERT_NE(load_side_at, std::string::npos) << result.err;
+  EXPECT_LT(identification, pressure_at) << result.err;
+  EXPECT_LT(pressure_at, load_side_at) << result.err;
+  EXPECT_EQ(count_of(result.err, "mf: warning: "), 3U) << result.err;
 }
 
 TEST(cli, Run_NegativeVx_DomainErrorAtLine_NoStdout) {
@@ -733,7 +800,8 @@ TEST(cli, Run_OverflowFz_NumericalErrorAtLine) {
 TEST(cli, Run_Uncombined_PureSlipValuesAndFlags) {
   const run_result result = run_files("inputs_s_vectors.csv", "pac2002_S.tir", {"--uncombined"});
   ASSERT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
-  EXPECT_TRUE(result.err.empty()) << result.err;
+  expect_mixed_warning(result.err);
+  EXPECT_EQ(count_of(result.err, "mf: warning: "), 2U) << result.err;
   const std::vector<result_row> rows = rows_of(result.out);
   ASSERT_EQ(rows.size(), 6U);
   // Pure Fx0 of V2 and pure Fy0 / Mz0 of V3, whatever the other slip of the row.
@@ -758,10 +826,43 @@ TEST(cli, Run_Verbose_InfoBeforeIgnoredColumnWarning) {
   const std::size_t column_warning = result.err.find(std::string(PRESSURE_WARNING));
   ASSERT_NE(last_info, std::string::npos) << result.err;
   ASSERT_NE(column_warning, std::string::npos) << result.err;
-  EXPECT_EQ(result.err.find("mf: info: model PAC2002\n"), 0U) << result.err;
+  // The identification warning precedes the first info line.
+  EXPECT_TRUE(result.err.contains("\nmf: info: model PAC2002\n")) << result.err;
   EXPECT_LT(last_info, column_warning) << result.err;
-  EXPECT_EQ(count_of(result.err, "mf: info: "), 3U) << result.err;
-  EXPECT_EQ(count_of(result.err, "mf: warning: "), 1U) << result.err;
+  EXPECT_EQ(count_of(result.err, "mf: info: "), 3U + 1U + 29U + 1U) << result.err;
+  // The identification warning and the pressure warning.
+  EXPECT_EQ(count_of(result.err, "mf: warning: "), 2U) << result.err;
+}
+
+TEST(cli_run, Run_SaeModelSaeTable_NoCoordinateOrLoadSideWarnings) {
+  const run_result result = run_files("inputs_sae.csv", "pac2002_S_sae.tir");
+  ASSERT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
+  EXPECT_FALSE(result.err.contains("coordinate system:")) << result.err;
+  EXPECT_FALSE(result.err.contains("lift-off")) << result.err;
+  EXPECT_TRUE(result.err.empty()) << result.err;
+  const std::vector<result_row> rows = rows_of(result.out);
+  ASSERT_EQ(rows.size(), 4U);
+  // The table is echoed as read and the loaded SAE tire produces forces.
+  expect_inputs(rows[0], -4000.0, 0.0, 0.1, 0.0, 10.0);
+  expect_inputs(rows[1], -4000.0, 0.05, 0.0, 0.0, 10.0);
+  EXPECT_NE(bits(rows[0].fx), bits(0.0));
+  EXPECT_NE(bits(rows[1].fy), bits(0.0));
+}
+
+TEST(cli_run, Run_SaeModelIsoTable_WarnsLoadSideSaeAtFirstPositiveLine) {
+  const run_result result = run_files("inputs_s_vectors.csv", "pac2002_S_sae.tir");
+  ASSERT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
+  EXPECT_EQ(result.err, "mf: warning: " + data_file("inputs_s_vectors.csv").string() +
+                            ":5: FZ > 0 in 4 row(s) of an SAE table: a loaded tire has FZ < 0 in SAE; these rows are "
+                            "lift-off (zero forces and moments) (the table mixes FZ signs)\n");
+  const std::vector<result_row> rows = rows_of(result.out);
+  ASSERT_EQ(rows.size(), 6U);
+  // The four positive rows and the zero row are lift-offs of an SAE model; FZ = -100 is loaded.
+  for (std::size_t index = 0; index < 5; ++index) {
+    expect_zero_outputs(rows[index]);
+  }
+  EXPECT_EQ(bits(rows[5].fz), bits(-100.0));
+  EXPECT_NE(bits(std::abs(rows[5].fy)), bits(0.0));
 }
 
 TEST(cli_run, Run_NonStdExceptionFromOutputStream_CaughtExit1) {
@@ -769,10 +870,188 @@ TEST(cli_run, Run_NonStdExceptionFromOutputStream_CaughtExit1) {
   std::ostream out(&buffer);
   out.exceptions(std::ios::badbit);
   std::ostringstream err;
-  const std::vector<std::string> arguments = file_arguments("inputs_s_vectors.csv", "pac2002_S.tir");
+  const std::vector<std::string> arguments = file_arguments("inputs_sae.csv", "pac2002_S_sae.tir");
   std::vector<std::string_view> argv{"mf"};
   argv.insert(argv.end(), arguments.begin(), arguments.end());
   const int code = mf::cli::run(argv, out, err);
   EXPECT_EQ(code, mf::cli::EXIT_ERROR);
   EXPECT_EQ(err.str(), "mf: error: unknown exception\n");
+}
+
+namespace {
+  /// Scale of the force columns of the S-family fixtures [N] for the scaled comparisons.
+  constexpr double FORCE_SCALE_N = 4000.0;
+
+  /// Scale of the moment columns [N*m].
+  constexpr double MOMENT_SCALE_NM = 4000.0 * 0.3;
+
+  /// `got` equals `want` with the vertical transform applied by `vertical_sign` (+1: same system, -1: the other one):
+  /// FZ, FY, MZ and MY are multiplied by it, SA, SR, IA, VX, FX, MX and the flags are equal. Inputs and flags compare
+  /// with ==, outputs within the scaled batch tolerance (the sign of an exact zero may differ between the paths).
+  void expect_row_matches(const result_row &got, const result_row &want, double vertical_sign, std::size_t index) {
+    constexpr double tol = 1e-12;
+    EXPECT_EQ(got.fz, vertical_sign * want.fz) << "FZ row " << index;
+    EXPECT_EQ(got.sa, want.sa) << "SA row " << index;
+    EXPECT_EQ(got.sr, want.sr) << "SR row " << index;
+    EXPECT_EQ(got.ia, want.ia) << "IA row " << index;
+    EXPECT_EQ(got.vx, want.vx) << "VX row " << index;
+    EXPECT_TRUE(near_scaled(got.fx, want.fx, tol, FORCE_SCALE_N)) << "FX row " << index;
+    EXPECT_TRUE(near_scaled(got.fy, vertical_sign * want.fy, tol, FORCE_SCALE_N)) << "FY row " << index;
+    EXPECT_TRUE(near_scaled(got.mz, vertical_sign * want.mz, tol, MOMENT_SCALE_NM)) << "MZ row " << index;
+    EXPECT_TRUE(near_scaled(got.mx, want.mx, tol, MOMENT_SCALE_NM)) << "MX row " << index;
+    EXPECT_TRUE(near_scaled(got.my, vertical_sign * want.my, tol, MOMENT_SCALE_NM)) << "MY row " << index;
+    EXPECT_EQ(got.fz_clamped, want.fz_clamped) << "FZ_CLAMPED row " << index;
+    EXPECT_EQ(got.sr_clamped, want.sr_clamped) << "SR_CLAMPED row " << index;
+    EXPECT_EQ(got.sa_clamped, want.sa_clamped) << "SA_CLAMPED row " << index;
+    EXPECT_EQ(got.ia_clamped, want.ia_clamped) << "IA_CLAMPED row " << index;
+    EXPECT_EQ(got.below_vxlow, want.below_vxlow) << "BELOW_VXLOW row " << index;
+  }
+
+  /// The first `count` data rows of both runs match as `expect_row_matches` defines.
+  void expect_runs_match(const run_result &got, const run_result &want, double vertical_sign, std::size_t count) {
+    const std::vector<result_row> got_rows = rows_of(got.out);
+    const std::vector<result_row> want_rows = rows_of(want.out);
+    ASSERT_GE(got_rows.size(), count);
+    ASSERT_GE(want_rows.size(), count);
+    for (std::size_t index = 0; index < count; ++index) {
+      expect_row_matches(got_rows[index], want_rows[index], vertical_sign, index);
+    }
+  }
+
+  /// Bit pattern of `value` with -0 folded to +0 (adding +0.0 turns -0 into +0 and changes nothing else).
+  std::uint64_t zero_normalised_bits(double value) {
+    return std::bit_cast<std::uint64_t>(value + 0.0);
+  }
+
+  /// The first `count` data rows of both runs are bit-equal field by field, +0 and -0 counting as equal.
+  void expect_runs_bit_equal(const run_result &got, const run_result &want, std::size_t count) {
+    const std::vector<result_row> got_rows = rows_of(got.out);
+    const std::vector<result_row> want_rows = rows_of(want.out);
+    ASSERT_GE(got_rows.size(), count);
+    ASSERT_GE(want_rows.size(), count);
+    for (std::size_t index = 0; index < count; ++index) {
+      const result_row &g = got_rows[index];
+      const result_row &w = want_rows[index];
+      EXPECT_EQ(zero_normalised_bits(g.fz), zero_normalised_bits(w.fz)) << "FZ row " << index;
+      EXPECT_EQ(zero_normalised_bits(g.sa), zero_normalised_bits(w.sa)) << "SA row " << index;
+      EXPECT_EQ(zero_normalised_bits(g.sr), zero_normalised_bits(w.sr)) << "SR row " << index;
+      EXPECT_EQ(zero_normalised_bits(g.ia), zero_normalised_bits(w.ia)) << "IA row " << index;
+      EXPECT_EQ(zero_normalised_bits(g.vx), zero_normalised_bits(w.vx)) << "VX row " << index;
+      EXPECT_EQ(zero_normalised_bits(g.fx), zero_normalised_bits(w.fx)) << "FX row " << index;
+      EXPECT_EQ(zero_normalised_bits(g.fy), zero_normalised_bits(w.fy)) << "FY row " << index;
+      EXPECT_EQ(zero_normalised_bits(g.mz), zero_normalised_bits(w.mz)) << "MZ row " << index;
+      EXPECT_EQ(zero_normalised_bits(g.mx), zero_normalised_bits(w.mx)) << "MX row " << index;
+      EXPECT_EQ(zero_normalised_bits(g.my), zero_normalised_bits(w.my)) << "MY row " << index;
+      EXPECT_EQ(g.fz_clamped, w.fz_clamped) << "FZ_CLAMPED row " << index;
+      EXPECT_EQ(g.sr_clamped, w.sr_clamped) << "SR_CLAMPED row " << index;
+      EXPECT_EQ(g.sa_clamped, w.sa_clamped) << "SA_CLAMPED row " << index;
+      EXPECT_EQ(g.ia_clamped, w.ia_clamped) << "IA_CLAMPED row " << index;
+      EXPECT_EQ(g.below_vxlow, w.below_vxlow) << "BELOW_VXLOW row " << index;
+    }
+  }
+} // namespace
+
+TEST(cli_run, Run_IsoModelSaeTable_ThreeWaysAgree) {
+  const run_result sae_model = run_files("inputs_sae.csv", "pac2002_S_sae.tir");
+  const run_result converted = run_files("inputs_sae.csv", "pac2002_S_iso.tir", {"--system=sae"});
+  const run_result table_converted = run_files("inputs_sae.csv", "pac2002_S_iso.tir", {"--table-system=sae"});
+  for (const run_result *result : {&sae_model, &converted, &table_converted}) {
+    ASSERT_EQ(result->code, mf::cli::EXIT_OK) << result->err;
+    EXPECT_FALSE(result->err.contains("coordinate system:")) << result->err;
+    EXPECT_FALSE(result->err.contains("lift-off")) << result->err;
+    EXPECT_EQ(lines_of(result->out).size(), 5U);
+    EXPECT_EQ(lines_of(result->out).front(), lines_of(sae_model.out).front());
+  }
+  EXPECT_EQ(converted.out, sae_model.out);
+  expect_runs_bit_equal(table_converted, sae_model, 4);
+}
+
+TEST(cli_run, Run_SaeModel_FlipsFyMzMyVsIsoModel) {
+  const run_result sae = run_files("inputs_sae.csv", "pac2002_S_sae.tir");
+  const run_result iso = run_files("inputs_s_vectors.csv", "pac2002_S_iso.tir");
+  ASSERT_EQ(sae.code, mf::cli::EXIT_OK) << sae.err;
+  ASSERT_EQ(iso.code, mf::cli::EXIT_OK) << iso.err;
+  expect_runs_match(sae, iso, -1.0, 4);
+}
+
+TEST(cli_run, Run_MixedModel_WarnsMixed) {
+  const run_result result = run_files("inputs_s_vectors.csv", "pac2002_S.tir");
+  ASSERT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
+  EXPECT_EQ(count_of(result.err, MIXED_WARNING), 1U) << result.err;
+}
+
+TEST(cli_run, Run_MixedModelSystemIso_NoMixedWarning) {
+  const run_result result = run_files("inputs_s_vectors.csv", "pac2002_S.tir", {"--system=iso"});
+  ASSERT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
+  EXPECT_FALSE(result.err.contains("mix conventions")) << result.err;
+  const std::vector<result_row> rows = rows_of(result.out);
+  ASSERT_EQ(rows.size(), 6U);
+  EXPECT_EQ(rows[1].sa, 0.05);
+  EXPECT_EQ(rows[1].fz, 4000.0);
+  EXPECT_GT(rows[1].fy, 0.0);
+}
+
+TEST(cli_run, Run_IsoModelNegativeFz_WarnsLoadSideAtLine) {
+  const run_result result = run_files("inputs_s_vectors.csv", "pac2002_S_iso.tir");
+  ASSERT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
+  EXPECT_TRUE(result.err.contains(mixed_iso_fz_warning("inputs_s_vectors.csv", 10))) << result.err;
+  EXPECT_EQ(count_of(result.err, "mf: warning: "), 1U) << result.err;
+}
+
+TEST(cli_run, Run_Verbose_PrintsIdentificationAndReadings) {
+  const run_result result = run_files("inputs_s_vectors.csv", "pac2002_S_iso.tir", {"--verbose"});
+  ASSERT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
+  EXPECT_TRUE(result.err.contains("mf: info: coordinate system of the model: ISO; vertical POSITIVE (DECIDED, "
+                                  "confidence 1.00); lateral POSITIVE (DECIDED, confidence 1.00)\n"))
+      << result.err;
+  EXPECT_EQ(count_of(result.err, "mf: info: coordinate indicator "), 29U) << result.err;
+  EXPECT_TRUE(result.err.contains("mf: info: coordinate indicator FZ0 at 1 x F'z0 (4000 N): 4000 N, normalised 1, "
+                                  "VOTE, vote +1, weight 1\n"))
+      << result.err;
+  EXPECT_TRUE(result.err.contains("mf: info: table in ISO; the model is loaded at FZ > 0\n")) << result.err;
+  EXPECT_FALSE(result.err.contains("model converted")) << result.err;
+}
+
+TEST(cli_run, Run_VerboseSystemSae_PrintsConversionAndTableLines) {
+  const run_result result = run_files("inputs_sae.csv", "pac2002_S_iso.tir", {"--verbose", "--system=sae"});
+  ASSERT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
+  EXPECT_TRUE(
+      result.err.contains("mf: info: model converted to SAE (vertical transform: yes, lateral transform: no)\n"))
+      << result.err;
+  EXPECT_TRUE(result.err.contains("mf: info: table in SAE; the model is loaded at FZ < 0\n")) << result.err;
+}
+
+TEST(cli_run, Run_SystemSameAsModel_EmptyPlanByteIdenticalStdout) {
+  const run_result plain = run_files("inputs_s_vectors.csv", "pac2002_S_iso.tir");
+  const run_result same = run_files("inputs_s_vectors.csv", "pac2002_S_iso.tir", {"--verbose", "--system=iso"});
+  ASSERT_EQ(plain.code, mf::cli::EXIT_OK) << plain.err;
+  ASSERT_EQ(same.code, mf::cli::EXIT_OK) << same.err;
+  EXPECT_TRUE(same.err.contains("model converted to ISO (vertical transform: no, lateral transform: no)")) << same.err;
+  EXPECT_EQ(same.out, plain.out);
+}
+
+TEST(cli_run, Run_MixedModelSystemSae_BothTransforms) {
+  const run_result result = run_files("inputs_sae.csv", "pac2002_S.tir", {"--verbose", "--system=sae"});
+  ASSERT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
+  EXPECT_TRUE(result.err.contains("(vertical transform: yes, lateral transform: yes)")) << result.err;
+}
+
+TEST(cli_run, Run_TableSystemIsoOnSaeModel_ConvertsData) {
+  const run_result converted = run_files("inputs_s_vectors.csv", "pac2002_S_sae.tir", {"--table-system=iso"});
+  const run_result iso = run_files("inputs_s_vectors.csv", "pac2002_S_iso.tir");
+  ASSERT_EQ(converted.code, mf::cli::EXIT_OK) << converted.err;
+  ASSERT_EQ(iso.code, mf::cli::EXIT_OK) << iso.err;
+  expect_runs_match(converted, iso, 1.0, 6);
+  EXPECT_TRUE(converted.err.contains(mixed_iso_fz_warning("inputs_s_vectors.csv", 10))) << converted.err;
+  EXPECT_TRUE(iso.err.contains(mixed_iso_fz_warning("inputs_s_vectors.csv", 10))) << iso.err;
+}
+
+TEST(cli_run, Run_InvalidSystem_Exit2) {
+  const run_result result = run_cli({"--system=xyz", "a.csv", "b.tir"});
+  expect_usage_run(result, "invalid value 'xyz' for --system (expected iso or sae)\n");
+}
+
+TEST(cli_run, Run_InvalidTableSystem_Exit2) {
+  const run_result result = run_cli({"--table-system=xyz", "a.csv", "b.tir"});
+  expect_usage_run(result, "invalid value 'xyz' for --table-system (expected iso or sae)\n");
 }

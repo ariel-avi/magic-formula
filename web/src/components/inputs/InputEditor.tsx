@@ -21,10 +21,20 @@ interface InputEditorProps {
   entries: readonly TirEntry[];
   spec: ChartSpec;
   onChange: (spec: ChartSpec) => void;
+  /** Sweep to select on mount, when the spec still has it (survives a remount). */
+  initialSelectedId?: string;
+  /** Called whenever the selected sweep changes. */
+  onSelect?: (id: string) => void;
 }
 
-export function InputEditor({ model, entries, spec, onChange }: InputEditorProps) {
-  const [selectedId, setSelectedId] = useState(spec.sweeps[0].id);
+export function InputEditor({ model, entries, spec, onChange, initialSelectedId, onSelect }: InputEditorProps) {
+  const [selectedId, selectSweep] = useState(
+    spec.sweeps.some((sweep) => sweep.id === initialSelectedId) ? (initialSelectedId as string) : spec.sweeps[0].id,
+  );
+  const setSelectedId = (id: string) => {
+    selectSweep(id);
+    onSelect?.(id);
+  };
   const index = sweepIndexOf(spec.sweeps, selectedId);
 
   const add = () => {

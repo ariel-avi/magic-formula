@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <gtest/gtest.h>
+#include <limits>
 #include <magic_formula/detail/lanes.hpp>
 #include <magic_formula/detail/mf5x_kernels.hpp>
 #include <magic_formula/evaluation_types.hpp>
@@ -135,18 +136,18 @@ namespace {
   }
 
   std::vector<condition_row> condition_on_points(const Eigen::VectorXd &limits,
-                                                 const std::vector<mf::test::point> &points) {
+                                                 const std::vector<mf::test::point> &points, double load_sign = ONE) {
     std::vector<condition_row> rows;
     for (const mf::test::point &p : points) {
-      rows.push_back(condition_row_of(kernels::mf5x_condition<point_lane>(limits, lanes_of(p)), 0));
+      rows.push_back(condition_row_of(kernels::mf5x_condition<point_lane>(limits, lanes_of(p), load_sign), 0));
     }
     return rows;
   }
 
   std::vector<condition_row> condition_on_block(const Eigen::VectorXd &limits,
-                                                const std::vector<mf::test::point> &points) {
+                                                const std::vector<mf::test::point> &points, double load_sign = ONE) {
     const kernels::conditioned_lanes<block_lane> cond =
-        kernels::mf5x_condition<block_lane>(limits, block_inputs_of(points));
+        kernels::mf5x_condition<block_lane>(limits, block_inputs_of(points), load_sign);
     std::vector<condition_row> rows;
     for (Eigen::Index i = 0; i < static_cast<Eigen::Index>(points.size()); ++i) {
       rows.push_back(condition_row_of(cond, i));
@@ -176,9 +177,9 @@ namespace {
   }
 
   // The conditioning of `points` on point lanes (index 0) and on one block lane (index 1).
-  std::array<std::vector<condition_row>, 2> condition_on_both(const Eigen::VectorXd &limits,
-                                                              const std::vector<mf::test::point> &points) {
-    return {condition_on_points(limits, points), condition_on_block(limits, points)};
+  std::array<std::vector<condition_row>, 2>
+  condition_on_both(const Eigen::VectorXd &limits, const std::vector<mf::test::point> &points, double load_sign = ONE) {
+    return {condition_on_points(limits, points, load_sign), condition_on_block(limits, points, load_sign)};
   }
 
   // The pipeline of `points` on point lanes (index 0) and on one block lane (index 1).
@@ -376,7 +377,91 @@ TEST(mf5x_pipeline, Condition_VxNeverModified) {
   }
 }
 
+TEST(mf5x_pipeline, Condition_NegativeLoadSign_NegativeFzInContact) {
+  std::vector<mf::test::point> points;
+  points.push_back(pt(-4000.0, 0.1, 0.05, 0.02));
+  points.push_back(pt(-1e-300, 0.1, 0.05, 0.02));
+  points.push_back(pt(-EXTREME, 0.1, 0.05, 0.02));
+  const auto runs = condition_on_both(mf::default_limits(mf::mf5x::LIMITS), points, -ONE);
+  for (std::size_t k = 0; k < runs.size(); ++k) {
+    SCOPED_TRACE(lane_name(k));
+    ASSERT_EQ(runs[k].size(), points.size());
+    for (std::size_t i = 0; i < points.size(); ++i) {
+      SCOPED_TRACE(i);
+      expect_condition(runs[k][i], points[i].fz_n, 0.1, 0.05, 0.02, ZERO, ZERO, ZERO, ZERO);
+      EXPECT_TRUE(runs[k][i].contact);
+    }
+  }
+}
+
+TEST(mf5x_pipeline, Condition_NegativeLoadSign_PositiveZeroNegZeroNanFzNoContactNoFlags) {
+  Eigen::VectorXd limits = mf::default_limits(mf::mf5x::LIMITS);
+  limits(mf::mf5x::FZMIN) = -6000.0;
+  limits(mf::mf5x::FZMAX) = -1000.0;
+  const double quiet_nan = std::numeric_limits<double>::quiet_NaN();
+  std::vector<mf::test::point> points;
+  points.push_back(pt(500.0, 0.1, 0.05, 0.02));
+  points.push_back(pt(0.0, 0.1, 0.05, 0.02));
+  points.push_back(pt(-0.0, 0.1, 0.05, 0.02));
+  points.push_back(pt(quiet_nan, 0.1, 0.05, 0.02));
+  points.push_back(pt(8000.0, 0.1, 0.05, 0.02));
+  const auto runs = condition_on_both(limits, points, -ONE);
+  for (std::size_t k = 0; k < runs.size(); ++k) {
+    SCOPED_TRACE(lane_name(k));
+    ASSERT_EQ(runs[k].size(), points.size());
+    for (const condition_row &row : runs[k]) {
+      EXPECT_FALSE(row.contact);
+      expect_same_bits(row.fz_clamped, ZERO);
+      expect_same_bits(row.kappa_clamped, ZERO);
+      expect_same_bits(row.alpha_clamped, ZERO);
+      expect_same_bits(row.gamma_clamped, ZERO);
+    }
+  }
+}
+
+TEST(mf5x_pipeline, Condition_NegativeLoadSign_NegativeRangeClampsAndFlags) {
+  Eigen::VectorXd limits = mf::default_limits(mf::mf5x::LIMITS);
+  limits(mf::mf5x::FZMIN) = -6000.0;
+  limits(mf::mf5x::FZMAX) = -1000.0;
+  std::vector<mf::test::point> points;
+  points.push_back(pt(-8000.0, 0.1, 0.05, 0.02));
+  points.push_back(pt(-500.0, 0.1, 0.05, 0.02));
+  points.push_back(pt(500.0, 0.1, 0.05, 0.02));
+  points.push_back(pt(-3000.0, 0.1, 0.05, 0.02));
+  const auto runs = condition_on_both(limits, points, -ONE);
+  for (std::size_t k = 0; k < runs.size(); ++k) {
+    SCOPED_TRACE(lane_name(k));
+    ASSERT_EQ(runs[k].size(), points.size());
+    expect_condition(runs[k][0], -6000.0, 0.1, 0.05, 0.02, ONE, ZERO, ZERO, ZERO);
+    EXPECT_TRUE(runs[k][0].contact);
+    expect_condition(runs[k][1], -1000.0, 0.1, 0.05, 0.02, ONE, ZERO, ZERO, ZERO);
+    EXPECT_TRUE(runs[k][1].contact);
+    EXPECT_FALSE(runs[k][2].contact);
+    expect_same_bits(runs[k][2].fz_clamped, ZERO);
+    expect_condition(runs[k][3], -3000.0, 0.1, 0.05, 0.02, ZERO, ZERO, ZERO, ZERO);
+    EXPECT_TRUE(runs[k][3].contact);
+  }
+}
+
 // ---- mf5x_pipeline ----------------------------------------------------------------------------------------------
+
+TEST(mf5x_pipeline, Pipeline_NegativeFnomin_PositiveFzGivesExactZeros) {
+  mf::mf5x_coefficients c = coefficients();
+  c.FNOMIN = -4000.0;
+  const std::vector<mf::test::point> points{pt(4000.0, 0.1, 0.05, 0.02), pt(100.0, 0.1, 0.05, 0.02),
+                                            pt(0.0, 0.1, 0.05, 0.02)};
+  for (const mf::slip_mode mode : {mf::slip_mode::COMBINED, mf::slip_mode::UNCOMBINED}) {
+    const auto runs = pipeline_on_both(c, mode, ranged_limits(), points);
+    for (std::size_t k = 0; k < runs.size(); ++k) {
+      SCOPED_TRACE(lane_name(k));
+      ASSERT_EQ(runs[k].size(), points.size());
+      for (const output_row &row : runs[k]) {
+        expect_zero_forces(row);
+        expect_clamp_flags(row, ZERO, ZERO, ZERO, ZERO);
+      }
+    }
+  }
+}
 
 TEST(mf5x_pipeline, Pipeline_RawFzZero_ExactZeroForcesNoClampFlags) {
   const std::vector<mf::test::point> points{pt(0.0, 5.0, 3.0, 1.0), pt(0.0, 0.1, 0.05, 0.02)};

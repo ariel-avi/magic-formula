@@ -9,6 +9,7 @@ const channel = (name: string, unit: string): InputChannel => ({
   unit,
   minimum: 0,
   minimumInclusive: true,
+  negatedBy: name === 'FZ' ? 'VERTICAL' : name === 'SA' ? 'LATERAL' : 'NONE',
 });
 
 const FZ = channel('FZ', 'N');
@@ -81,6 +82,27 @@ describe('roleBlocker', () => {
 
   it('blocks a step at the maximum', () => {
     expect(roleBlocker(twoSteps(), 'VX', 'step')).toBe(`At most ${MAX_STEPS} inputs can be stepped.`);
+  });
+});
+
+describe('assignRole with a negative nominal load', () => {
+  const negative: TirEntry[] = [
+    { section: 'VERTICAL', key: 'FNOMIN', value: '-5000', quoted: false, line: 1, used: true },
+  ];
+
+  it('sweeping FZ yields the signed ascending default range', () => {
+    const out = assignRole(baseSpec(), FZ, 'sweep', negative);
+    expect(out.swept).toEqual({ variable: 'FZ', start: -10000, end: -1000, points: 37 });
+  });
+
+  it('stepping FZ without a held value starts at FNOMIN', () => {
+    const spec: SweepSpec = { ...baseSpec(), steps: [], fixed: {} };
+    expect(assignRole(spec, FZ, 'step', negative).steps[0].values).toEqual([-5000]);
+  });
+
+  it('stepping FZ keeps a held value', () => {
+    const spec: SweepSpec = { ...baseSpec(), steps: [], fixed: { FZ: -3000 } };
+    expect(assignRole(spec, FZ, 'step', negative).steps[0].values).toEqual([-3000]);
   });
 });
 

@@ -1,5 +1,12 @@
 import type { SweepBatch } from '@/domain/batch';
-import type { EvaluationError, MfError, TirInspection } from '@/domain/model';
+import type {
+  BatchWarning,
+  Conversion,
+  CoordinateSystem,
+  EvaluationError,
+  MfError,
+  TirInspection,
+} from '@/domain/model';
 import { err, ok, type Result } from '@/domain/result';
 import createMfModule, { type MfWasmModule } from './mf_wasm.js';
 
@@ -32,6 +39,7 @@ export function inspectTir(mf: MfWasmModule, text: string, fileName: string): Re
     warnings: raw.warnings,
     ignoredKeys: raw.ignoredKeys,
     model: raw.model,
+    coordinates: raw.coordinates,
     loadError: raw.loadError,
   });
 }
@@ -54,7 +62,18 @@ export function solveBatch(
   text: string,
   batch: SweepBatch,
   uncombined: boolean,
-): Result<Float64Array, EvaluationError> {
+): Result<{ outputs: Float64Array; warnings: BatchWarning[] }, EvaluationError> {
   const raw = mf.evaluate(text, batch.inputs, uncombined);
-  return raw.ok ? ok(raw.outputs) : err({ ...raw.error, row: raw.row });
+  return raw.ok ? ok({ outputs: raw.outputs, warnings: raw.warnings }) : err({ ...raw.error, row: raw.row });
+}
+
+/** Converts the model to the target system by coefficient sign flips; returns the converted .tir text. */
+export function convertModel(
+  mf: MfWasmModule,
+  text: string,
+  fileName: string,
+  target: CoordinateSystem,
+): Result<Conversion, MfError> {
+  const raw = mf.convertModel(text, fileName, target);
+  return raw.ok ? ok({ text: raw.text, applied: raw.applied, changes: raw.changes }) : err(raw.error);
 }

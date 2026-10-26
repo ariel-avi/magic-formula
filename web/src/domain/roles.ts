@@ -30,7 +30,7 @@ export function roleBlocker(spec: SweepSpec, name: string, role: InputRole): str
   return null;
 }
 
-/** Gives `channel` the role. Returns the same spec object when the role is unchanged or blocked. */
+/** Gives `channel` the role; generated defaults come from the model entries. Returns the same spec object when the role is unchanged or blocked. */
 export function assignRole(
   spec: SweepSpec,
   channel: InputChannel,

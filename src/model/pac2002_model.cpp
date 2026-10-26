@@ -7,6 +7,8 @@
 #include <magic_formula/mf5x_model.hpp>
 #include <magic_formula/model_layout.hpp>
 #include <magic_formula/pac2002_model.hpp>
+#include <magic_formula/tire_model.hpp>
+#include <memory>
 #include <string_view>
 
 namespace mf {
@@ -38,6 +40,10 @@ namespace mf {
 
   pac2002_model::pac2002_model(const mf5x_parameters &parameters, const mf5x_forms &forms, const model_options &options)
       : mf5x_model(parameters, forms, options) {}
+
+  std::unique_ptr<tire_model> pac2002_model::with_parameters(const mf5x_parameters &parameters) const {
+    return std::make_unique<pac2002_model>(pac2002_model(parameters, forms(), options()));
+  }
 
   std::string_view pac2002_model::name() const noexcept {
     return "PAC2002";

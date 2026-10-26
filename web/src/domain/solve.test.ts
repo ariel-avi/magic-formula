@@ -5,7 +5,7 @@ import type { InputChannel } from './model';
 import { err, ok } from './result';
 import { solveSweep, solveSweeps, solvedSweeps, type BatchSolver, type SweepOutcome } from './solve';
 
-const channel = (name: string): InputChannel => ({ name, unit: '-', minimum: 0, minimumInclusive: true });
+const channel = (name: string): InputChannel => ({ name, unit: '-', minimum: 0, minimumInclusive: true, negatedBy: name === 'FZ' ? 'VERTICAL' : name === 'SA' ? 'LATERAL' : 'NONE' });
 const inputs = [channel('FZ'), channel('SA')];
 
 const sweep: SweepSpec = {
@@ -26,6 +26,7 @@ describe('solveSweep', () => {
     const outcome = solveSweep({ ...sweep, swept: { ...sweep.swept, points: 1 } }, inputs, solve);
     expect(solve).not.toHaveBeenCalled();
     expect(outcome.problems.length).toBeGreaterThan(0);
+    expect(outcome.warnings).toEqual([]);
     expect(outcome.error).toBeNull();
     expect(outcome.solution).toBeNull();
   });
@@ -36,6 +37,7 @@ describe('solveSweep', () => {
       problems: [],
       error: 'boom (FZ = 5000, SA = 0)',
       solution: null,
+      warnings: [],
     });
   });
 
@@ -46,7 +48,7 @@ describe('solveSweep', () => {
 
   it('solves the batch with the sweep slip mode', () => {
     const outputs = new Float64Array([1, 2, 3]);
-    const solve = vi.fn<BatchSolver>(() => ok(outputs));
+    const solve = vi.fn<BatchSolver>(() => ok({ outputs, warnings: [] }));
     const pure = { ...sweep, uncombined: true };
     const outcome = solveSweep(pure, inputs, solve);
     expect(solve).toHaveBeenCalledTimes(1);
@@ -55,11 +57,23 @@ describe('solveSweep', () => {
     expect(outcome.error).toBeNull();
     expect(outcome.solution?.outputs).toBe(outputs);
     expect(outcome.solution?.batch).toEqual(buildBatch(pure, inputs));
+    expect(outcome.warnings).toEqual([]);
+  });
+
+  it('formats the solver warnings in order', () => {
+    const outputs = new Float64Array(3);
+    const warnings = [
+      { message: 'first', key: 'FZ', row: 0 },
+      { message: 'second', key: 'FZ', row: 2 },
+    ];
+    const outcome = solveSweep(sweep, inputs, () => ok({ outputs, warnings }));
+    expect(outcome.warnings).toEqual(['first (first at FZ = 5000, SA = 0)', 'second (first at FZ = 5000, SA = 10)']);
+    expect(outcome.solution?.outputs).toBe(outputs);
   });
 });
 
 describe('solveSweeps', () => {
-  const okSolver = () => vi.fn<BatchSolver>(() => ok(new Float64Array(3)));
+  const okSolver = () => vi.fn<BatchSolver>(() => ok({ outputs: new Float64Array(3), warnings: [] }));
 
   it('solves every sweep once and reuses the cached outcomes', () => {
     const sweeps = [sweep, { ...sweep, id: 'sweep-2' }];
@@ -90,8 +104,8 @@ describe('solvedSweeps', () => {
   it('keeps the solved sweeps with their chart position', () => {
     const sweeps = [sweep, { ...sweep, id: 'sweep-2' }, { ...sweep, id: 'sweep-3' }];
     const solution = { batch: buildBatch(sweep, inputs), outputs: new Float64Array(3) };
-    const solved: SweepOutcome = { problems: [], error: null, solution };
-    const unsolved: SweepOutcome = { problems: [], error: 'x', solution: null };
+    const solved: SweepOutcome = { problems: [], error: null, solution, warnings: [] };
+    const unsolved: SweepOutcome = { problems: [], error: 'x', solution: null, warnings: [] };
     const result = solvedSweeps(sweeps, [solved, unsolved, solved]);
     expect(result.map((r) => r.index)).toEqual([0, 2]);
     expect(result[0].sweep).toBe(sweeps[0]);

@@ -15,7 +15,7 @@ namespace mf {
   struct mf5x_coefficients {
     // NOLINTBEGIN(readability-identifier-naming): MF coefficient names match the .tir keys one-to-one
 
-    /// Nominal vertical load Fz0 [N] (> 0).
+    /// Nominal load [N]; non-zero; its sign is the loaded side.
     double FNOMIN = 0.0;
     /// Unloaded tire radius R0 [m] (> 0).
     double UNLOADED_RADIUS = 0.0;
@@ -269,7 +269,7 @@ namespace mf {
   };
 
   /// Checks the coefficients that the equations divide by or take as a base. Six independent checks, in this
-  /// order: FNOMIN > 0, UNLOADED_RADIUS > 0, LFZO > 0, PKY2 != 0, LMUY != 0, LONGVL > 0. A failure is an
+  /// order: FNOMIN != 0, UNLOADED_RADIUS > 0, LFZO > 0, PKY2 != 0, LMUY != 0, LONGVL > 0. A failure is an
   /// INVALID_VALUE whose `where.key` is the member name (a NaN fails the "> 0" checks).
   [[nodiscard]] std::expected<void, error> validate_coefficients(const mf5x_coefficients &coefficients);
 } // namespace mf

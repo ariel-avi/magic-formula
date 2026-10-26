@@ -1,6 +1,8 @@
 """Pacejka Magic Formula tire models (PAC2002, MF 5.2) from the magic-formula C++ library.
 
-All quantities are SI (N, m, rad, m/s) in the ISO-W axis system. Example::
+All quantities are SI (N, m, rad, m/s). Evaluation never converts axis systems: inputs are used as given.
+``find_coordinate_system`` identifies whether a model is ISO, SAE or MIXED, and ``convert_coordinate_system`` returns a model
+converted between ISO and SAE by flipping coefficient signs. Example::
 
     import numpy as np
     import magic_formula as mf
@@ -14,12 +16,23 @@ from __future__ import annotations
 
 from magic_formula import _core
 from magic_formula._errors import MagicFormulaError, MagicFormulaWarning
-from magic_formula._model import Channel, TireModel, load_tir, parse_tir
+from magic_formula._model import (
+    AxisDecision,
+    Channel,
+    CoordinateIdentification,
+    IndicatorReading,
+    TireModel,
+    load_tir,
+    parse_tir,
+)
 
 __version__: str = _core.version()
 
 __all__ = [
+    'AxisDecision',
     'Channel',
+    'CoordinateIdentification',
+    'IndicatorReading',
     'MagicFormulaError',
     'MagicFormulaWarning',
     'TireModel',

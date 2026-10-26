@@ -40,7 +40,10 @@ export function addSweep(chart: ChartSpec, model: ModelInfo, entries: readonly T
     return chart;
   }
   const { id, name } = freshIdentity(chart);
-  return { ...chart, sweeps: [...chart.sweeps, defaultSweepSpec(model, entries, id, name)] };
+  return {
+    ...chart,
+    sweeps: [...chart.sweeps, defaultSweepSpec(model, entries, id, name)],
+  };
 }
 
 /** Inserts a deep copy right after `index`; ignored at MAX_SWEEPS. */

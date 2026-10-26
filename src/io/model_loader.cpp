@@ -289,10 +289,11 @@ namespace mf::io {
 
     /// Step: FE_METHOD is not a PAC2002 or MF 5.2 key and is ignored.
     status warn_fe_method(load_state &state) {
-      if (state.reader.contains("FE_METHOD")) {
-        std::string message = "FE_METHOD is not a PAC2002 or MF 5.2 key and is ignored";
-        add_warning(state, std::move(message), state.reader.locate("FE_METHOD"));
+      if (!state.reader.contains("FE_METHOD")) {
+        return {};
       }
+      std::string message = "FE_METHOD is not a PAC2002 or MF 5.2 key and is ignored";
+      add_warning(state, std::move(message), state.reader.locate("FE_METHOD"));
       return {};
     }
 

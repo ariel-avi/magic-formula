@@ -24,7 +24,8 @@ def _error(model, rows, **kwargs):
 
 
 def test_s_vectors_match_hand_derived_values(pac2002, s_vectors):
-    out = pac2002.evaluate_batch(s_vectors)
+    with pytest.warns(mf.MagicFormulaWarning, match='FZ < 0'):
+        out = pac2002.evaluate_batch(s_vectors)
     expected_fx = 4000 * math.sin(1.5 * math.atan(4 / 3))
     assert out[0, 0] == pytest.approx(expected_fx, rel=REL_TOL_CLOSED_FORM)
     assert out[1, 1] == pytest.approx(-2376.40, abs=PRINTED_TOL)
@@ -37,16 +38,20 @@ def test_s_vectors_match_hand_derived_values(pac2002, s_vectors):
 
 
 def test_result_is_float64_rows_by_outputs(pac2002, s_vectors):
-    out = pac2002.evaluate_batch(s_vectors)
+    with pytest.warns(mf.MagicFormulaWarning, match='FZ < 0'):
+        out = pac2002.evaluate_batch(s_vectors)
     assert out.shape == (6, 10)
     assert out.dtype == np.float64
     assert out.flags.f_contiguous
 
 
 def test_c_order_lists_and_ints_equal_fortran_result(pac2002, s_vectors):
-    expected = pac2002.evaluate_batch(s_vectors)
-    assert np.array_equal(pac2002.evaluate_batch(np.ascontiguousarray(s_vectors)), expected)
-    assert np.array_equal(pac2002.evaluate_batch(s_vectors.tolist()), expected)
+    with pytest.warns(mf.MagicFormulaWarning, match='FZ < 0'):
+        expected = pac2002.evaluate_batch(s_vectors)
+    with pytest.warns(mf.MagicFormulaWarning, match='FZ < 0'):
+        assert np.array_equal(pac2002.evaluate_batch(np.ascontiguousarray(s_vectors)), expected)
+    with pytest.warns(mf.MagicFormulaWarning, match='FZ < 0'):
+        assert np.array_equal(pac2002.evaluate_batch(s_vectors.tolist()), expected)
     ints = np.array([[4000, 0, 0, 0, 10]])
     floats = np.array([[4000.0, 0.0, 0.0, 0.0, 10.0]], order='F')
     assert np.array_equal(pac2002.evaluate_batch(ints), pac2002.evaluate_batch(floats))
@@ -162,3 +167,12 @@ def test_mf52_zero_vx_raises_invalid_input(mf52, pac2002):
     assert e.key == 'VX'
     assert e.row == 0
     assert pac2002.evaluate_batch([[4000, 0, 0, 0, 0]]).shape == (1, 10)
+
+
+def test_load_side_warning_points_at_the_caller(pac2002, s_vectors):
+    with pytest.warns(mf.MagicFormulaWarning, match='FZ < 0') as batch:
+        pac2002.evaluate_batch(s_vectors)
+    assert batch[0].filename == __file__
+    with pytest.warns(mf.MagicFormulaWarning, match='FZ < 0') as named:
+        pac2002.evaluate(fz=-1000.0, sa=0.0, sr=0.0, ia=0.0, vx=10.0)
+    assert named[0].filename == __file__

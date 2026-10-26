@@ -17,7 +17,48 @@ namespace mf {
       std::string text(key);
       return location{.file = {}, .line = 0, .key = std::move(text)};
     }
+
+    /// Negates every column of `values` whose channel's `negated_by` is in `transforms` (exact sign flips).
+    // NOLINTBEGIN(performance-unnecessary-value-param): a writable Eigen::Ref is taken by value so that it binds Map
+    // temporaries (the Eigen idiom); a const reference to it would not bind a writable parameter.
+    template <typename Channel_T>
+    void negate_columns(std::span<const Channel_T> channels, const sign_transforms &transforms,
+                        Eigen::Ref<Eigen::MatrixXd> values) noexcept {
+      for (std::size_t i = 0; i < channels.size(); ++i) {
+        if (contains(transforms, channels[i].negated_by)) {
+          const auto column = static_cast<Eigen::Index>(i);
+          values.col(column) = -values.col(column);
+        }
+      }
+    }
+    // NOLINTEND(performance-unnecessary-value-param)
   } // namespace
+
+  // NOLINTBEGIN(performance-unnecessary-value-param): writable Eigen::Ref by value, see negate_columns.
+  void apply_sign_transforms(std::span<const input_channel> channels, const sign_transforms &transforms,
+                             Eigen::Ref<Eigen::MatrixXd> values) noexcept {
+    negate_columns(channels, transforms, values);
+  }
+
+  void apply_sign_transforms(std::span<const output_channel> channels, const sign_transforms &transforms,
+                             Eigen::Ref<Eigen::MatrixXd> values) noexcept {
+    negate_columns(channels, transforms, values);
+  }
+  // NOLINTEND(performance-unnecessary-value-param)
+
+  Eigen::VectorXd transform_limits(const Eigen::Ref<const Eigen::VectorXd> &limits,
+                                   std::span<const limit_channel> channels, const sign_transforms &transforms) {
+    Eigen::VectorXd result = limits;
+    for (std::size_t i = 0; i < channels.size(); ++i) {
+      if (channels[i].role == limit_role::LOWER && contains(transforms, channels[i].negated_by)) {
+        const auto lower = static_cast<Eigen::Index>(i);
+        result(lower) = -limits(lower + 1);
+        result(lower + 1) = -limits(lower);
+      }
+    }
+    // Returned through a move into a prvalue: a returned local would add an exception-cleanup-only line.
+    return Eigen::VectorXd(std::move(result)); // NOLINT(modernize-return-braced-init-list): see default_limits
+  }
 
   Eigen::VectorXd default_limits(std::span<const limit_channel> channels) {
     Eigen::VectorXd values(static_cast<Eigen::Index>(channels.size()));

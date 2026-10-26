@@ -1,11 +1,18 @@
 #include <Eigen/Core>
+#include <cstddef>
 #include <expected>
+#include <magic_formula/coordinate_identification.hpp>
+#include <magic_formula/coordinate_system.hpp>
+#include <magic_formula/detail/identification_probes.hpp>
 #include <magic_formula/error.hpp>
 #include <magic_formula/evaluation_types.hpp>
 #include <magic_formula/model_checks.hpp>
 #include <magic_formula/model_layout.hpp>
+#include <magic_formula/sign_transform.hpp>
 #include <magic_formula/tire_model.hpp>
+#include <memory>
 #include <optional>
+#include <span>
 #include <utility>
 
 namespace mf {
@@ -86,6 +93,38 @@ namespace mf {
     Eigen::MatrixXd outputs(inputs.rows(), static_cast<Eigen::Index>(output_length_));
     evaluate_batch_into(inputs, outputs);
     return outputs;
+  }
+
+  coordinate_identification tire_model::find_coordinate_system() const {
+    return find_coordinate_system(IDENTIFICATION_INDICATORS);
+  }
+
+  coordinate_identification tire_model::find_coordinate_system(std::span<const indicator_definition> indicators) const {
+    Eigen::VectorXd reference = reference_input();
+    detail::identification_probes probes = detail::plan_probes(layout(), reference, indicators);
+    Eigen::MatrixXd outputs(probes.inputs.rows(), output_length());
+    compute_batch(probes.inputs, outputs);
+    return assemble_identification(detail::read_probes(layout(), indicators, probes, outputs), std::move(reference));
+  }
+
+  coordinate_system tire_model::loaded_side() const {
+    const std::optional<std::size_t> fz = find_channel(layout().inputs, "FZ");
+    if (!fz.has_value()) {
+      return coordinate_system::ISO;
+    }
+    const Eigen::VectorXd reference = reference_input();
+    const bool negative = reference(static_cast<Eigen::Index>(*fz)) < 0.0;
+    return negative ? coordinate_system::SAE : coordinate_system::ISO;
+  }
+
+  std::unique_ptr<tire_model> tire_model::transformed(const sign_transforms &transforms) const {
+    return rebuild(transforms, transform_limits(limits_, layout().limits, transforms));
+  }
+
+  model_conversion tire_model::convert_coordinate_system(coordinate_system target) const {
+    coordinate_identification identification = find_coordinate_system();
+    const sign_transforms plan = plan_conversion(identification.effective, target);
+    return model_conversion{.model = transformed(plan), .applied = plan, .identification = std::move(identification)};
   }
 
   void tire_model::evaluate_batch(const double *inputs, int rows, double *data, int len) const {

@@ -14,7 +14,7 @@ import type { SweepSpec } from './chart-spec';
 import type { InputChannel, ModelInfo } from './model';
 import { niceExtent } from './ticks';
 
-const channel = (name: string, unit: string): InputChannel => ({ name, unit, minimum: 0, minimumInclusive: true });
+const channel = (name: string, unit: string): InputChannel => ({ name, unit, minimum: 0, minimumInclusive: true, negatedBy: name === 'FZ' ? 'VERTICAL' : name === 'SA' ? 'LATERAL' : 'NONE' });
 
 const model: ModelInfo = {
   name: 'm',
@@ -23,11 +23,11 @@ const model: ModelInfo = {
   tyreSide: 'LEFT',
   inputs: [channel('FZ', 'N'), channel('SA', 'rad'), channel('SR', '-')],
   outputs: [
-    { name: 'FX', unit: 'N' },
-    { name: 'FY', unit: 'N' },
-    { name: 'ANG', unit: 'rad' },
-    { name: 'MZ', unit: 'N*m' },
-    { name: 'FLAG', unit: '-' },
+    { name: 'FX', unit: 'N', negatedBy: 'NONE' },
+    { name: 'FY', unit: 'N', negatedBy: 'VERTICAL' },
+    { name: 'ANG', unit: 'rad', negatedBy: 'NONE' },
+    { name: 'MZ', unit: 'N*m', negatedBy: 'VERTICAL' },
+    { name: 'FLAG', unit: '-', negatedBy: 'NONE' },
   ],
   limits: [],
 };

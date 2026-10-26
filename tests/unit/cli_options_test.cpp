@@ -3,6 +3,7 @@
 #include <format>
 #include <gtest/gtest.h>
 #include <magic_formula/cli/cli.hpp>
+#include <magic_formula/coordinate_system.hpp>
 #include <magic_formula/evaluation_types.hpp>
 #include <magic_formula/io/result_writer.hpp>
 #include <magic_formula/mf5x_layout.hpp>
@@ -149,6 +150,95 @@ TEST(cli_options, Parse_LoneDash_ReturnsError) {
   const parse_result parsed = parse({"table.csv", "-", "model.tir"});
   ASSERT_FALSE(parsed.has_value());
   EXPECT_EQ(parsed.error(), "unknown option '-'");
+}
+
+TEST(cli_options, Parse_V1SystemOptions_UnknownOption) {
+  const parse_result input = parse({"--input-system=sae", "table.csv", "model.tir"});
+  ASSERT_FALSE(input.has_value());
+  EXPECT_EQ(input.error(), "unknown option '--input-system=sae'");
+
+  const parse_result output = parse({"--output-system=iso", "table.csv", "model.tir"});
+  ASSERT_FALSE(output.has_value());
+  EXPECT_EQ(output.error(), "unknown option '--output-system=iso'");
+}
+
+TEST(cli_options, Parse_NoSystemOptions_DefaultsEmpty) {
+  const parse_result parsed = parse({"table.csv", "model.tir"});
+  ASSERT_TRUE(parsed.has_value()) << parsed.error();
+  EXPECT_FALSE(parsed->target_system.has_value());
+  EXPECT_FALSE(parsed->table_system.has_value());
+}
+
+TEST(cli_options, Parse_SystemIso_SetsTargetIso) {
+  const parse_result parsed = parse({"--system=iso", "table.csv", "model.tir"});
+  ASSERT_TRUE(parsed.has_value()) << parsed.error();
+  ASSERT_TRUE(parsed->target_system.has_value());
+  EXPECT_EQ(*parsed->target_system, mf::coordinate_system::ISO);
+  EXPECT_FALSE(parsed->table_system.has_value());
+}
+
+TEST(cli_options, Parse_SystemUpperCaseSae_SetsTargetSae) {
+  const parse_result parsed = parse({"--system=SAE", "table.csv", "model.tir"});
+  ASSERT_TRUE(parsed.has_value()) << parsed.error();
+  ASSERT_TRUE(parsed->target_system.has_value());
+  EXPECT_EQ(*parsed->target_system, mf::coordinate_system::SAE);
+}
+
+TEST(cli_options, Parse_TableSystemSae_SetsTableSae) {
+  const parse_result parsed = parse({"table.csv", "--table-system=sae", "model.tir"});
+  ASSERT_TRUE(parsed.has_value()) << parsed.error();
+  ASSERT_TRUE(parsed->table_system.has_value());
+  EXPECT_EQ(*parsed->table_system, mf::coordinate_system::SAE);
+  EXPECT_FALSE(parsed->target_system.has_value());
+}
+
+TEST(cli_options, Parse_RepeatedSystemOptions_LastWins) {
+  const parse_result target = parse({"--system=iso", "--system=sae", "table.csv", "model.tir"});
+  ASSERT_TRUE(target.has_value()) << target.error();
+  ASSERT_TRUE(target->target_system.has_value());
+  EXPECT_EQ(*target->target_system, mf::coordinate_system::SAE);
+
+  const parse_result table = parse({"--table-system=sae", "--table-system=iso", "table.csv", "model.tir"});
+  ASSERT_TRUE(table.has_value()) << table.error();
+  ASSERT_TRUE(table->table_system.has_value());
+  EXPECT_EQ(*table->table_system, mf::coordinate_system::ISO);
+}
+
+TEST(cli_options, Parse_InvalidSystem_UsageError) {
+  const parse_result parsed = parse({"--system=iso-w", "table.csv", "model.tir"});
+  ASSERT_FALSE(parsed.has_value());
+  EXPECT_EQ(parsed.error(), "invalid value 'iso-w' for --system (expected iso or sae)");
+}
+
+TEST(cli_options, Parse_EmptySystemValue_UsageError) {
+  const parse_result parsed = parse({"--system=", "table.csv", "model.tir"});
+  ASSERT_FALSE(parsed.has_value());
+  EXPECT_EQ(parsed.error(), "invalid value '' for --system (expected iso or sae)");
+}
+
+TEST(cli_options, Parse_InvalidTableSystem_UsageError) {
+  const parse_result parsed = parse({"--table-system=auto", "table.csv", "model.tir"});
+  ASSERT_FALSE(parsed.has_value());
+  EXPECT_EQ(parsed.error(), "invalid value 'auto' for --table-system (expected iso or sae)");
+}
+
+TEST(cli_options, Parse_SystemOptionsWithoutEquals_UnknownOption) {
+  for (const std::string_view option : {"--system", "--table-system"}) {
+    const parse_result parsed = parse({option, "table.csv", "model.tir"});
+    ASSERT_FALSE(parsed.has_value()) << option;
+    EXPECT_EQ(parsed.error(), std::format("unknown option '{}'", option));
+  }
+}
+
+TEST(cli_options, Usage_DocumentsCoordinateSystemOptions) {
+  const std::string_view text = mf::cli::usage();
+  EXPECT_TRUE(text.contains("--system=iso|sae"));
+  EXPECT_TRUE(text.contains("--table-system=iso|sae"));
+  EXPECT_TRUE(text.contains("SA, SR and IA have the same definition in both; FZ, FY, MZ and MY change sign."));
+  EXPECT_TRUE(text.contains("Converting a model flips coefficient signs; the equations never change."));
+  EXPECT_TRUE(text.contains("printed in the table system"));
+  EXPECT_FALSE(text.contains("--input-system"));
+  EXPECT_FALSE(text.contains("ISO-W"));
 }
 
 TEST(cli_options, Usage_Text_DocumentsSynopsisColumnsHeaderAndExitCodes) {

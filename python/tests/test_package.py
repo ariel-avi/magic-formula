@@ -21,7 +21,17 @@ def test_version_matches_distribution_metadata():
 
 
 def test_public_api_exports():
-    expected = ['Channel', 'MagicFormulaError', 'MagicFormulaWarning', 'TireModel', 'load_tir', 'parse_tir']
+    expected = [
+        'AxisDecision',
+        'Channel',
+        'CoordinateIdentification',
+        'IndicatorReading',
+        'MagicFormulaError',
+        'MagicFormulaWarning',
+        'TireModel',
+        'load_tir',
+        'parse_tir',
+    ]
     assert sorted(mf.__all__) == expected
     for name in expected:
         assert hasattr(mf, name)

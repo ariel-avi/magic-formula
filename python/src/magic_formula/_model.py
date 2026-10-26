@@ -35,10 +35,57 @@ def _checked(result):
     return result
 
 
+class AxisDecision(NamedTuple):
+    """The weighted vote of one axis of the coordinate-system identification."""
+
+    sign: str  # 'POSITIVE' (the ISO side), 'NEGATIVE' (the SAE side) or 'UNDETERMINED'
+    basis: str  # 'DECIDED', 'INSUFFICIENT_EVIDENCE' or 'CONFLICTING_EVIDENCE'
+    confidence: float  # share of the valid vote weight held by the winning side
+    positive_weight: float  # vote weight for the ISO side
+    negative_weight: float  # vote weight for the SAE side
+
+
+class IndicatorReading(NamedTuple):
+    """One identification indicator evaluated at one probe load."""
+
+    name: str  # indicator name, e.g. 'dFy/dSA'
+    meaning: str  # the physical expectation behind the vote
+    unit: str  # SI unit of ``value``
+    axis: str  # 'VERTICAL', 'LATERAL' or 'CHECK'
+    load_scale: float  # probe load as a multiple of the reference FZ
+    load: float  # probe FZ in N
+    value: float  # indicator value in ``unit``
+    normalised: float  # value / |load|
+    status: str  # 'VOTE', 'BELOW_THRESHOLD', 'NOT_FINITE', 'CLAMPED' or 'MISSING_CHANNEL'
+    vote: int  # +1 (ISO side), -1 (SAE side) or 0 (abstains)
+    weight: float  # vote weight of this reading
+
+
+class CoordinateIdentification(NamedTuple):
+    """The coordinate system a coefficient set is expressed in.
+
+    ``classification`` is ``'ISO'``, ``'SAE'`` or ``'MIXED'`` (the vertical and
+    lateral axes disagree). ``effective_vertical`` and ``effective_lateral`` are
+    the signs used for the classification (``'POSITIVE'`` or ``'NEGATIVE'``).
+    ``reference_input`` is the reference operating point, in input order.
+    """
+
+    classification: str
+    vertical: AxisDecision
+    lateral: AxisDecision
+    effective_vertical: str
+    effective_lateral: str
+    readings: tuple[IndicatorReading, ...]
+    reference_input: npt.NDArray[np.float64]
+    warnings: tuple[str, ...]
+
+
 class TireModel:
     """A loaded tire model.
 
-    Units are SI (N, m, rad, m/s), ISO-W axis system. Inputs are the columns
+    Units are SI (N, m, rad, m/s). The equations never convert axis systems:
+    inputs are used as given and outputs are in the model's own system (see
+    ``find_coordinate_system`` and ``convert_coordinate_system``). Inputs are the columns
     ``FZ, SA, SR, IA, VX`` (see ``inputs``); outputs are listed in ``outputs``.
     A model is immutable after loading and the GIL is released during
     evaluation, so threads may share one instance. Do not mutate an input array
@@ -108,10 +155,88 @@ class TireModel:
         """File keys that the model does not use."""
         return tuple(self._core.ignored_keys)
 
-    def evaluate_batch(
-        self, inputs: npt.ArrayLike, *, check: bool = True
+    def find_coordinate_system(self) -> CoordinateIdentification:
+        """Identify the coordinate system the coefficient set is expressed in.
+
+        ISO is x forward, y left, z up (a loaded tire has FZ > 0 and
+        dFy/dSA > 0); SAE is x forward, y right, z down (FZ < 0 and
+        dFy/dSA < 0). The vertical and lateral axes are identified separately
+        from several evaluated indicators; ``'MIXED'`` means they disagree.
+        """
+        r = self._core.find_coordinate_system()
+
+        def decision(d) -> AxisDecision:
+            return AxisDecision(d.sign, d.basis, d.confidence, d.positive_weight, d.negative_weight)
+
+        readings = tuple(
+            IndicatorReading(
+                x.name, x.meaning, x.unit, x.axis, x.load_scale, x.load,
+                x.value, x.normalised, x.status, x.vote, x.weight,
+            )
+            for x in r.readings
+        )
+        return CoordinateIdentification(
+            classification=r.classification,
+            vertical=decision(r.vertical),
+            lateral=decision(r.lateral),
+            effective_vertical=r.effective_vertical,
+            effective_lateral=r.effective_lateral,
+            readings=readings,
+            reference_input=np.asarray(r.reference_input, dtype=np.float64),
+            warnings=tuple(r.warnings),
+        )
+
+    def convert_coordinate_system(self, target: str) -> TireModel:
+        """Return a model converted to ``target`` by flipping coefficient signs.
+
+        The equations never change. ``target`` is ``'ISO'`` or ``'SAE'``
+        (case-insensitive).
+
+        Raises:
+            MagicFormulaError: unknown system.
+        """
+        return TireModel(_checked(self._core.convert_coordinate_system(target)))
+
+    def _convert(
+        self, values: npt.ArrayLike, kind: str, source: str, target: str
     ) -> npt.NDArray[np.float64]:
-        """Evaluate rows of operating points.
+        a = np.asarray(values, dtype=np.float64)
+        one_row = a.ndim == 1
+        result = _checked(
+            self._core.convert(a.reshape(1, -1) if one_row else a, kind, source, target)
+        )
+        return result.reshape(-1) if one_row else result
+
+    def convert_inputs(
+        self, values: npt.ArrayLike, *, source: str, target: str
+    ) -> npt.NDArray[np.float64]:
+        """Convert input rows between ``'ISO'`` and ``'SAE'`` (data utility).
+
+        Names are case-insensitive. Only FZ changes sign; SA, SR, IA and VX
+        keep their meaning. A 1-D array is one row. Evaluation never calls this.
+
+        Raises:
+            MagicFormulaError: unknown system, wrong dimensions or columns.
+        """
+        return self._convert(values, 'inputs', source, target)
+
+    def convert_outputs(
+        self, values: npt.ArrayLike, *, source: str, target: str
+    ) -> npt.NDArray[np.float64]:
+        """Convert output rows between ``'ISO'`` and ``'SAE'``.
+
+        FY, MZ and MY change sign; FX, MX and the flags do not. See
+        ``convert_inputs`` for names and shapes.
+        """
+        return self._convert(values, 'outputs', source, target)
+
+    def evaluate_batch(
+        self,
+        inputs: npt.ArrayLike,
+        *,
+        check: bool = True,
+    ) -> npt.NDArray[np.float64]:
+        """Evaluate rows of operating points in the model's own coordinate system.
 
         Args:
             inputs: array-like of shape ``(N, n_inputs)``, columns in ``inputs``
@@ -121,12 +246,26 @@ class TireModel:
                 The shape is always checked.
 
         Returns:
-            A float64 array of shape ``(N, n_outputs)``.
+            A float64 array of shape ``(N, n_outputs)``. Rows with FZ on the
+            unloaded side of the model are lift-off (zero forces and moments)
+            and are reported as MagicFormulaWarning.
         """
-        return _checked(self._core.evaluate_batch(inputs, check))
+        return self._evaluate_batch(inputs, check, stacklevel=3)
+
+    def _evaluate_batch(
+        self, inputs: npt.ArrayLike, check: bool, *, stacklevel: int
+    ) -> npt.NDArray[np.float64]:
+        """Evaluate and warn at ``stacklevel`` frames above this helper's caller."""
+        solution = _checked(self._core.evaluate_batch(inputs, check))
+        for message in solution.warnings:
+            _warnings.warn(message, MagicFormulaWarning, stacklevel=stacklevel)
+        return solution.outputs
 
     def evaluate(
-        self, *, check: bool = True, **inputs: npt.ArrayLike
+        self,
+        *,
+        check: bool = True,
+        **inputs: npt.ArrayLike,
     ) -> dict[str, npt.NDArray[np.float64]]:
         """Evaluate named channels with NumPy broadcasting.
 
@@ -163,7 +302,7 @@ class TireModel:
         matrix = np.empty((arrays[0].size, len(names)), dtype=np.float64, order='F')
         for j, a in enumerate(arrays):
             matrix[:, j] = a.reshape(-1)
-        out = self.evaluate_batch(matrix, check=check)
+        out = self._evaluate_batch(matrix, check, stacklevel=3)
         return {c.name.lower(): out[:, j].reshape(shape) for j, c in enumerate(self._outputs)}
 
 

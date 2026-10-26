@@ -11,7 +11,7 @@ Each row summarises a rule; Details names the note that defines it.
 | FITTYP meanings | 5 = MF 5.0/5.1; 6 = MF 5.2; 21 = MF-Swift 1.x (based on MF 5.2); 51/52 = MF-MCTyre 1.0/1.1; 60/61/62 = MF 6.0/6.1/6.2; 70 = MF 6.2 with the temperature and velocity extension | model-routing.md |
 | Routing | see model-routing.md | model-routing.md; policies.md section 3 |
 | Range clamp | Fz, kappa, alpha and gamma are limited to [*_RANGE] before evaluation, including raising Fz to FZMIN; one warning per variable; clamp only when both limits of a pair exist | conventions.md section 8; policies.md section 1 |
-| Fz <= 0 | all outputs 0, no evaluation | policies.md section 1 |
+| Unloaded (Fz*sgn(FNOMIN) <= 0) | all outputs 0, no evaluation | policies.md section 1 |
 | alpha_eq | alpha_x,eq = atan(sqrt(tan^2 a + (Kx/Ky)^2 kappa^2)) * sgn+(a), for a = alpha_t, alpha_r; Kx from the pure Fx0 block, Ky from the pure Fy0 block (with the camber reduction); eps-guarded | pac2002.md sections 3 and 5.2 |
 | Friction-ellipse signs | ratios use \|mu_act\|, so each force keeps the sign of its pure-slip value | pac2002.md section 5.4 |
 | Combined-method choice | all 20 R* keys present: cosine; none: friction ellipse; partial set: load error naming the missing keys; FE_METHOD ignored with a warning | pac2002.md section 5.5; policies.md section 3 |
@@ -29,7 +29,7 @@ Each row summarises a rule; Details names the note that defines it.
 | Scaling in Dr | LRES on the residual term, LMUY on the whole Dr | pac2002.md sections 3-4 |
 | Mz_gyr | 0 in steady state (the term contains a time derivative) | pac2002.md section 2 |
 | sgn and eps | sgn+(x) = +1 for x >= 0, else -1; eps = 1e-6 added sign-preserving to Cx*Dx, Cy*Dy, Ky (in SHf and Kx/Ky), Kx and Ky in the friction ellipse, and (MF 5.2) Vc | conventions.md section 7; policies.md section 2 |
-| Axes | W axis system, origin at the contact point | conventions.md section 1 |
+| Axes | ISO (z up, y left) or SAE (z down, y right), origin at the contact point; the equations never convert | conventions.md section 1; coordinate-systems.md |
 | Trail normaliser | PAC2002: R0/FNOMIN. MF 5.2: R0/F'z0 with t multiplied by LFZO, which equals R0/FNOMIN | pac2002.md section 5.6 |
 | Reuse in combined Mz | Et (from the pure alpha_t), Bt, Ct, Dt, Br, Cr and Dr are reused unchanged; the combined Mz equations redefine none of them | pac2002.md section 3 |
 | Pressure | ignored for both models, with one warning | conventions.md section 11; policies.md section 5 |
@@ -41,6 +41,7 @@ Each row summarises a rule; Details names the note that defines it.
 | File | Content |
 |---|---|
 | conventions.md | cross-model rules: axes, slip, signs, speed, sgn/eps, limits, TYRESIDE, modes, pressure |
+| coordinate-systems.md | the user's ISO and SAE definitions, TNO ISO-W context, conversion by coefficient sign flips (transforms A and B, flip tables, code generalisations, gauge symmetries), robust multi-indicator identification, expected results per fixture, numerical verification |
 | pac2002.md | PAC2002 evaluation order and equations (authoritative), equation choices, rule details |
 | mf52.md | MF 5.2 status and settings, parameter set, evaluation order and equations (authoritative), behaviours not adopted |
 | pac2002-vs-mf52.md | difference table |

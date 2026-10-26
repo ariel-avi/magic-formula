@@ -14,6 +14,7 @@ export default defineConfig({
     channel: process.env.PLAYWRIGHT_CHANNEL ?? 'chrome',
     viewport: { width: 1600, height: 1000 },
     trace: 'retain-on-failure',
+    launchOptions: { args: ['--enable-unsafe-swiftshader'] },
   },
   webServer: {
     command: 'npm run dev',

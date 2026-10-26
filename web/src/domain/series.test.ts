@@ -7,7 +7,7 @@ import { buildChartData, comboLabel, flatXGroups, tableColumns, type SweepSeries
 import { solvedSweeps, type SweepOutcome } from './solve';
 import { niceExtent, niceTicks } from './ticks';
 
-const channel = (name: string, unit: string): InputChannel => ({ name, unit, minimum: 0, minimumInclusive: true });
+const channel = (name: string, unit: string): InputChannel => ({ name, unit, minimum: 0, minimumInclusive: true, negatedBy: name === 'FZ' ? 'VERTICAL' : name === 'SA' ? 'LATERAL' : 'NONE' });
 const inputs = [channel('FZ', 'N'), channel('SA', 'rad'), channel('SR', '-'), channel('IA', 'rad'), channel('VX', 'm/s')];
 const model: ModelInfo = {
   name: 'm',
@@ -16,11 +16,11 @@ const model: ModelInfo = {
   tyreSide: 'LEFT',
   inputs,
   outputs: [
-    { name: 'FX', unit: 'N' },
-    { name: 'FY', unit: 'N' },
-    { name: 'MZ', unit: 'N*m' },
-    { name: 'FLAG', unit: '-' },
-    { name: 'ANG', unit: 'rad' },
+    { name: 'FX', unit: 'N', negatedBy: 'NONE' },
+    { name: 'FY', unit: 'N', negatedBy: 'VERTICAL' },
+    { name: 'MZ', unit: 'N*m', negatedBy: 'VERTICAL' },
+    { name: 'FLAG', unit: '-', negatedBy: 'NONE' },
+    { name: 'ANG', unit: 'rad', negatedBy: 'NONE' },
   ],
   limits: [],
 };
@@ -64,10 +64,10 @@ function outputsFor(rows: number): Float64Array {
 function solve(chart: ChartSpec, only?: number[]) {
   const outcomes: SweepOutcome[] = chart.sweeps.map((s, i) => {
     if (only !== undefined && !only.includes(i)) {
-      return { problems: [], error: 'x', solution: null };
+      return { problems: [], error: 'x', solution: null, warnings: [] };
     }
     const batch = buildBatch(s, inputs);
-    return { problems: [], error: null, solution: { batch, outputs: outputsFor(batch.rows) } };
+    return { problems: [], error: null, solution: { batch, outputs: outputsFor(batch.rows) }, warnings: [] };
   });
   return solvedSweeps(chart.sweeps, outcomes);
 }

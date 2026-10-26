@@ -3,7 +3,11 @@
 set(MF_UNIT_TESTS
         allocation_test.cpp
         cli_options_test.cpp
+        coordinate_conversion_test.cpp
+        coordinate_identification_test.cpp
+        coordinate_system_test.cpp
         error_test.cpp
+        identification_probes_test.cpp
         input_table_test.cpp
         lanes_test.cpp
         mf52_model_test.cpp
@@ -12,6 +16,7 @@ set(MF_UNIT_TESTS
         mf5x_kernels_test.cpp
         mf5x_layout_test.cpp
         mf5x_pipeline_test.cpp
+        mf5x_signs_test.cpp
         model_checks_test.cpp
         model_contract_test.cpp
         model_layout_test.cpp
@@ -22,6 +27,7 @@ set(MF_UNIT_TESTS
         result_writer_test.cpp
         text_file_test.cpp
         text_test.cpp
+        tir_conversion_test.cpp
         tir_document_test.cpp
         tir_editor_test.cpp
         tir_reader_test.cpp

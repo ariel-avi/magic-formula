@@ -3,9 +3,13 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <ios>
+#include <istream>
 #include <magic_formula/error.hpp>
 #include <magic_formula/io/text_file.hpp>
 #include <random>
+#include <sstream>
+#include <stdexcept>
+#include <streambuf>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -62,6 +66,32 @@ TEST_F(read_text_file, ReadTextFile_ReadErrorAfterOpen_ReturnsIoErrorWithFile) {
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error().code, mf::error_code::IO);
   EXPECT_EQ(result.error().where.file, unreadable.string());
+}
+
+namespace {
+  /// Stream buffer whose reads always fail; the istream turns the exception into badbit.
+  class failing_buffer : public std::streambuf {
+  protected:
+    int_type underflow() override {
+      throw std::runtime_error("read failure");
+    }
+  };
+} // namespace
+
+TEST(read_text_stream, ReadTextStream_FailingBuffer_ReturnsIoErrorWithName) {
+  failing_buffer buffer;
+  std::istream input(&buffer);
+  const auto result = mf::io::read_text_stream(input, "broken.tir");
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code, mf::error_code::IO);
+  EXPECT_EQ(result.error().where.file, "broken.tir");
+}
+
+TEST(read_text_stream, ReadTextStream_GoodStream_ReturnsContent) {
+  std::istringstream input("abc");
+  const auto result = mf::io::read_text_stream(input, "mem");
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result.value(), "abc");
 }
 
 TEST_F(read_text_file, ReadTextFile_ExistingFile_ReturnsBytesExactly) {

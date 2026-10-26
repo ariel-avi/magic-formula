@@ -435,11 +435,11 @@ namespace mf::detail {
     return -(c.UNLOADED_RADIUS * fz_n * (c.QSY1 + fx_term + speed_term) * c.LMY);
   }
 
-  /// Output rolling-resistance moment from the longitudinal shifts, My = -R0*(SVx + Kx*SHx), without LMY. PAC2002
-  /// uses it when FITTYP = 5 and QSY1 = QSY2 = 0.
+  /// Output rolling-resistance moment from the longitudinal shifts, My = -sgn(FNOMIN)*R0*(SVx + Kx*SHx), without LMY.
+  /// PAC2002 uses it when FITTYP = 5 and QSY1 = QSY2 = 0.
   template <typename Lane_T>
   [[nodiscard]] Lane_T my_from_shifts(const mf5x_coefficients &c, const longitudinal_terms<Lane_T> &lon) noexcept {
-    return -(c.UNLOADED_RADIUS * (lon.svx_n + (lon.kx_n * lon.shx)));
+    return -(std::copysign(c.UNLOADED_RADIUS, c.FNOMIN) * (lon.svx_n + (lon.kx_n * lon.shx)));
   }
 
   /// Cosine factor of the trail: cos(alpha) for `COS_ALPHA`, cos'(alpha) = Vx/(hypot(Vx, tan(alpha)*Vx) + eps) for
@@ -534,7 +534,7 @@ namespace mf::detail {
   template <typename Lane_T> struct conditioned_lanes {
     /// Clamped Fz, SA, SR, IA and the untouched Vx.
     input_lanes<Lane_T> point;
-    /// True where the point has a vertical load: raw Fz > 0 and clamped Fz > 0.
+    /// True where the point has a vertical load on the side of FNOMIN: raw Fz and clamped Fz both on that side.
     mask_of<Lane_T> contact;
     /// 1.0 where Fz was moved to FZMIN/FZMAX (0.0 for a point without raw contact).
     Lane_T fz_clamped;
@@ -572,14 +572,15 @@ namespace mf::detail {
     Lane_T below_vxlow;
   };
 
-  /// Branch-free input conditioning: below_vxlow = to_flag(vx < VXLOW); raw_contact = fz > 0; Fz, SR, SA and IA are
-  /// clamped to their limits (infinite bounds never move a value) and each clamp flag is masked by raw_contact;
-  /// contact = raw_contact && clamped Fz > 0. Vx is never modified.
+  /// Branch-free input conditioning: below_vxlow = to_flag(vx < VXLOW); raw_contact = fz*load_sign > 0; Fz, SR, SA and
+  /// IA are clamped to their limits (infinite bounds never move a value) and each clamp flag is masked by
+  /// raw_contact; contact additionally needs the clamped fz*load_sign > 0; load_sign = +1 or -1 is the sign of
+  /// FNOMIN. Vx is never modified.
   template <typename Lane_T>
   [[nodiscard]] conditioned_lanes<Lane_T> mf5x_condition(const Eigen::Ref<const Eigen::VectorXd> &limits,
-                                                         const input_lanes<Lane_T> &raw) noexcept {
+                                                         const input_lanes<Lane_T> &raw, double load_sign) noexcept {
     const Lane_T zero = Lane_T::Zero(raw.fz_n.size());
-    const mask_of<Lane_T> raw_contact = raw.fz_n > 0.0;
+    const mask_of<Lane_T> raw_contact = (raw.fz_n * load_sign) > 0.0;
     Lane_T fz_moved;
     Lane_T kappa_moved;
     Lane_T alpha_moved;
@@ -588,7 +589,7 @@ namespace mf::detail {
     const Lane_T kappa = clamp_to_limits(raw.kappa, limits(mf5x::KPUMIN), limits(mf5x::KPUMAX), kappa_moved);
     const Lane_T alpha = clamp_to_limits(raw.alpha_rad, limits(mf5x::ALPMIN), limits(mf5x::ALPMAX), alpha_moved);
     const Lane_T gamma = clamp_to_limits(raw.gamma_rad, limits(mf5x::CAMMIN), limits(mf5x::CAMMAX), gamma_moved);
-    const mask_of<Lane_T> clamped_contact = fz > 0.0;
+    const mask_of<Lane_T> clamped_contact = (fz * load_sign) > 0.0;
     conditioned_lanes<Lane_T> out;
     out.point.fz_n = fz;
     out.point.alpha_rad = alpha;
@@ -611,7 +612,7 @@ namespace mf::detail {
   [[nodiscard]] output_lanes<Lane_T> mf5x_pipeline(const mf5x_coefficients &c, const mf5x_forms &forms, slip_mode mode,
                                                    const Eigen::Ref<const Eigen::VectorXd> &limits,
                                                    const input_lanes<Lane_T> &raw) noexcept {
-    const conditioned_lanes<Lane_T> cond = mf5x_condition<Lane_T>(limits, raw);
+    const conditioned_lanes<Lane_T> cond = mf5x_condition<Lane_T>(limits, raw, std::copysign(1.0, c.FNOMIN));
     const force_lanes<Lane_T> f = mf5x_evaluate(c, forms, mode, cond.point);
     const Lane_T zero = Lane_T::Zero(raw.fz_n.size());
     output_lanes<Lane_T> out;

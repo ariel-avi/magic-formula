@@ -11,8 +11,16 @@ function positiveOr(entries: Entries, key: string, fallback: number): number {
   return value !== null && value > 0 ? value : fallback;
 }
 
+/** Signed nominal load FNOMIN * LFZO (the sign is the loaded side); 4000 when FNOMIN is absent or zero. */
+function nominalLoad(entries: Entries): number {
+  const fnomin = findNumber(entries, 'FNOMIN');
+  const lfzoRaw = findNumber(entries, 'LFZO');
+  const lfzo = lfzoRaw !== null && lfzoRaw > 0 ? lfzoRaw : 1;
+  return fnomin !== null && fnomin !== 0 ? fnomin * lfzo : 4000;
+}
+
 const FIXED_VALUES: Record<string, (entries: Entries) => number> = {
-  FZ: (entries) => positiveOr(entries, 'FNOMIN', 4000),
+  FZ: nominalLoad,
   VX: (entries) => positiveOr(entries, 'LONGVL', 16.7),
 };
 
@@ -26,7 +34,7 @@ const SWEEPS: Record<string, (fz0: number) => Range> = {
   SA: () => ({ start: -15, end: 15, points: 61 }),
   SR: () => ({ start: -0.3, end: 0.3, points: 61 }),
   IA: () => ({ start: -6, end: 6, points: 25 }),
-  FZ: (fz0) => ({ start: 0.2 * fz0, end: 2 * fz0, points: 37 }),
+  FZ: (fz0) => ({ start: Math.min(0.2 * fz0, 2 * fz0), end: Math.max(0.2 * fz0, 2 * fz0), points: 37 }),
   VX: () => ({ start: 1, end: 40, points: 40 }),
 };
 

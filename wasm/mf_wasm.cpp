@@ -5,14 +5,19 @@
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 #include <expected>
+#include <magic_formula/coordinate_identification.hpp>
+#include <magic_formula/coordinate_system.hpp>
 #include <magic_formula/error.hpp>
 #include <magic_formula/evaluation_types.hpp>
 #include <magic_formula/io/model_loader.hpp>
+#include <magic_formula/io/tir_conversion.hpp>
 #include <magic_formula/io/tir_document.hpp>
 #include <magic_formula/io/tir_editor.hpp>
 #include <magic_formula/model_checks.hpp>
+#include <magic_formula/sign_transform.hpp>
 #include <magic_formula/version.hpp>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace mf::wasm {
@@ -74,6 +79,7 @@ namespace mf::wasm {
         item.set("unit", std::string{channel.unit});
         item.set("minimum", channel.minimum);
         item.set("minimumInclusive", channel.minimum_inclusive);
+        item.set("negatedBy", std::string{sign_transform_name(channel.negated_by)});
         inputs.call<void>("push", item);
       }
       result.set("inputs", inputs);
@@ -83,6 +89,7 @@ namespace mf::wasm {
         val item = val::object();
         item.set("name", std::string{channel.name});
         item.set("unit", std::string{channel.unit});
+        item.set("negatedBy", std::string{sign_transform_name(channel.negated_by)});
         outputs.call<void>("push", item);
       }
       result.set("outputs", outputs);
@@ -106,6 +113,81 @@ namespace mf::wasm {
       return result;
     }
 
+    [[nodiscard]] error unknown_system(const std::string &name) {
+      std::string message = "unknown coordinate system '" + name + "' (expected ISO or SAE)";
+      return error{error_code::INVALID_ARGUMENT, std::move(message), {}};
+    }
+
+    [[nodiscard]] val to_js(const axis_decision &value) {
+      val result = val::object();
+      result.set("sign", std::string{axis_sign_name(value.sign)});
+      result.set("basis", std::string{decision_basis_name(value.basis)});
+      result.set("confidence", value.confidence);
+      result.set("positiveWeight", value.positive_weight);
+      result.set("negativeWeight", value.negative_weight);
+      return result;
+    }
+
+    [[nodiscard]] val to_js(const indicator_reading &value) {
+      val result = val::object();
+      result.set("name", std::string{value.definition.name});
+      result.set("meaning", std::string{value.definition.meaning});
+      result.set("unit", std::string{value.definition.unit});
+      result.set("axis", std::string{identification_axis_name(value.definition.axis)});
+      result.set("loadScale", value.load_scale);
+      result.set("load", value.load_n);
+      result.set("value", value.value);
+      result.set("normalised", value.normalised);
+      result.set("status", std::string{reading_status_name(value.status)});
+      result.set("vote", value.vote);
+      result.set("weight", value.weight);
+      return result;
+    }
+
+    [[nodiscard]] val to_js(const coordinate_identification &value) {
+      val result = val::object();
+      result.set("classification", std::string{system_classification_name(value.classification)});
+      result.set("vertical", to_js(value.vertical));
+      result.set("lateral", to_js(value.lateral));
+      val effective = val::object();
+      effective.set("vertical", std::string{axis_sign_name(value.effective.vertical)});
+      effective.set("lateral", std::string{axis_sign_name(value.effective.lateral)});
+      result.set("effective", effective);
+      val readings = val::array();
+      for (const indicator_reading &item : value.readings) {
+        readings.call<void>("push", to_js(item));
+      }
+      result.set("readings", readings);
+      val reference = val::array();
+      for (const double item : value.reference_input) {
+        reference.call<void>("push", item);
+      }
+      result.set("referenceInput", reference);
+      val warnings = val::array();
+      for (const warning &item : value.warnings) {
+        warnings.call<void>("push", to_js(item));
+      }
+      result.set("warnings", warnings);
+      return result;
+    }
+
+    [[nodiscard]] val to_js(const sign_transforms &value) {
+      val result = val::object();
+      result.set("vertical", value.vertical);
+      result.set("lateral", value.lateral);
+      return result;
+    }
+
+    [[nodiscard]] val to_js(const io::tir_change &value) {
+      val result = val::object();
+      result.set("section", value.section);
+      result.set("key", value.key);
+      result.set("line", static_cast<double>(value.line));
+      result.set("before", value.before);
+      result.set("after", value.after);
+      return result;
+    }
+
     [[nodiscard]] val to_float64_array(const double *data, std::size_t size) {
       val view{emscripten::typed_memory_view(size, data)};
       return val::global("Float64Array").call<val>("from", view);
@@ -118,7 +200,9 @@ namespace mf::wasm {
   }
 
   /// Parses `text` and tries to build the model. `{ok:false,error}` for a syntax error; otherwise the entries,
-  /// warnings, ignored keys and either `model` or `loadError`.
+  /// warnings, ignored keys and either `model` (with `coordinates`, the coordinate-system identification:
+  /// classification, vertical and lateral decisions, effective signs, readings, reference input, warnings) or
+  /// `loadError` (with `model` and `coordinates` null).
   [[nodiscard]] val inspect(const std::string &text, const std::string &file_name) {
     const auto document = io::tir_document::parse(text, file_name);
     if (!document) {
@@ -144,6 +228,7 @@ namespace mf::wasm {
         ignored.call<void>("push", key);
       }
       result.set("model", to_js(*loaded->model));
+      result.set("coordinates", to_js(loaded->model->find_coordinate_system()));
       result.set("loadError", val::null());
     } else {
       // loaded->warnings already starts with the parse warnings; on failure the document's are all there is.
@@ -151,6 +236,7 @@ namespace mf::wasm {
         warnings.call<void>("push", to_js(item));
       }
       result.set("model", val::null());
+      result.set("coordinates", val::null());
       result.set("loadError", to_js(loaded.error()));
     }
     result.set("warnings", warnings);
@@ -171,8 +257,10 @@ namespace mf::wasm {
     return result;
   }
 
-  /// Evaluates a batch. `inputs` is a Float64Array, column-major rows x input_length (SI units).
-  /// `{ok:true,rows,outputs}` (Float64Array, column-major rows x output_length) or `{ok:false,error,row}`.
+  /// Evaluates a batch with raw inputs (no conversion). `inputs` is a Float64Array, column-major rows x input_length
+  /// (SI units). `{ok:true,rows,outputs,warnings}` (outputs: Float64Array, column-major rows x output_length;
+  /// warnings: `[{message,key,row}]`, at most the load-side warning for FZ on the unloaded side) or
+  /// `{ok:false,error,row}`.
   [[nodiscard]] val evaluate(const std::string &text, const val &inputs, bool uncombined) {
     const auto document = io::tir_document::parse(text);
     if (!document) {
@@ -197,14 +285,48 @@ namespace mf::wasm {
     }
     const auto rows = static_cast<Eigen::Index>(data.size() / width);
     const Eigen::Map<const Eigen::MatrixXd> matrix{data.data(), rows, static_cast<Eigen::Index>(width)};
-    const auto outputs = checked_evaluate_batch(model, matrix);
-    if (!outputs) {
-      return evaluation_failure(outputs.error().cause, val(static_cast<double>(outputs.error().index)));
+    const auto solved = checked_evaluate_batch(model, matrix);
+    if (!solved) {
+      return evaluation_failure(solved.error().cause, val(static_cast<double>(solved.error().index)));
+    }
+    val warnings = val::array();
+    const auto side_warning = load_side_warning(census_fz(model.layout(), matrix), model.loaded_side());
+    if (side_warning) {
+      val entry = val::object();
+      entry.set("message", side_warning->cause.message);
+      entry.set("key", side_warning->cause.where.key);
+      entry.set("row", static_cast<double>(side_warning->index));
+      warnings.call<void>("push", entry);
     }
     val result = val::object();
     result.set("ok", true);
     result.set("rows", static_cast<double>(rows));
-    result.set("outputs", to_float64_array(outputs->data(), static_cast<std::size_t>(outputs->size())));
+    result.set("outputs", to_float64_array(solved->data(), static_cast<std::size_t>(solved->size())));
+    result.set("warnings", warnings);
+    return result;
+  }
+
+  /// `io::convert_tir`: converts the model text to `target` ("ISO" or "SAE") by coefficient sign flips.
+  /// `{ok:true,text,applied:{vertical,lateral},changes:[{section,key,line,before,after}]}` or `{ok:false,error}`
+  /// (INVALID_ARGUMENT for an unknown target).
+  [[nodiscard]] val convert_model(const std::string &text, const std::string &file_name, const std::string &target) {
+    const auto system = parse_coordinate_system(target);
+    if (!system) {
+      return failure(unknown_system(target));
+    }
+    const auto converted = io::convert_tir(text, *system, file_name);
+    if (!converted) {
+      return failure(converted.error());
+    }
+    val result = val::object();
+    result.set("ok", true);
+    result.set("text", converted->text);
+    result.set("applied", to_js(converted->applied));
+    val changes = val::array();
+    for (const io::tir_change &item : converted->changes) {
+      changes.call<void>("push", to_js(item));
+    }
+    result.set("changes", changes);
     return result;
   }
 } // namespace mf::wasm
@@ -214,4 +336,5 @@ EMSCRIPTEN_BINDINGS(mf_wasm) {
   emscripten::function("inspect", &mf::wasm::inspect);
   emscripten::function("replaceValue", &mf::wasm::replace_value);
   emscripten::function("evaluate", &mf::wasm::evaluate);
+  emscripten::function("convertModel", &mf::wasm::convert_model);
 }

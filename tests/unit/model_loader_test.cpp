@@ -1005,17 +1005,23 @@ TEST(model_loader, Load_Fittyp5WithQsy1_NoMyFromShiftsWarning) {
 }
 
 TEST(model_loader, Load_InvalidFnomin_InvalidValueWithFileAndLine) {
-  const std::string text = set_value(s_text(), "FNOMIN", "-1");
+  const std::string text = set_value(s_text(), "FNOMIN", "0");
   const load_result result = load_text(text);
   ASSERT_FALSE(result.has_value());
   expect_error(result, error_code::INVALID_VALUE, "FNOMIN", line_of(text, "FNOMIN"));
 }
 
 TEST(model_loader, Load_Mf52InvalidFnomin_InvalidValueWithFileAndLine) {
-  const std::string text = set_value(mf52_clean_text(), "FNOMIN", "-1");
+  const std::string text = set_value(mf52_clean_text(), "FNOMIN", "0");
   const load_result result = load_text(text);
   ASSERT_FALSE(result.has_value());
   expect_error(result, error_code::INVALID_VALUE, "FNOMIN", line_of(text, "FNOMIN"));
+}
+
+TEST(model_loader, Load_NegativeFnomin_LoadsWithSignedReferenceLoad) {
+  const load_result loaded = load_text(set_value(s_text(), "FNOMIN", "-4000"));
+  ASSERT_TRUE(loaded.has_value()) << describe(loaded);
+  EXPECT_EQ(loaded->model->reference_input()(mf::mf5x::FZ), -4000.0);
 }
 
 TEST(model_loader, Load_QuotedNumber_InvalidValue) {

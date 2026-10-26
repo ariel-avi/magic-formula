@@ -21,8 +21,8 @@ const model = (inNames: string[], outNames: string[]): ModelInfo => ({
   fittyp: null,
   useMode: null,
   tyreSide: 'LEFT',
-  inputs: inNames.map((name) => ({ name, unit: '-', minimum: 0, minimumInclusive: true })),
-  outputs: outNames.map((name) => ({ name, unit: 'N' })),
+  inputs: inNames.map((name) => ({ name, unit: '-', minimum: 0, minimumInclusive: true, negatedBy: name === 'FZ' ? 'VERTICAL' : name === 'SA' ? 'LATERAL' : 'NONE' })),
+  outputs: outNames.map((name) => ({ name, unit: 'N', negatedBy: ['FY', 'MZ', 'MY'].includes(name) ? 'VERTICAL' : 'NONE' })),
   limits: [],
 });
 const base = model(['FZ', 'SA', 'SR', 'IA'], ['FY', 'FX']);
@@ -59,6 +59,16 @@ describe('sweepIndexOf', () => {
   it('finds the index or falls back to 0', () => {
     expect(sweepIndexOf(sweeps, 'b')).toBe(1);
     expect(sweepIndexOf(sweeps, 'zz')).toBe(0);
+  });
+});
+
+describe('addSweep with a negative nominal load', () => {
+  it('yields signed FZ defaults', () => {
+    const entries = [{ section: 'S', key: 'FNOMIN', value: '-4000', quoted: false, line: 1, used: true }];
+    const added = addSweep(chartOf([sweepOf('sweep-1', 'Sweep 1')]), base, entries).sweeps[1];
+    expect(added.fixed.FZ).toBe(-4000);
+    expect(added.steps[0].values).toEqual([-2000, -4000, -6000]);
+    expect(added.swept).toEqual({ variable: 'SA', start: -15, end: 15, points: 61 });
   });
 });
 

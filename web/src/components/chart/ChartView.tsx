@@ -103,6 +103,27 @@ export function ChartView({ mf, text, model, spec, onChange }: ChartViewProps) {
           </Alert>
         ) : null,
       )}
+      {spec.sweeps.map((sweep, i) =>
+        outcomes[i].warnings.length > 0 ? (
+          <Alert
+            key={`warnings-${sweep.id}`}
+            data-testid="chart-warnings"
+            data-sweep={sweep.id}
+            className="mx-3 mt-3 w-auto"
+          >
+            <AlertTitle className="line-clamp-none">
+              {grouped ? `${sweepDisplayName(sweep, i)}: solver warnings` : 'Solver warnings'}
+            </AlertTitle>
+            <AlertDescription>
+              <ul className="list-disc pl-4">
+                {outcomes[i].warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            </AlertDescription>
+          </Alert>
+        ) : null,
+      )}
       {data !== null && (
         <>
           {flat.length > 0 && (

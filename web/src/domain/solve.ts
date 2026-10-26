@@ -1,6 +1,7 @@
 import { buildBatch, describeBatchRow, type SweepBatch } from './batch';
+import { formatBatchWarning } from './coordinates';
 import type { SweepSpec } from './chart-spec';
-import type { EvaluationError, InputChannel } from './model';
+import type { BatchWarning, EvaluationError, InputChannel } from './model';
 import type { Result } from './result';
 import { validateSweepSpec } from './steps';
 
@@ -13,24 +14,30 @@ export interface SweepOutcome {
   problems: string[];
   error: string | null;
   solution: SweepSolution | null;
+  /** Formatted solver warnings; empty for validation problems and solver errors. */
+  warnings: string[];
 }
 
-export type BatchSolver = (batch: SweepBatch, uncombined: boolean) => Result<Float64Array, EvaluationError>;
+export type BatchSolver = (
+  batch: SweepBatch,
+  uncombined: boolean,
+) => Result<{ outputs: Float64Array; warnings: BatchWarning[] }, EvaluationError>;
 
 /** Validates and solves one sweep. Invalid specs never reach the solver; a solver error names the failing row. */
 export function solveSweep(sweep: SweepSpec, inputs: readonly InputChannel[], solve: BatchSolver): SweepOutcome {
   const problems = validateSweepSpec(sweep, inputs);
   if (problems.length > 0) {
-    return { problems, error: null, solution: null };
+    return { problems, error: null, solution: null, warnings: [] };
   }
   const batch = buildBatch(sweep, inputs);
   const result = solve(batch, sweep.uncombined);
   if (!result.ok) {
     const row = result.error.row;
     const error = result.error.message + (typeof row === 'number' ? ` (${describeBatchRow(sweep, batch, row)})` : '');
-    return { problems: [], error, solution: null };
+    return { problems: [], error, solution: null, warnings: [] };
   }
-  return { problems: [], error: null, solution: { batch, outputs: result.value } };
+  const warnings = result.value.warnings.map((warning) => formatBatchWarning(sweep, batch, warning));
+  return { problems: [], error: null, solution: { batch, outputs: result.value.outputs }, warnings };
 }
 
 /** One outcome per sweep; a sweep object already in the cache is not solved again. */
