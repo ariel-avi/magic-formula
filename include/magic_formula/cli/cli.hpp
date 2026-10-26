@@ -69,15 +69,18 @@ namespace mf::cli {
   /// (`tire_model::find_coordinate_system`), converts the model with `--system` (`convert_coordinate_system`; the
   /// equations never change), reads the input table, converts the table values from the table system
   /// (`--table-system`, default the evaluated model's `loaded_side()`, so no conversion) to the model's side
-  /// (`convert_inputs`), evaluates them with `checked_evaluate_batch`, converts the outputs back to the table system
-  /// (`convert_outputs`) and writes the results as CSV (`io::write_results`) to `out`: 15 columns, the five inputs
-  /// (echoed as read, in the table system), the five outputs and the five 0/1 flag columns (FZ_CLAMPED, SR_CLAMPED,
-  /// SA_CLAMPED, IA_CLAMPED, BELOW_VXLOW). Diagnostics go to `err`, in this order: load warnings, the identification
-  /// warnings of the evaluated model, optional `--verbose` information (model information, ignored keys, the
-  /// identification of the model as loaded with every indicator reading, the conversion, the table system), one
+  /// (`convert_inputs`), evaluates them with `checked_evaluate_batch` and `checked_evaluate_characteristics_batch`,
+  /// converts the outputs and the characteristics back to the table system (`convert_outputs`,
+  /// `convert_characteristics`) and writes the results as CSV (`io::write_results`) to `out`: 23 columns, the five
+  /// inputs (echoed as read, in the table system), the five outputs, the five 0/1 flag columns (FZ_CLAMPED,
+  /// SR_CLAMPED, SA_CLAMPED, IA_CLAMPED, BELOW_VXLOW) and the eight characteristics (DFY_DSA, DFX_DSR, FY_OVER_SA,
+  /// FX_OVER_SR, DY, DX, SA_AT_PEAK_FY, SR_AT_PEAK_FX). A NaN prints as "nan"; it appears only in SA_AT_PEAK_FY and
+  /// SR_AT_PEAK_FX (no stationary point, or no contact). Diagnostics go to `err`, in this order: load warnings, the
+  /// identification warnings of the evaluated model, optional `--verbose` information (model information, ignored keys,
+  /// the identification of the model as loaded with every indicator reading, the conversion, the table system), one
   /// warning per table column that the model has no input for (for example P), the load-side warning
-  /// (`load_side_warning` in the table system) naming the first offending table line, and one clamp / VXLOW warning
-  /// per flag naming the first table line and the number of rows.
+  /// (`load_side_warning` in the table system) naming the first offending table line, and one clamp / VXLOW warning per
+  /// flag naming the first table line and the number of rows.
   /// Nothing is written to `out` for a usage, file, model,
   /// input-table or evaluation error, because the results are written only after every row has been evaluated. The
   /// results are then streamed to `out` row by row, so if `out` fails or throws while they are written, the rows

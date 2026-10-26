@@ -30,6 +30,16 @@ namespace mf {
     sign_transform negated_by = sign_transform::NONE;
   };
 
+  /// One position of a model's characteristics vector: a derived quantity of the evaluated Fx/Fy curves.
+  struct characteristic_channel {
+    std::string_view name; ///< upper-case; also the CSV column ("DFY_DSA")
+    std::string_view unit; ///< SI unit ("N/rad", "N", "rad", "-")
+    /// The transforms that each negate this value; a plan negates it when `negates(negated_by, plan)`.
+    sign_transforms negated_by{};
+    /// true: NaN is a documented value meaning "undefined" (no stationary point).
+    bool nan_allowed = false;
+  };
+
   /// Role of a limits-vector position. LOWER is immediately followed by its UPPER.
   enum class limit_role : std::uint8_t {
     LOWER, ///< lower end of a validity range
@@ -52,6 +62,9 @@ namespace mf {
     std::span<const input_channel> inputs;
     std::span<const output_channel> outputs;
     std::span<const limit_channel> limits;
+    /// Characteristic channels; empty for a formulation without them. The default member initializer keeps designated
+    /// initializers that omit it warning-free.
+    std::span<const characteristic_channel> characteristics{}; // NOLINT(readability-redundant-member-init): see above
   };
 
   /// Position of the first channel whose name equals `name` (exact, case-sensitive comparison), or empty.
@@ -117,6 +130,11 @@ namespace mf {
 
   /// The same for the columns of an output matrix.
   void apply_sign_transforms(std::span<const output_channel> channels, const sign_transforms &transforms,
+                             Eigen::Ref<Eigen::MatrixXd> values) noexcept;
+
+  /// Negates in place every column i with negates(channels[i].negated_by, transforms). Exact (NaN stays NaN, its sign
+  /// bit flips); self-inverse. Precondition: values.cols() == channels.size().
+  void apply_sign_transforms(std::span<const characteristic_channel> channels, const sign_transforms &transforms,
                              Eigen::Ref<Eigen::MatrixXd> values) noexcept;
 
   /// The limits after `transforms`: every pair whose LOWER channel's negated_by is in `transforms` becomes

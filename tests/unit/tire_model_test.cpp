@@ -32,7 +32,13 @@ namespace {
       {.name = "Y", .unit = "-"},
       {.name = "Z", .unit = "-"},
   }};
-  constexpr mf::model_layout STUB_LAYOUT{.inputs = STUB_INPUTS, .outputs = STUB_OUTPUTS, .limits = {}};
+  /// Characteristics CA (NaN allowed) and CB.
+  constexpr std::array<mf::characteristic_channel, 2> STUB_CHARACTERISTICS{{
+      {.name = "CA", .unit = "-", .nan_allowed = true},
+      {.name = "CB", .unit = "-"},
+  }};
+  constexpr mf::model_layout STUB_LAYOUT{
+      .inputs = STUB_INPUTS, .outputs = STUB_OUTPUTS, .limits = {}, .characteristics = STUB_CHARACTERISTICS};
 
   /// The same layout with limits: a LOWER/UPPER pair negated by VERTICAL and a VALUE row.
   constexpr std::array<mf::limit_channel, 3> STUB_LIMITS{{
@@ -46,17 +52,19 @@ namespace {
        .negated_by = mf::sign_transform::VERTICAL},
       {.key = "V", .role = mf::limit_role::VALUE, .default_value = 1.0},
   }};
-  constexpr mf::model_layout STUB_LAYOUT_LIMITS{.inputs = STUB_INPUTS, .outputs = STUB_OUTPUTS, .limits = STUB_LIMITS};
+  constexpr mf::model_layout STUB_LAYOUT_LIMITS{
+      .inputs = STUB_INPUTS, .outputs = STUB_OUTPUTS, .limits = STUB_LIMITS, .characteristics = STUB_CHARACTERISTICS};
 
-  /// X = A + B, Y = A * B, Z = 1 (or NaN when `emit_nan`), with call counters. `rebuild` records the plan.
+  /// X = A + B, Y = A * B, Z = 1 (or NaN when `emit_nan`), with call counters. `rebuild` records the plan. The
+  /// characteristics are {1, 2} for every row except the last row of a batch, which gets `characteristic_values`.
   class stub_model final : public mf::tire_model {
   public:
     explicit stub_model(const mf::model_options &options, bool emit_nan = false,
                         const Eigen::VectorXd &limits = Eigen::VectorXd(),
                         const mf::model_metadata &metadata = mf::model_metadata{}, bool with_limit_layout = false,
-                        double reference_value = 0.5)
+                        double reference_value = 0.5, std::array<double, 2> characteristic_values = {1.0, 2.0})
         : tire_model(2, 3, limits, metadata, options), emit_nan_(emit_nan), with_limit_layout_(with_limit_layout),
-          reference_value_(reference_value) {}
+          reference_value_(reference_value), characteristic_values_(characteristic_values) {}
 
     [[nodiscard]] std::string_view name() const noexcept override {
       return "stub";
@@ -83,8 +91,8 @@ namespace {
   private:
     [[nodiscard]] std::unique_ptr<mf::tire_model> rebuild(const mf::sign_transforms &transforms,
                                                           const Eigen::VectorXd &limits) const override {
-      auto copy =
-          std::make_unique<stub_model>(options(), emit_nan_, limits, metadata(), with_limit_layout_, reference_value_);
+      auto copy = std::make_unique<stub_model>(options(), emit_nan_, limits, metadata(), with_limit_layout_,
+                                               reference_value_, characteristic_values_);
       copy->rebuilt = true;
       copy->rebuilt_plan = transforms;
       return copy;
@@ -106,9 +114,26 @@ namespace {
       outputs.col(2).setConstant(emit_nan_ ? QUIET_NAN : 1.0);
     }
 
+    void compute_characteristics(const Eigen::Ref<const Eigen::VectorXd> & /*input*/,
+                                 Eigen::Ref<Eigen::VectorXd> characteristics) const noexcept override {
+      characteristics(0) = characteristic_values_[0];
+      characteristics(1) = characteristic_values_[1];
+    }
+
+    void compute_characteristics_batch(const Eigen::Ref<const Eigen::MatrixXd> &inputs,
+                                       Eigen::Ref<Eigen::MatrixXd> characteristics) const noexcept override {
+      characteristics.col(0).setConstant(1.0);
+      characteristics.col(1).setConstant(2.0);
+      if (inputs.rows() > 0) {
+        characteristics(inputs.rows() - 1, 0) = characteristic_values_[0];
+        characteristics(inputs.rows() - 1, 1) = characteristic_values_[1];
+      }
+    }
+
     bool emit_nan_;
     bool with_limit_layout_;
     double reference_value_;
+    std::array<double, 2> characteristic_values_;
   };
 
   constexpr std::array<mf::input_channel, 2> LOAD_INPUTS{{{.name = "FZ", .unit = "N"}, {.name = "B", .unit = "-"}}};
@@ -152,6 +177,16 @@ namespace {
     void compute_batch(const Eigen::Ref<const Eigen::MatrixXd> & /*inputs*/,
                        Eigen::Ref<Eigen::MatrixXd> outputs) const noexcept override {
       outputs.setZero();
+    }
+
+    void compute_characteristics(const Eigen::Ref<const Eigen::VectorXd> & /*input*/,
+                                 Eigen::Ref<Eigen::VectorXd> characteristics) const noexcept override {
+      characteristics.setZero();
+    }
+
+    void compute_characteristics_batch(const Eigen::Ref<const Eigen::MatrixXd> & /*inputs*/,
+                                       Eigen::Ref<Eigen::MatrixXd> characteristics) const noexcept override {
+      characteristics.setZero();
     }
 
     double reference_fz_;
@@ -435,6 +470,101 @@ TEST(tire_model, EvaluateBatchRaw_Checked_Valid_Succeeds) {
   EXPECT_NEAR(data[1], 7.0, VALUE_TOL);
   EXPECT_NEAR(data[2], 2.0, VALUE_TOL);
   EXPECT_NEAR(data[3], 12.0, VALUE_TOL);
+}
+
+namespace {
+  constexpr double INFINITE = std::numeric_limits<double>::infinity();
+
+  /// A stub whose characteristic hooks write `values` (the last batch row gets them, the others {1, 2}).
+  stub_model stub_with_characteristics(const mf::model_options &options, std::array<double, 2> values) {
+    return stub_model(options, false, Eigen::VectorXd(), mf::model_metadata{}, false, 0.5, values);
+  }
+} // namespace
+
+TEST(tire_model, CharacteristicsLength_EqualsLayoutSize) {
+  const stub_model model(unchecked_options());
+  EXPECT_EQ(model.characteristics_length(), 2);
+  const load_stub no_characteristics(4000.0);
+  EXPECT_EQ(no_characteristics.characteristics_length(), 0);
+}
+
+TEST(tire_model, EvaluateCharacteristics_NoFlag_ReturnsHookValuesUnchecked) {
+  const stub_model model = stub_with_characteristics(unchecked_options(), {INFINITE, QUIET_NAN});
+  Eigen::VectorXd values;
+  EXPECT_NO_THROW(values = model.evaluate_characteristics(point_of(2.0, 3.0)));
+  ASSERT_EQ(values.size(), 2);
+  EXPECT_TRUE(std::isinf(values(0)));
+  EXPECT_TRUE(std::isnan(values(1)));
+  // An invalid input is not validated either.
+  EXPECT_NO_THROW(values = model.evaluate_characteristics(point_of(-1.0, 3.0)));
+  ASSERT_EQ(values.size(), 2);
+  EXPECT_TRUE(std::isinf(values(0)));
+}
+
+TEST(tire_model, EvaluateCharacteristicsBatch_NoFlag_ReturnsHookValues) {
+  const stub_model model = stub_with_characteristics(unchecked_options(), {INFINITE, QUIET_NAN});
+  const Eigen::MatrixXd values = model.evaluate_characteristics_batch(ramp_inputs());
+  ASSERT_EQ(values.rows(), 5);
+  ASSERT_EQ(values.cols(), 2);
+  EXPECT_NEAR(values(0, 0), 1.0, VALUE_TOL);
+  EXPECT_NEAR(values(3, 1), 2.0, VALUE_TOL);
+  EXPECT_TRUE(std::isinf(values(4, 0)));
+  EXPECT_TRUE(std::isnan(values(4, 1)));
+
+  const Eigen::MatrixXd empty = model.evaluate_characteristics_batch(Eigen::MatrixXd(0, 2));
+  EXPECT_EQ(empty.rows(), 0);
+  EXPECT_EQ(empty.cols(), 2);
+}
+
+TEST(tire_model, EvaluateCharacteristics_FlagInvalidInput_ThrowsModelFailureWithoutRow) {
+  const stub_model model(checked_options());
+  const Eigen::VectorXd bad_point = point_of(-1.0, 3.0);
+  expect_failure([&] { (void)model.evaluate_characteristics(bad_point); }, mf::error_code::INVALID_INPUT, "A",
+                 std::nullopt);
+}
+
+TEST(tire_model, EvaluateCharacteristicsBatch_FlagInvalidInput_ThrowsModelFailureWithRow) {
+  const stub_model model(checked_options());
+  Eigen::MatrixXd inputs = ramp_inputs();
+  inputs(2, 0) = -1.0;
+  expect_failure([&] { (void)model.evaluate_characteristics_batch(inputs); }, mf::error_code::INVALID_INPUT, "A", 2U);
+}
+
+TEST(tire_model, EvaluateCharacteristics_FlagDisallowedNaN_ThrowsNumerical) {
+  const stub_model model = stub_with_characteristics(checked_options(), {1.0, QUIET_NAN});
+  expect_failure([&] { (void)model.evaluate_characteristics(point_of(2.0, 3.0)); }, mf::error_code::NUMERICAL, "CB",
+                 std::nullopt);
+}
+
+TEST(tire_model, EvaluateCharacteristics_FlagInf_ThrowsNumerical) {
+  const stub_model model = stub_with_characteristics(checked_options(), {INFINITE, 2.0});
+  expect_failure([&] { (void)model.evaluate_characteristics(point_of(2.0, 3.0)); }, mf::error_code::NUMERICAL, "CA",
+                 std::nullopt);
+}
+
+TEST(tire_model, EvaluateCharacteristicsBatch_FlagNonFinite_ThrowsWithLastRow) {
+  const stub_model model = stub_with_characteristics(checked_options(), {1.0, INFINITE});
+  expect_failure([&] { (void)model.evaluate_characteristics_batch(ramp_inputs()); }, mf::error_code::NUMERICAL, "CB",
+                 4U);
+}
+
+TEST(tire_model, EvaluateCharacteristics_FlagAllowedNaN_Succeeds) {
+  const stub_model model = stub_with_characteristics(checked_options(), {QUIET_NAN, 2.0});
+  Eigen::VectorXd values;
+  EXPECT_NO_THROW(values = model.evaluate_characteristics(point_of(2.0, 3.0)));
+  ASSERT_EQ(values.size(), 2);
+  EXPECT_TRUE(std::isnan(values(0)));
+  EXPECT_NEAR(values(1), 2.0, VALUE_TOL);
+}
+
+TEST(tire_model, EvaluateCharacteristicsBatch_FlagValid_Succeeds) {
+  const stub_model model(checked_options());
+  Eigen::MatrixXd values;
+  EXPECT_NO_THROW(values = model.evaluate_characteristics_batch(ramp_inputs()));
+  ASSERT_EQ(values.rows(), 5);
+  ASSERT_EQ(values.cols(), 2);
+  EXPECT_NEAR(values(4, 0), 1.0, VALUE_TOL);
+  EXPECT_NEAR(values(4, 1), 2.0, VALUE_TOL);
 }
 
 TEST(tire_model, Accessors_ReturnLimitsMetadataOptions) {

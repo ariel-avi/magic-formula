@@ -18,8 +18,8 @@ namespace mf::io {
     double value = 0.0;
     const char *const first = text.data();
     const char *const last = text.data() + text.size();
-    const auto [ptr, ec] = std::from_chars(first, last, value, std::chars_format::general);
-    if (ec == std::errc{} && ptr == last && std::isfinite(value)) {
+    if (const auto [ptr, ec] = std::from_chars(first, last, value, std::chars_format::general);
+        ec == std::errc{} && ptr == last && std::isfinite(value)) {
       return value;
     }
     return std::nullopt;

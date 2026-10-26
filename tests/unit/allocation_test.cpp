@@ -7,10 +7,13 @@
 #include <cstdlib>
 #include <expected>
 #include <gtest/gtest.h>
+#include <magic_formula/detail/lanes.hpp>
+#include <magic_formula/detail/mf5x_characteristics.hpp>
 #include <magic_formula/error.hpp>
 #include <magic_formula/evaluation_types.hpp>
 #include <magic_formula/mf52_model.hpp>
 #include <magic_formula/mf5x_coefficients.hpp>
+#include <magic_formula/mf5x_forms.hpp>
 #include <magic_formula/mf5x_layout.hpp>
 #include <magic_formula/pac2002_model.hpp>
 #include <magic_formula/tire_model.hpp>
@@ -41,18 +44,30 @@
 #endif
 
 namespace {
+  // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables): the state of the counting global allocator
   // Number of allocations made while `tracking` is set.
   std::atomic<long> allocation_count{0};
   std::atomic<bool> tracking{false};
 
   // A sink that makes a pointer escape, so that the compiler cannot elide an allocation.
   double *volatile pointer_sink = nullptr;
+  // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
+
+  void *call_malloc(std::size_t size) {
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory): counting allocator
+    return std::malloc(size);
+  }
+
+  // malloc is called through a pointer so that the static analyser does not follow the allocation of the replaced
+  // operator new into GoogleTest's matcher storage, where it reports a false leak.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables): volatile function pointer, see above
+  void *(*const volatile MALLOC_FUNCTION)(std::size_t) = &call_malloc;
 
   void *counted_allocate(std::size_t size) {
     if (tracking.load(std::memory_order_relaxed)) {
       allocation_count.fetch_add(1, std::memory_order_relaxed);
     }
-    void *memory = std::malloc(size == 0 ? 1 : size); // NOLINT(cppcoreguidelines-no-malloc): counting allocator
+    void *memory = MALLOC_FUNCTION(size == 0 ? 1 : size);
     if (memory == nullptr) {
       throw std::bad_alloc();
     }
@@ -82,11 +97,11 @@ void operator delete[](void *memory) noexcept {
   counted_free(memory);
 }
 
-void operator delete(void *memory, std::size_t) noexcept {
+void operator delete(void *memory, [[maybe_unused]] std::size_t size) noexcept {
   counted_free(memory);
 }
 
-void operator delete[](void *memory, std::size_t) noexcept {
+void operator delete[](void *memory, [[maybe_unused]] std::size_t size) noexcept {
   counted_free(memory);
 }
 // NOLINTEND(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory,misc-new-delete-overloads)
@@ -106,6 +121,8 @@ namespace {
     }
     eigen_malloc_guard(const eigen_malloc_guard &) = delete;
     eigen_malloc_guard &operator=(const eigen_malloc_guard &) = delete;
+    eigen_malloc_guard(eigen_malloc_guard &&) = delete;
+    eigen_malloc_guard &operator=(eigen_malloc_guard &&) = delete;
     ~eigen_malloc_guard() {
 #ifdef EIGEN_RUNTIME_NO_MALLOC
       Eigen::internal::set_is_malloc_allowed(true);
@@ -208,7 +225,48 @@ namespace {
       }
     }
   }
+
+  // The characteristics kernel on `rows` rows of the valid grid (offset by 3 rows), in both slip modes and with both
+  // combined methods, on fixture S-rng: it must not allocate (it also runs the dual-lane kernels and the root finder).
+  template <class Lane_T> void expect_characteristics_without_allocation(Eigen::Index rows) {
+    constexpr Eigen::Index offset = 3;
+    const Eigen::MatrixXd grid = valid_grid();
+    const mf::mf5x_parameters parameters = mf::test::fixture_s_rng();
+    mf::detail::input_lanes<Lane_T> raw;
+    raw.fz_n = Lane_T::Zero(rows);
+    raw.alpha_rad = Lane_T::Zero(rows);
+    raw.kappa = Lane_T::Zero(rows);
+    raw.gamma_rad = Lane_T::Zero(rows);
+    raw.vx_mps = Lane_T::Zero(rows);
+    for (Eigen::Index i = 0; i < rows; ++i) {
+      raw.fz_n(i) = grid(i + offset, mf::mf5x::FZ);
+      raw.alpha_rad(i) = grid(i + offset, mf::mf5x::SA);
+      raw.kappa(i) = grid(i + offset, mf::mf5x::SR);
+      raw.gamma_rad(i) = grid(i + offset, mf::mf5x::IA);
+      raw.vx_mps(i) = grid(i + offset, mf::mf5x::VX);
+    }
+    for (const mf::slip_mode mode : SLIP_MODES) {
+      for (const mf::combined_method method : {mf::combined_method::COSINE, mf::combined_method::FRICTION_ELLIPSE}) {
+        mf::mf5x_forms forms;
+        forms.combined = method;
+        const long count = count_allocations([&] {
+          mf::detail::characteristic_lanes<Lane_T> out =
+              mf::detail::mf5x_characteristics<Lane_T>(parameters.coefficients, forms, mode, parameters.limits, raw);
+          pointer_sink = out.dy_n.data();
+        });
+        EXPECT_EQ(count, 0);
+      }
+    }
+  }
 } // namespace
+
+TEST(allocation, Mf5xCharacteristicsPoint_BothModesBothMethods_NoAllocation) {
+  expect_characteristics_without_allocation<mf::detail::point_lane>(1);
+}
+
+TEST(allocation, Mf5xCharacteristicsBlock_BothModesBothMethods_NoAllocation) {
+  expect_characteristics_without_allocation<mf::detail::block_lane>(mf::detail::BLOCK_ROWS);
+}
 
 TEST(allocation, Counter_DetectsStdVectorAllocation) {
   const long count = count_allocations([] {

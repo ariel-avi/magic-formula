@@ -1,6 +1,6 @@
 # docs/research: index and findings
 
-These notes define the PAC2002 and MF 5.2 tire models as this project implements them: equations, conventions, the `.tir` format, model routing, project rules, test data and validation. They are self-contained and refer only to files in this repository. The evaluation orders in pac2002.md section 2 and mf52.md section 4 are authoritative. MF 5.2 shares the PAC2002 forms except the differences listed in pac2002-vs-mf52.md. Where a note and policies.md differ, policies.md is what the code implements.
+These notes define the PAC2002 and MF 5.2 tire models as this project implements them: equations, conventions, the `.tir` format, model routing, project rules, test data and validation. They are self-contained; apart from characteristics.md and coordinate-systems.md, which carry an external source list in their Sources section, they refer only to files in this repository. The evaluation orders in pac2002.md section 2 and mf52.md section 4 are authoritative. MF 5.2 shares the PAC2002 forms except the differences listed in pac2002-vs-mf52.md. Where a note and policies.md differ, policies.md is what the code implements.
 
 ## Findings
 
@@ -35,6 +35,14 @@ Each row summarises a rule; Details names the note that defines it.
 | Pressure | ignored for both models, with one warning | conventions.md section 11; policies.md section 5 |
 | Uncombined mode | Fx = Fx0, Fy = Fy0, Mz = Mz0 | conventions.md section 10; policies.md section 1 |
 | Vx | Vx < 0 rejected; PAC2002 accepts Vx = 0; MF 5.2 requires Vx > 0 | conventions.md section 5; policies.md section 1 |
+| Characteristics (tangent and secant stiffness, DY, DX, peak slips) | eight channels per point in a separate vector; the cited meaning of BCD, K and D, and the project definitions of the tangent and the secant | characteristics.md section 1; policies.md section 9 |
+| Stiffness parameters vs tangents | the slope of the pure curve at the shifted origin is K*abs(CD)/(abs(CD) + eps), not exactly K; MFeval Kxk/Kya semantics are not determined, so no parity is claimed | characteristics.md section 1 |
+| Derivative method | forward-mode differentiation (dual numbers) of the closed-form kernels, exact chain rule, no step size; the closed forms are the oracles | characteristics.md sections 2 and 3 |
+| Ellipse derivatives | Fz-free form; at a genuine kink the right derivative; at a 0/0 ratio the value is 1 and the force derivative is F0' times the directional limit of the ratio | characteristics.md sections 2.3-2.5 |
+| Peak condition | cos(C*theta) = 0, abs(phi) = tan(pi/(2C)), needs C > 1; E = (abs(u) - T)/(abs(u) - atan(abs(u))); existence conditions and the agreement with the search | characteristics.md section 4 |
+| Peak search | first stationary point from 0 on the side of the row's slip, 32-cell scan plus 52 bisections, NaN when none | characteristics.md section 5; policies.md section 9 |
+| Characteristic sign parity | DFY_DSA, FY_OVER_SA: VERTICAL and LATERAL; DY: VERTICAL; SA_AT_PEAK_FY: LATERAL (SA != 0); the others none | characteristics.md section 6 |
+| Zero-slip secant | at raw slip +-0 the secant is the row's tangent; rows without contact give +0; NaN only in the two peak channels | characteristics.md section 7; policies.md section 9 |
 
 ## Files
 
@@ -42,12 +50,13 @@ Each row summarises a rule; Details names the note that defines it.
 |---|---|
 | conventions.md | cross-model rules: axes, slip, signs, speed, sgn/eps, limits, TYRESIDE, modes, pressure |
 | coordinate-systems.md | the user's ISO and SAE definitions, TNO ISO-W context, conversion by coefficient sign flips (transforms A and B, flip tables, code generalisations, gauge symmetries), robust multi-indicator identification, expected results per fixture, numerical verification |
+| characteristics.md | the eight characteristics: definitions, closed-form derivatives (pure, cosine, friction ellipse with kinks and 0/0 points), evaluation method, peak condition and existence, peak search, sign parity, edge cases, sources |
 | pac2002.md | PAC2002 evaluation order and equations (authoritative), equation choices, rule details |
 | mf52.md | MF 5.2 status and settings, parameter set, evaluation order and equations (authoritative), behaviours not adopted |
 | pac2002-vs-mf52.md | difference table |
 | model-routing.md | FITTYP / PROPERTY_FILE_FORMAT routing |
 | tir-format.md | lexical rules, sections, [UNITS], required keys and defaults |
-| test-data.md | data policy, fixture S, vectors, property tests, parser and routing fixtures |
+| test-data.md | data policy, fixture S, vectors, property tests, parser and routing fixtures, characteristic vectors and CLI rows |
 | policies.md | project rules: pipeline, numerics, loading, lexical refinements, CLI, test data, items that may change |
 | open-questions.md | open items and settled points |
 | validation.md | validation summary: comparisons, method and tolerances, results, differences and dispositions, open items |

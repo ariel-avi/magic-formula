@@ -6,12 +6,14 @@ set(MF_UNIT_TESTS
         coordinate_conversion_test.cpp
         coordinate_identification_test.cpp
         coordinate_system_test.cpp
+        dual_lane_test.cpp
         error_test.cpp
         identification_probes_test.cpp
         input_table_test.cpp
         lanes_test.cpp
         mf52_model_test.cpp
         mf5x_bindings_test.cpp
+        mf5x_characteristics_test.cpp
         mf5x_coefficients_test.cpp
         mf5x_kernels_test.cpp
         mf5x_layout_test.cpp
@@ -25,6 +27,7 @@ set(MF_UNIT_TESTS
         number_test.cpp
         pac2002_model_test.cpp
         result_writer_test.cpp
+        stationary_point_test.cpp
         text_file_test.cpp
         text_test.cpp
         tir_conversion_test.cpp

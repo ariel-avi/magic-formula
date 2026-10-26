@@ -35,13 +35,20 @@ namespace {
   using mf::test::printed_tol;
   using mf::test::rel_near_result;
 
-  /// Number of comma-separated fields on every result line (5 inputs + 5 outputs + 5 flags).
-  constexpr std::size_t FIELD_COUNT = 15;
+  /// Number of comma-separated fields on every result line (5 inputs + 5 outputs + 5 flags + 8 characteristics).
+  constexpr std::size_t FIELD_COUNT = 23;
+
+  /// Number of characteristic fields at the end of every result line.
+  constexpr std::size_t CHARACTERISTIC_COUNT = 8;
+
+  /// Index of the first characteristic field of a result line.
+  constexpr std::size_t FIRST_CHARACTERISTIC = FIELD_COUNT - CHARACTERISTIC_COUNT;
 
   /// The exact header line of every run (PAC2002 and MF 5.2 alike).
   constexpr std::string_view EXPECTED_HEADER =
       "FZ[N],SA[rad],SR[-],IA[rad],VX[m/s],FX[N],FY[N],MZ[N*m],MX[N*m],MY[N*m],FZ_CLAMPED[-],SR_CLAMPED[-],"
-      "SA_CLAMPED[-],IA_CLAMPED[-],BELOW_VXLOW[-]";
+      "SA_CLAMPED[-],IA_CLAMPED[-],BELOW_VXLOW[-],DFY_DSA[N/rad],DFX_DSR[N],FY_OVER_SA[N/rad],FX_OVER_SR[N],DY[N],"
+      "DX[N],SA_AT_PEAK_FY[rad],SR_AT_PEAK_FX[-]";
 
   /// Exit status and both streams of one in-process run.
   struct run_result {
@@ -50,7 +57,8 @@ namespace {
     std::string err;
   };
 
-  /// One parsed result line: the five echoed inputs, the five outputs, then the five 0/1 flags.
+  /// One parsed result line: the five echoed inputs, the five outputs, the five 0/1 flags, then the eight
+  /// characteristics in the order of `mf::mf5x::characteristic_index` (a printed "nan" reads as NaN).
   struct result_row {
     double fz = 0.0;
     double sa = 0.0;
@@ -67,6 +75,7 @@ namespace {
     double sa_clamped = 0.0;
     double ia_clamped = 0.0;
     double below_vxlow = 0.0;
+    std::array<double, CHARACTERISTIC_COUNT> characteristics{};
   };
 
   /// A streambuf that rejects every character, so that every insertion into a stream on it fails.
@@ -121,19 +130,32 @@ namespace {
     return lines;
   }
 
-  /// The fifteen numbers of one result line; a field that is not a number makes the test fail and reads as NaN.
-  result_row row_of(const std::string &line) {
-    std::vector<double> values;
+  /// The text fields of one result line.
+  std::vector<std::string> fields_of(const std::string &line) {
+    std::vector<std::string> fields;
     std::istringstream stream(line);
     for (std::string field; std::getline(stream, field, ',');) {
+      fields.push_back(field);
+    }
+    return fields;
+  }
+
+  /// The numbers of one result line; "nan" reads as NaN, any other field that is not a number makes the test fail and
+  /// reads as NaN.
+  result_row row_of(const std::string &line) {
+    std::vector<double> values;
+    for (const std::string &field : fields_of(line)) {
       const std::optional<double> parsed = mf::io::parse_number(field);
-      EXPECT_TRUE(parsed.has_value()) << "not a number: '" << field << "' in " << line;
+      EXPECT_TRUE(parsed.has_value() || field == "nan") << "not a number: '" << field << "' in " << line;
       values.push_back(parsed.value_or(std::nan("")));
     }
     if (values.size() != FIELD_COUNT) {
       ADD_FAILURE() << "expected " << FIELD_COUNT << " fields, got " << values.size() << " in " << line;
       return result_row{};
     }
+    std::array<double, CHARACTERISTIC_COUNT> characteristics{};
+    std::copy(values.begin() + static_cast<std::ptrdiff_t>(FIRST_CHARACTERISTIC), values.end(),
+              characteristics.begin());
     return result_row{.fz = values[0],
                       .sa = values[1],
                       .sr = values[2],
@@ -148,7 +170,8 @@ namespace {
                       .sr_clamped = values[11],
                       .sa_clamped = values[12],
                       .ia_clamped = values[13],
-                      .below_vxlow = values[14]};
+                      .below_vxlow = values[14],
+                      .characteristics = characteristics};
   }
 
   /// All data rows of a stdout text (the header line is skipped).
@@ -659,7 +682,14 @@ TEST(cli_run, Run_ThrowingOutputStream_CaughtExit1) {
   EXPECT_NE(err.str(), "mf: error: cannot write results\n");
 }
 
-TEST(cli, Run_Header_FifteenColumnsExact) {
+namespace {
+  /// The line has exactly FIELD_COUNT comma-separated fields.
+  bool has_field_count(const std::string &line) {
+    return count_of(line, ",") + 1U == FIELD_COUNT;
+  }
+} // namespace
+
+TEST(cli, Run_Header_TwentyThreeColumnsExact) {
   const run_result result = run_files("inputs_s_vectors.csv", "pac2002_S.tir");
   ASSERT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
   const std::vector<std::string> lines = lines_of(result.out);
@@ -667,9 +697,7 @@ TEST(cli, Run_Header_FifteenColumnsExact) {
   EXPECT_EQ(lines[0], EXPECTED_HEADER);
   EXPECT_EQ(lines[0], mf::io::results_header(mf::mf5x::PAC2002_LAYOUT));
   EXPECT_EQ(count_of(lines[0], ",") + 1U, FIELD_COUNT);
-  for (std::size_t index = 1; index < lines.size(); ++index) {
-    EXPECT_EQ(count_of(lines[index], ",") + 1U, FIELD_COUNT) << "line " << index;
-  }
+  EXPECT_TRUE(std::ranges::all_of(lines, has_field_count)) << result.out;
 
   const run_result mf52 = run_files("inputs_s_vectors.csv", "mf52_S52.tir");
   ASSERT_EQ(mf52.code, mf::cli::EXIT_OK) << mf52.err;
@@ -1054,4 +1082,254 @@ TEST(cli_run, Run_InvalidSystem_Exit2) {
 TEST(cli_run, Run_InvalidTableSystem_Exit2) {
   const run_result result = run_cli({"--table-system=xyz", "a.csv", "b.tir"});
   expect_usage_run(result, "invalid value 'xyz' for --table-system (expected iso or sae)\n");
+}
+
+namespace {
+  /// The eight printed characteristics of a row, as the digits of the reference tables ("nan" for an undefined peak).
+  using printed_row = std::array<std::string_view, CHARACTERISTIC_COUNT>;
+
+  /// A row without contact: six zeros, then two undefined peaks.
+  constexpr printed_row NO_CONTACT{"0", "0", "0", "0", "0", "0", "nan", "nan"};
+
+  /// The four loaded rows of inputs_s_vectors.csv (V2, V3, V12, V13) followed by the two lift-off rows, for one run.
+  using printed_run = std::array<printed_row, 6>;
+
+  /// Position of a characteristic in a result line.
+  constexpr std::size_t field_index(std::size_t characteristic) {
+    return FIRST_CHARACTERISTIC + characteristic;
+  }
+
+  /// `actual` equals the printed reference `text` within half a unit of its last digit plus a 5e-10 relative allowance
+  /// for the iterated peak slips; "nan" needs a NaN and "0" an exact zero (of either sign).
+  void expect_printed(double actual, std::string_view text, const std::string &label) {
+    if (text == "nan") {
+      EXPECT_TRUE(std::isnan(actual)) << label << ": expected nan, got " << actual;
+      return;
+    }
+    const std::optional<double> parsed = mf::io::parse_number(text);
+    ASSERT_TRUE(parsed.has_value()) << label << ": bad reference '" << text << "'";
+    const double expected = parsed.value_or(0.0);
+    if (expected == 0.0) {
+      EXPECT_EQ(actual, 0.0) << label;
+      return;
+    }
+    // A reference without a decimal point is an exactly representable integer such as 4000.
+    const std::size_t point = text.find('.');
+    const int decimals = point == std::string_view::npos ? 9 : static_cast<int>(text.size() - point - 1);
+    const double tolerance = printed_tol(decimals) + (5e-10 * std::abs(expected));
+    EXPECT_NEAR(actual, expected, tolerance) << label;
+  }
+
+  /// The eight characteristics of `row` equal the printed reference `want`.
+  void expect_printed_row(const result_row &row, const printed_row &want, const std::string &label) {
+    for (std::size_t index = 0; index < CHARACTERISTIC_COUNT; ++index) {
+      expect_printed(row.characteristics.at(index), want.at(index), label + " characteristic " + std::to_string(index));
+    }
+  }
+
+  /// A successful run whose six rows have the printed characteristics `want`; "-nan" never appears.
+  void expect_printed_run(const run_result &result, const printed_run &want, const std::string &label) {
+    ASSERT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
+    EXPECT_FALSE(result.out.contains("-nan")) << result.out;
+    const std::vector<result_row> rows = rows_of(result.out);
+    ASSERT_EQ(rows.size(), want.size());
+    for (std::size_t index = 0; index < want.size(); ++index) {
+      expect_printed_row(rows[index], want.at(index), label + " row " + std::to_string(index));
+    }
+  }
+
+  /// The characteristics of `got` equal those of `want` multiplied by `signs`, within a 1e-10 scaled tolerance; a NaN
+  /// of `want` needs a NaN in `got`.
+  void expect_characteristics_match(const result_row &got, const result_row &want,
+                                    const std::array<double, CHARACTERISTIC_COUNT> &signs, std::size_t row) {
+    constexpr double tol = 1e-10;
+    constexpr std::array<double, CHARACTERISTIC_COUNT> scales{5e4, 1e5, 5e4, 1e5, 4000.0, 4000.0, 1.0, 1.0};
+    for (std::size_t index = 0; index < CHARACTERISTIC_COUNT; ++index) {
+      const double expected = signs.at(index) * want.characteristics.at(index);
+      if (std::isnan(expected)) {
+        EXPECT_TRUE(std::isnan(got.characteristics.at(index))) << "row " << row << " characteristic " << index;
+      } else {
+        EXPECT_TRUE(near_scaled(got.characteristics.at(index), expected, tol, scales.at(index)))
+            << "row " << row << " characteristic " << index;
+      }
+    }
+  }
+
+  /// Every row of `got` matches the same-index row of `want` as `expect_characteristics_match` defines (`got` may be
+  /// the shorter list).
+  void expect_all_characteristics_match(const std::vector<result_row> &got, const std::vector<result_row> &want,
+                                        const std::array<double, CHARACTERISTIC_COUNT> &signs) {
+    for (std::size_t index = 0; index < got.size(); ++index) {
+      expect_characteristics_match(got[index], want[index], signs, index);
+    }
+  }
+
+  /// The secant FY_OVER_SA and FX_OVER_SR of a no-contact line print as "0" and the peak slips as "nan".
+  void expect_no_contact_fields(const std::string &line) {
+    const std::vector<std::string> fields = fields_of(line);
+    EXPECT_EQ(fields[field_index(mf::mf5x::FY_OVER_SA)], "0") << line;
+    EXPECT_EQ(fields[field_index(mf::mf5x::FX_OVER_SR)], "0") << line;
+    EXPECT_EQ(fields[field_index(mf::mf5x::SA_AT_PEAK_FY)], "nan") << line;
+    EXPECT_EQ(fields[field_index(mf::mf5x::SR_AT_PEAK_FX)], "nan") << line;
+  }
+
+  /// In the lines of a zero-slip run, the secant of the SA = 0 row (line 1) and of the SR = 0 row (line 2) is the slope
+  /// of that row, field for field.
+  void expect_secants_equal_slopes_at_zero_slip(const std::vector<std::string> &lines) {
+    const std::vector<std::string> v2 = fields_of(lines[1]);
+    EXPECT_EQ(v2[field_index(mf::mf5x::FY_OVER_SA)], v2[field_index(mf::mf5x::DFY_DSA)]);
+    const std::vector<std::string> v3 = fields_of(lines[2]);
+    EXPECT_EQ(v3[field_index(mf::mf5x::FX_OVER_SR)], v3[field_index(mf::mf5x::DFX_DSR)]);
+  }
+
+  /// The text of the characteristic fields of every data line of `out`, joined by ';'.
+  std::vector<std::string> characteristic_texts(const std::string &out) {
+    const std::vector<std::string> lines = lines_of(out);
+    std::vector<std::string> texts;
+    for (std::size_t index = 1; index < lines.size(); ++index) {
+      const std::vector<std::string> fields = fields_of(lines[index]);
+      std::string joined;
+      for (std::size_t field = FIRST_CHARACTERISTIC; field < fields.size(); ++field) {
+        joined += fields[field] + ";";
+      }
+      texts.push_back(joined);
+    }
+    return texts;
+  }
+} // namespace
+
+TEST(cli_run, Run_PacSVectors_CharacteristicColumnsMatchVectors) {
+  const run_result result = run_files("inputs_s_vectors.csv", "pac2002_S.tir");
+  const printed_run want{printed_row{"-39162.83710", "5151.900624", "-39162.83710", "39354.79640", "4000", "4000",
+                                     "0.2475646539", "0.1299038106"},
+                         printed_row{"-34707.69218", "71554.17527", "-47527.96305", "71554.17527", "4000", "4000",
+                                     "0.2475646539", "0.1299038106"},
+                         printed_row{"-8938.282121", "3642.943867", "-24701.24502", "27828.04341", "4000", "4000",
+                                     "0.2475646539", "0.1299038106"},
+                         printed_row{"-24542.04450", "4608.000003", "-33607.34497", "35200.00000", "4000", "4000",
+                                     "0.2475646539", "0.1299038106"},
+                         NO_CONTACT,
+                         NO_CONTACT};
+  expect_printed_run(result, want, "S combined");
+
+  const std::vector<std::string> lines = lines_of(result.out);
+  ASSERT_EQ(lines.size(), 7U);
+  // V2 (SA 0): FY_OVER_SA is the slope DFY_DSA of the row, V3 (SR 0): FX_OVER_SR is DFX_DSR.
+  expect_secants_equal_slopes_at_zero_slip(lines);
+  // V22: no contact gives exactly +0 secants, with no sign.
+  expect_no_contact_fields(lines[5]);
+  expect_no_contact_fields(lines[6]);
+}
+
+TEST(cli_run, Run_Mf52Vectors_CharacteristicColumnsEqualPac2002) {
+  const run_result pac = run_files("inputs_s_vectors.csv", "pac2002_S.tir");
+  const run_result mf52 = run_files("inputs_s_vectors.csv", "mf52_S52.tir");
+  ASSERT_EQ(pac.code, mf::cli::EXIT_OK) << pac.err;
+  ASSERT_EQ(mf52.code, mf::cli::EXIT_OK) << mf52.err;
+  const std::vector<std::string> expected = characteristic_texts(pac.out);
+  const std::vector<std::string> actual = characteristic_texts(mf52.out);
+  ASSERT_EQ(expected.size(), 6U);
+  EXPECT_EQ(actual, expected);
+}
+
+TEST(cli_run, Run_Uncombined_CharacteristicsOfPureCurves) {
+  const run_result result = run_files("inputs_s_vectors.csv", "pac2002_S.tir", {"--uncombined"});
+  const printed_run want{printed_row{"-55384.61537", "5151.900624", "-55384.61537", "39354.79640", "4000", "4000",
+                                     "0.2475646539", "0.1299038106"},
+                         printed_row{"-34707.69218", "79999.99999", "-47527.96305", "79999.99999", "4000", "4000",
+                                     "0.2475646539", "0.1299038106"},
+                         printed_row{"-12640.63980", "5151.900624", "-34932.83571", "39354.79640", "4000", "4000",
+                                     "0.2475646539", "0.1299038106"},
+                         printed_row{"-34707.69218", "5151.900624", "-47527.96305", "39354.79640", "4000", "4000",
+                                     "0.2475646539", "0.1299038106"},
+                         NO_CONTACT,
+                         NO_CONTACT};
+  expect_printed_run(result, want, "S uncombined");
+
+  const std::vector<std::string> lines = lines_of(result.out);
+  ASSERT_EQ(lines.size(), 7U);
+  // V2 (SA 0): FY_OVER_SA = DFY_DSA = 5200*By; V3 (SR 0): FX_OVER_SR = DFX_DSR = 6000*Bx.
+  expect_secants_equal_slopes_at_zero_slip(lines);
+}
+
+TEST(cli_run, Run_EllipseFixture_ZeroSlipRowsUseDirectionalLimit) {
+  const run_result result = run_files("inputs_s_vectors.csv", "pac2002_S_ell.tir");
+  const printed_run want{printed_row{"-32427.16913", "5151.900624", "-32427.16913", "39354.79640", "4000", "4000",
+                                     "0.4281129082", "0.1299038106"},
+                         printed_row{"-34707.69218", "56580.32736", "-47527.96305", "56580.32736", "4000", "4000",
+                                     "0.2475646539", "0.1675533315"},
+                         printed_row{"-16749.59182", "15657.19503", "-26292.52881", "28076.37066", "4000", "4000",
+                                     "0.4281129082", "0.2445156130"},
+                         printed_row{"-27161.23002", "10599.59198", "-30596.45195", "35316.04991", "4000", "4000",
+                                     "0.4281129082", "0.1675533315"},
+                         NO_CONTACT,
+                         NO_CONTACT};
+  expect_printed_run(result, want, "S_ell combined");
+
+  const std::vector<std::string> lines = lines_of(result.out);
+  ASSERT_EQ(lines.size(), 7U);
+  // V2 (SA 0): the secant is the directional-limit slope of the row; V3 (SR 0) likewise.
+  expect_secants_equal_slopes_at_zero_slip(lines);
+}
+
+TEST(cli_run, Run_TableSystemIsoOnSaeModel_CharacteristicsConverted) {
+  const run_result converted = run_files("inputs_s_vectors.csv", "pac2002_S_sae.tir", {"--table-system=iso"});
+  const run_result iso = run_files("inputs_s_vectors.csv", "pac2002_S_iso.tir");
+  ASSERT_EQ(converted.code, mf::cli::EXIT_OK) << converted.err;
+  ASSERT_EQ(iso.code, mf::cli::EXIT_OK) << iso.err;
+  EXPECT_FALSE(converted.out.contains("-nan")) << converted.out;
+  const std::vector<result_row> converted_rows = rows_of(converted.out);
+  const std::vector<result_row> iso_rows = rows_of(iso.out);
+  ASSERT_EQ(converted_rows.size(), 6U);
+  ASSERT_EQ(iso_rows.size(), 6U);
+  // The table is in ISO for both runs: the converted SAE model prints what the ISO model prints.
+  constexpr std::array<double, CHARACTERISTIC_COUNT> same{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
+  expect_all_characteristics_match(converted_rows, iso_rows, same);
+
+  // Without conversion the SAE model on its own SAE table: DFY_DSA, FY_OVER_SA and DY have the other sign than the ISO
+  // model on the ISO table, the other five characteristics are equal.
+  const run_result sae = run_files("inputs_sae.csv", "pac2002_S_sae.tir");
+  ASSERT_EQ(sae.code, mf::cli::EXIT_OK) << sae.err;
+  EXPECT_FALSE(sae.out.contains("-nan")) << sae.out;
+  const std::vector<result_row> sae_rows = rows_of(sae.out);
+  ASSERT_EQ(sae_rows.size(), 4U);
+  constexpr std::array<double, CHARACTERISTIC_COUNT> negated{-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 1.0, 1.0};
+  expect_all_characteristics_match(sae_rows, iso_rows, negated);
+}
+
+namespace {
+  /// The slope of row `index` is an exact zero (of either sign) when its slip was clamped, and non-zero otherwise.
+  void expect_zero_slope_iff_clamped(double clamped_flag, double slope, std::size_t index) {
+    if (clamped_flag == 1.0) {
+      EXPECT_EQ(slope, 0.0) << "row " << index;
+    } else {
+      EXPECT_NE(slope, 0.0) << "row " << index;
+    }
+  }
+} // namespace
+
+TEST(cli, Run_RangesFixture_ClampedRowsZeroSlope) {
+  const run_result result = run_files("inputs_ranges.csv", "pac2002_S_rng.tir");
+  ASSERT_EQ(result.code, mf::cli::EXIT_OK) << result.err;
+  const std::vector<result_row> rows = rows_of(result.out);
+  ASSERT_EQ(rows.size(), 6U);
+  for (std::size_t index = 0; index < rows.size(); ++index) {
+    expect_zero_slope_iff_clamped(rows[index].sa_clamped, rows[index].characteristics[mf::mf5x::DFY_DSA], index);
+    expect_zero_slope_iff_clamped(rows[index].sr_clamped, rows[index].characteristics[mf::mf5x::DFX_DSR], index);
+  }
+  const auto clamped_sa = [](const result_row &row) { return row.sa_clamped == 1.0; };
+  const auto clamped_sr = [](const result_row &row) { return row.sr_clamped == 1.0; };
+  EXPECT_EQ(std::ranges::count_if(rows, clamped_sa), 1);
+  EXPECT_EQ(std::ranges::count_if(rows, clamped_sr), 1);
+}
+
+TEST(cli_run, Run_Help_UsageDescribesCharacteristicsAndNan) {
+  const run_result result = run_cli({"--help"});
+  EXPECT_EQ(result.code, mf::cli::EXIT_OK);
+  EXPECT_TRUE(result.out.contains(EXPECTED_HEADER)) << result.out;
+  EXPECT_TRUE(result.out.contains(mf::io::results_header(mf::mf5x::PAC2002_LAYOUT))) << result.out;
+  EXPECT_TRUE(result.out.contains(mf::io::results_header(mf::mf5x::MF52_LAYOUT))) << result.out;
+  EXPECT_TRUE(result.out.contains("nan appears only in these last two")) << result.out;
+  EXPECT_TRUE(result.out.contains("is a value, not an error.")) << result.out;
+  EXPECT_TRUE(result.out.contains("(at SA = 0 or SR = 0 the slope DFY_DSA or")) << result.out;
 }

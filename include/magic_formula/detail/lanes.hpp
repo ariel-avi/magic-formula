@@ -22,6 +22,14 @@ namespace mf::detail {
   /// Guard added to denominators that can reach zero.
   inline constexpr double EPSILON = 1e-6;
 
+  /// mask ? if_true : if_false, element-wise: the one select primitive of kernels that must also run on dual lanes.
+  /// Call form: pass named concrete lanes, never `Lane_T::Constant(...)` expressions, so that `Lane_T` is deduced; an
+  /// unqualified call finds the `dual_lane` overload by argument-dependent lookup.
+  template <typename Mask_T, typename Lane_T>
+  [[nodiscard]] Lane_T select_lanes(const Mask_T &mask, const Lane_T &if_true, const Lane_T &if_false) noexcept {
+    return mask.select(if_true, if_false);
+  }
+
   /// sgn+ : +1 for x >= 0 (including +0.0 and -0.0), -1 otherwise.
   template <typename Lane_T> [[nodiscard]] Lane_T sgn_plus(const Lane_T &x) noexcept {
     return (x >= 0.0).select(Lane_T::Constant(x.size(), 1.0), Lane_T::Constant(x.size(), -1.0));

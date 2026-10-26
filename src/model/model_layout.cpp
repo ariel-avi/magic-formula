@@ -18,14 +18,29 @@ namespace mf {
       return location{.file = {}, .line = 0, .key = std::move(text)};
     }
 
-    /// Negates every column of `values` whose channel's `negated_by` is in `transforms` (exact sign flips).
+    /// True when `plan` negates the input `channel`.
+    [[nodiscard]] bool negated_under(const input_channel &channel, const sign_transforms &plan) noexcept {
+      return contains(plan, channel.negated_by);
+    }
+
+    /// True when `plan` negates the output `channel`.
+    [[nodiscard]] bool negated_under(const output_channel &channel, const sign_transforms &plan) noexcept {
+      return contains(plan, channel.negated_by);
+    }
+
+    /// True when `plan` negates the characteristic `channel`.
+    [[nodiscard]] bool negated_under(const characteristic_channel &channel, const sign_transforms &plan) noexcept {
+      return negates(channel.negated_by, plan);
+    }
+
+    /// Negates every column of `values` whose channel is negated under `transforms` (exact sign flips).
     // NOLINTBEGIN(performance-unnecessary-value-param): a writable Eigen::Ref is taken by value so that it binds Map
     // temporaries (the Eigen idiom); a const reference to it would not bind a writable parameter.
     template <typename Channel_T>
     void negate_columns(std::span<const Channel_T> channels, const sign_transforms &transforms,
                         Eigen::Ref<Eigen::MatrixXd> values) noexcept {
       for (std::size_t i = 0; i < channels.size(); ++i) {
-        if (contains(transforms, channels[i].negated_by)) {
+        if (negated_under(channels[i], transforms)) {
           const auto column = static_cast<Eigen::Index>(i);
           values.col(column) = -values.col(column);
         }
@@ -41,6 +56,11 @@ namespace mf {
   }
 
   void apply_sign_transforms(std::span<const output_channel> channels, const sign_transforms &transforms,
+                             Eigen::Ref<Eigen::MatrixXd> values) noexcept {
+    negate_columns(channels, transforms, values);
+  }
+
+  void apply_sign_transforms(std::span<const characteristic_channel> channels, const sign_transforms &transforms,
                              Eigen::Ref<Eigen::MatrixXd> values) noexcept {
     negate_columns(channels, transforms, values);
   }

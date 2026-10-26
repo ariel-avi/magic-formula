@@ -69,6 +69,11 @@ namespace mf {
                        Eigen::Ref<Eigen::MatrixXd> outputs) noexcept {
     apply_sign_transforms(layout.outputs, data_transforms(from, to), outputs);
   }
+
+  void convert_characteristics(const model_layout &layout, coordinate_system from, coordinate_system to,
+                               Eigen::Ref<Eigen::MatrixXd> characteristics) noexcept {
+    apply_sign_transforms(layout.characteristics, data_transforms(from, to), characteristics);
+  }
   // NOLINTEND(performance-unnecessary-value-param)
 
   fz_sign_census census_fz(const model_layout &layout, const Eigen::Ref<const Eigen::MatrixXd> &inputs) noexcept {

@@ -63,6 +63,17 @@ namespace mf {
       return key_error(error_code::NUMERICAL, std::move(message), channel.name);
     }
 
+    /// True when `v` is finite, or NaN in a channel that documents NaN as a value.
+    bool characteristic_ok(const characteristic_channel &channel, double v) noexcept {
+      return std::isfinite(v) || (channel.nan_allowed && std::isnan(v));
+    }
+
+    /// NUMERICAL for the invalid value `v` of the characteristic `channel`.
+    error characteristic_error(const characteristic_channel &channel, double v) {
+      std::string message = std::format("non-finite {} characteristic ({})", channel.name, v);
+      return key_error(error_code::NUMERICAL, std::move(message), channel.name);
+    }
+
     /// INVALID_ARGUMENT "<what> has <got> <unit>, the <name> model <verb> <want>" for a size mismatch.
     std::unexpected<error> size_mismatch(std::string_view what, Eigen::Index got, std::string_view unit,
                                          std::string_view name, std::string_view verb, Eigen::Index want) {
@@ -171,6 +182,38 @@ namespace mf {
                          output_error(at(channels, cell.col), outputs(cell.row, cell.col)));
   }
 
+  std::expected<void, error> check_characteristics(const tire_model &model,
+                                                   const Eigen::Ref<const Eigen::VectorXd> &characteristics) {
+    if (characteristics.size() != model.characteristics_length()) {
+      return size_mismatch("characteristics", characteristics.size(), "values", model.name(), "produces",
+                           model.characteristics_length());
+    }
+    const std::span<const characteristic_channel> channels = model.layout().characteristics;
+    for (Eigen::Index j = 0; j < characteristics.size(); ++j) {
+      if (!characteristic_ok(at(channels, j), characteristics(j))) {
+        return std::unexpected<error>(characteristic_error(at(channels, j), characteristics(j)));
+      }
+    }
+    return {};
+  }
+
+  std::expected<void, batch_error>
+  check_characteristics_batch(const tire_model &model, const Eigen::Ref<const Eigen::MatrixXd> &characteristics) {
+    if (characteristics.cols() != model.characteristics_length()) {
+      const std::string message = std::format("characteristics matrix has {} columns, the {} model produces {}",
+                                              characteristics.cols(), model.name(), model.characteristics_length());
+      return batch_failure(0, make_error(error_code::INVALID_ARGUMENT, message).error());
+    }
+    const std::span<const characteristic_channel> channels = model.layout().characteristics;
+    const auto ok = [channels](Eigen::Index c, double v) { return characteristic_ok(at(channels, c), v); };
+    const failing_cell cell = first_failing_cell(characteristics, ok);
+    if (cell.col < 0) {
+      return {};
+    }
+    return batch_failure(static_cast<std::size_t>(cell.row),
+                         characteristic_error(at(channels, cell.col), characteristics(cell.row, cell.col)));
+  }
+
   std::expected<void, error> check_buffers(const tire_model &model, const double *input, int input_len,
                                            const double *data, int len) {
     if (input == nullptr) {
@@ -221,5 +264,32 @@ namespace mf {
       return std::unexpected<batch_error>(finite.error());
     }
     return outputs;
+  }
+
+  std::expected<Eigen::MatrixXd, batch_error>
+  checked_evaluate_characteristics_batch(const tire_model &model, const Eigen::Ref<const Eigen::MatrixXd> &inputs) {
+    if (const std::expected<void, batch_error> valid = validate_inputs(model, inputs); !valid.has_value()) {
+      return std::unexpected<batch_error>(valid.error());
+    }
+    Eigen::MatrixXd characteristics = model.evaluate_characteristics_batch(inputs);
+    const std::expected<void, batch_error> finite = check_characteristics_batch(model, characteristics);
+    if (!finite.has_value()) {
+      return std::unexpected<batch_error>(finite.error());
+    }
+    return characteristics;
+  }
+
+  std::expected<checked_batch, batch_error>
+  checked_evaluate_batch_with_characteristics(const tire_model &model,
+                                              const Eigen::Ref<const Eigen::MatrixXd> &inputs) {
+    std::expected<Eigen::MatrixXd, batch_error> outputs = checked_evaluate_batch(model, inputs);
+    if (!outputs.has_value()) {
+      return std::unexpected<batch_error>(outputs.error());
+    }
+    std::expected<Eigen::MatrixXd, batch_error> characteristics = checked_evaluate_characteristics_batch(model, inputs);
+    if (!characteristics.has_value()) {
+      return std::unexpected<batch_error>(characteristics.error());
+    }
+    return checked_batch{.outputs = std::move(*outputs), .characteristics = std::move(*characteristics)};
   }
 } // namespace mf

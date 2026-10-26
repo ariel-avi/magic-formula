@@ -88,6 +88,7 @@ Immutable properties:
 | `combined` | `True` for combined slip |
 | `inputs` | tuple of `Channel(name, unit)` in input order (FZ, SA, SR, IA, VX) |
 | `outputs` | tuple of `Channel(name, unit)` in output order |
+| `characteristic_channels` | tuple of `Channel(name, unit)` of the characteristics (below) |
 | `limits` | `dict[str, float]`; absent bounds are `-inf` / `+inf`; includes `VXLOW` |
 | `fittyp`, `use_mode` | `[MODEL]` metadata, `None` when absent |
 | `tyre_side` | `"LEFT"` or `"RIGHT"` |
@@ -102,10 +103,25 @@ Methods:
 - `evaluate(*, check=True, **inputs) -> dict[str, ndarray]`: keywords `fz, sa, sr, ia, vx` (scalars or array-likes,
   all required). Inputs are broadcast with NumPy rules. Returns a dict keyed `fx, fy, mz, mx, my, fz_clamped,
   sr_clamped, sa_clamped, ia_clamped, below_vxlow`, each with the broadcast shape (0-d arrays for scalars).
+- `characteristics_batch(inputs, *, check=True) -> ndarray`: same inputs as `evaluate_batch`; returns an `(N, 8)`
+  float64 array with columns DFY_DSA [N/rad], DFX_DSR [N], FY_OVER_SA [N/rad], FX_OVER_SR [N], DY [N], DX [N],
+  SA_AT_PEAK_FY [rad], SR_AT_PEAK_FX [-].
+- `characteristics(*, check=True, **inputs) -> dict[str, ndarray]`: like `evaluate`, keyed `dfy_dsa, dfx_dsr,
+  fy_over_sa, fx_over_sr, dy, dx, sa_at_peak_fy, sr_at_peak_fx`.
 - `find_coordinate_system() -> CoordinateIdentification`, `convert_coordinate_system(target) -> TireModel`,
   `convert_inputs(values, *, source, target)` and `convert_outputs(values, *, source, target)`: see
   "Coordinate systems" below.
 
+Characteristics are analytic (no finite differences). DFY_DSA and DFX_DSR are the derivatives of the full combined
+force at the row; FY_OVER_SA and FX_OVER_SR are force over raw slip; DY and DX are the pure-slip peak forces; the last
+two channels are the slips at the peaks, on the side of the row's slip. NaN occurs only in SA_AT_PEAK_FY and
+SR_AT_PEAK_FX (no peak in the slip range, or no contact). At zero slip the secant equals the slope
+(`fy_over_sa == dfy_dsa`, `fx_over_sr == dfx_dsr`). Rows without contact give 0 in every other channel.
+
+```python
+c = tire.characteristics(fz=4000.0, sa=0.0, sr=0.1, ia=0.0, vx=10.0)
+c["dfx_dsr"], c["sr_at_peak_fx"]
+```
 
 `check=True` validates inputs and outputs. `check=False` is the unchecked fast path: values are computed as is (NaN in
 gives NaN out). A wrong input shape is always an error, whatever `check` is.

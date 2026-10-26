@@ -38,6 +38,13 @@ namespace {
     return outputs;
   }
 
+  Eigen::MatrixXd sample_characteristics() {
+    Eigen::MatrixXd values(2, 8);
+    values << 100.0, 200.0, 30.0, 4.0, 5.0, 6.0, 0.2, 0.1, //
+        -0.0, 7.0, QNAN, QNAN, -2.0, 0.0, QNAN, -0.3;
+    return values;
+  }
+
   void expect_same_bits(const Eigen::MatrixXd &actual, const Eigen::MatrixXd &expected) {
     ASSERT_EQ(actual.rows(), expected.rows());
     ASSERT_EQ(actual.cols(), expected.cols());
@@ -121,6 +128,50 @@ TEST(coordinate_system, ConvertOutputs_IsoToSae_FlipsFyMzMy) {
       }
     }
   }
+}
+
+TEST(convert_characteristics, IsoToSae_FlipsDfyDsaFyOverSaDyOnly) {
+  const Eigen::MatrixXd original = sample_characteristics();
+  const std::array<bool, 8> flipped{true, false, true, false, true, false, false, false};
+  for (const mf::model_layout &layout : LAYOUTS) {
+    Eigen::MatrixXd values = original;
+    mf::convert_characteristics(layout, coordinate_system::ISO, coordinate_system::SAE, values);
+    for (Eigen::Index c = 0; c < values.cols(); ++c) {
+      for (Eigen::Index r = 0; r < values.rows(); ++r) {
+        const double expected = flipped[static_cast<std::size_t>(c)] ? -original(r, c) : original(r, c);
+        EXPECT_EQ(bits(values(r, c)), bits(expected)) << "row " << r << " column " << c;
+      }
+    }
+  }
+}
+
+TEST(convert_characteristics, SaeToIso_FlipsSameColumns) {
+  const Eigen::MatrixXd original = sample_characteristics();
+  const std::array<bool, 8> flipped{true, false, true, false, true, false, false, false};
+  Eigen::MatrixXd values = original;
+  mf::convert_characteristics(mf::mf5x::PAC2002_LAYOUT, coordinate_system::SAE, coordinate_system::ISO, values);
+  for (Eigen::Index c = 0; c < values.cols(); ++c) {
+    for (Eigen::Index r = 0; r < values.rows(); ++r) {
+      const double expected = flipped[static_cast<std::size_t>(c)] ? -original(r, c) : original(r, c);
+      EXPECT_EQ(bits(values(r, c)), bits(expected)) << "row " << r << " column " << c;
+    }
+  }
+}
+
+TEST(convert_characteristics, SameSystem_Identity) {
+  const Eigen::MatrixXd original = sample_characteristics();
+  for (const coordinate_system system : {coordinate_system::ISO, coordinate_system::SAE}) {
+    Eigen::MatrixXd values = original;
+    mf::convert_characteristics(mf::mf5x::MF52_LAYOUT, system, system, values);
+    expect_same_bits(values, original);
+  }
+}
+
+TEST(convert_characteristics, ZeroRows_NoOp) {
+  Eigen::MatrixXd values(0, 8);
+  mf::convert_characteristics(mf::mf5x::PAC2002_LAYOUT, coordinate_system::ISO, coordinate_system::SAE, values);
+  EXPECT_EQ(values.rows(), 0);
+  EXPECT_EQ(values.cols(), 8);
 }
 
 TEST(coordinate_system, ConvertInputs_SameSystem_BitIdentical) {

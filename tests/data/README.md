@@ -66,8 +66,10 @@ Format: a header line of column names, then the mandatory unit line, then data r
 
 `tests/module/fixtures_test.cpp` (`EveryInputTable_HasExpectedOutcome`) loads every `inputs_*` file and checks its documented outcome (rows, or error code and line); `cli_test` `Run_BadInputTable_Exit1AtLine` runs the six error tables through the CLI.
 
-CLI outputs carry 15 columns: the five inputs, the five outputs (FX, FY, MZ, MX, MY) and five 0/1 flag columns
-(FZ_CLAMPED, SR_CLAMPED, SA_CLAMPED, IA_CLAMPED, BELOW_VXLOW).
+CLI outputs carry 23 columns: the five inputs, the five outputs (FX, FY, MZ, MX, MY), five 0/1 flag columns
+(FZ_CLAMPED, SR_CLAMPED, SA_CLAMPED, IA_CLAMPED, BELOW_VXLOW) and eight characteristics (DFY_DSA, DFX_DSR,
+FY_OVER_SA, FX_OVER_SR, DY, DX, SA_AT_PEAK_FY, SR_AT_PEAK_FX). `nan` appears only in SA_AT_PEAK_FY and
+SR_AT_PEAK_FX; the secants FY_OVER_SA and FX_OVER_SR at zero slip equal the slopes DFY_DSA and DFX_DSR.
 
 ### Documented line numbers (1-based, comments, header and unit line included)
 

@@ -162,9 +162,14 @@ namespace mf::python {
     std::vector<std::string> warnings;
   };
 
-  /// The result of `model_handle::evaluate_batch` (bound as `_core.Solution`; read-only attributes).
+  /// The result of `model_handle::evaluate_batch` or `model_handle::evaluate_characteristics_batch` (bound as
+  /// `_core.Solution`; read-only attributes).
   struct solution_record {
-    py::array_t<double> outputs;       ///< rows x output_length()
+    /// rows x output_length() (evaluate_batch) or rows x characteristics_length() (evaluate_characteristics_batch).
+    /// For characteristics, NaN is a documented value only in SA_AT_PEAK_FY and SR_AT_PEAK_FX (no stationary point, or
+    /// no contact); FY_OVER_SA and FX_OVER_SR at zero slip are the tangent slopes DFY_DSA and DFX_DSR, and 0 for rows
+    /// without contact.
+    py::array_t<double> outputs;
     std::vector<std::string> warnings; ///< "row <index>: <message>" per table warning
   };
 
@@ -223,6 +228,15 @@ namespace mf::python {
     [[nodiscard]] std::vector<std::pair<std::string, std::string>> outputs() const {
       std::vector<std::pair<std::string, std::string>> result;
       for (const output_channel &channel : model().layout().outputs) {
+        result.emplace_back(std::string(channel.name), std::string(channel.unit));
+      }
+      return result;
+    }
+
+    /// (name, unit) of every characteristic channel, in characteristic_index order.
+    [[nodiscard]] std::vector<std::pair<std::string, std::string>> characteristics() const {
+      std::vector<std::pair<std::string, std::string>> result;
+      for (const characteristic_channel &channel : model().layout().characteristics) {
         result.emplace_back(std::string(channel.name), std::string(channel.unit));
       }
       return result;
@@ -359,6 +373,41 @@ namespace mf::python {
     ///    warning (`load_side_warning` for `loaded_side()`) as "row <index>: <message>".
     [[nodiscard]] std::variant<solution_record, error_record> evaluate_batch(const input_array &points,
                                                                              bool check) const {
+      return run_batch(
+          points, check,
+          [](const tire_model &tire, const Eigen::Map<const Eigen::MatrixXd> &map) {
+            return checked_evaluate_batch(tire, map);
+          },
+          [](const tire_model &tire, const Eigen::Map<const Eigen::MatrixXd> &map) {
+            return tire.evaluate_batch(map);
+          });
+    }
+
+    /// Like `evaluate_batch`, but evaluates the characteristics (rows x characteristics_length(), channel order of
+    /// `characteristics()`): the same shape checks, GIL release and load-side warning, with
+    /// `checked_evaluate_characteristics_batch` for `check`, else `check_input_shape` and
+    /// `evaluate_characteristics_batch`.
+    [[nodiscard]] std::variant<solution_record, error_record> evaluate_characteristics_batch(const input_array &points,
+                                                                                             bool check) const {
+      return run_batch(
+          points, check,
+          [](const tire_model &tire, const Eigen::Map<const Eigen::MatrixXd> &map) {
+            return checked_evaluate_characteristics_batch(tire, map);
+          },
+          [](const tire_model &tire, const Eigen::Map<const Eigen::MatrixXd> &map) {
+            return tire.evaluate_characteristics_batch(map);
+          });
+    }
+
+  private:
+    /// The shared body of the two batch evaluations: shape checks (always), a Map over the points, the GIL released
+    /// around `checked_fn(model, map)` with `check`, else `check_input_shape` and `unchecked_fn(model, map)`; a
+    /// batch_error becomes to_record(cause, index), a result a solution_record with the load-side warning as
+    /// "row <index>: <message>".
+    template <typename Checked_T, typename Unchecked_T>
+    [[nodiscard]] std::variant<solution_record, error_record> run_batch(const input_array &points, bool check,
+                                                                        const Checked_T &checked_fn,
+                                                                        const Unchecked_T &unchecked_fn) const {
       constexpr std::string_view dims_fmt = "inputs must be a 2-D array with one row per point and {} columns ({}), "
                                             "got {} dimension(s)";
       constexpr std::string_view columns_fmt = "inputs must have {} columns ({}), got {}";
@@ -373,13 +422,13 @@ namespace mf::python {
       std::expected<Eigen::MatrixXd, batch_error> result = [&]() -> std::expected<Eigen::MatrixXd, batch_error> {
         const py::gil_scoped_release release;
         if (check) {
-          return checked_evaluate_batch(model(), map);
+          return checked_fn(model(), map);
         }
         const auto shape = check_input_shape(model(), map);
         if (!shape.has_value()) {
           return std::unexpected(shape.error());
         }
-        return model().evaluate_batch(map);
+        return unchecked_fn(model(), map);
       }();
       if (!result.has_value()) {
         return to_record(result.error().cause, result.error().index);
@@ -394,7 +443,6 @@ namespace mf::python {
       return record;
     }
 
-  private:
     io::loaded_model loaded_;
   };
 
@@ -477,7 +525,9 @@ PYBIND11_MODULE(_core, m) {
                     "reference operating point (SI), input order")
       .def_readonly("warnings", &identification_record::warnings, "identification warnings");
 
-  py::class_<solution_record>(m, "Solution", "The result of Model.evaluate_batch (read-only attributes).")
+  py::class_<solution_record>(m, "Solution",
+                              "The result of Model.evaluate_batch or Model.evaluate_characteristics_batch "
+                              "(read-only attributes).")
       .def_readonly("outputs", &solution_record::outputs, "(N, n_outputs) float64 array")
       .def_readonly("warnings", &solution_record::warnings, "'row <index>: <message>' per table warning");
 
@@ -487,6 +537,8 @@ PYBIND11_MODULE(_core, m) {
       .def_property_readonly("name", &model_handle::name, "model name: 'PAC2002' or 'MF 5.2'")
       .def_property_readonly("inputs", &model_handle::inputs, "(name, unit) of every input channel")
       .def_property_readonly("outputs", &model_handle::outputs, "(name, unit) of every output channel")
+      .def_property_readonly("characteristics", &model_handle::characteristics,
+                             "(name, unit) of every characteristic channel")
       .def_property_readonly("limits", &model_handle::limits, "(key, value) of every limit; open bounds are -inf/+inf")
       .def_property_readonly("fittyp", &model_handle::fittyp, "[MODEL] FITTYP or None")
       .def_property_readonly("use_mode", &model_handle::use_mode, "[MODEL] USE_MODE or None")
@@ -506,7 +558,14 @@ PYBIND11_MODULE(_core, m) {
       .def("evaluate_batch", &model_handle::evaluate_batch, py::arg("points"), py::arg("check") = true,
            "Evaluate an (N, n_inputs) array (SI units, angles in rad) in the model's own coordinate system, without "
            "axis conversion. Returns a Solution (outputs and load-side warnings) or an Error for a wrong shape or, "
-           "with check=True, an invalid or non-finite point.");
+           "with check=True, an invalid or non-finite point.")
+      .def("evaluate_characteristics_batch", &model_handle::evaluate_characteristics_batch, py::arg("points"),
+           py::arg("check") = true,
+           "Evaluate the characteristics of an (N, n_inputs) float64 F-ordered array of points (SI units, angles in "
+           "rad). Returns a Solution whose outputs is the (N, n_characteristics) array (DFY_DSA ... SR_AT_PEAK_FX) or "
+           "an Error. NaN is a documented value only in SA_AT_PEAK_FY and SR_AT_PEAK_FX (no stationary point, or no "
+           "contact). FY_OVER_SA and FX_OVER_SR at zero slip are the tangent slopes DFY_DSA and DFX_DSR, and 0 for "
+           "rows without contact.");
 
   m.def("version", [] { return std::string(mf::version()); }, "Library version string.");
   m.def("load_tir", &mf::python::load_tir, py::arg("path"), py::arg("combined") = true,
