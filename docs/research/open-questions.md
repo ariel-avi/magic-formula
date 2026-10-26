@@ -21,11 +21,17 @@
 | Axis-system sources not extracted: Figure 8 of the MF-Tyre manual (alpha, Fz and output signs); Fz sign for a loaded tire in ISO-W (no read source states it); "adapted SAE" and "adapted ISO" definitions (racer.nl unreadable); Pacejka 2nd and 3rd edition conventions; ISO 8855, SAE J670, TYDEX text; SAE cornering-stiffness and camber signs; whether gamma is right-hand-rule in every standard; CarSim handling; PKY1 and camber-term signs in tests/data (expected MIXED, see coordinate-systems.md section 8) | read sources confirm ISO for MF-Tyre, kappa definition, SAE and W-axis axes, PAC2002 W-axis requirement; the rest is snippets and algebra; the system is identified from the table of indicators in coordinate-systems.md section 7 | coordinate-systems.md sections 1, 2 and 7 |
 | Braking-positive slip ratio (Kx < 0) in some files (PAC89, old SAE percent slip) | treated as non-standard: a CHECK warning | coordinate-systems.md section 7 |
 | LONGVL when absent | required iff QSY3 != 0 or QSY4 != 0; otherwise an internal placeholder of 1 m/s | policies.md section 3; tir-format.md section 3 |
+| MFeval Kxk and Kya semantics: the model stiffness parameters (BCD at the shifted origin) or tangents at the operating point. The MFeval page gives only the output index (Kxk is output 30 since 2.3.0) and no formula; the solver source was not read | no parity with MFeval Kxk or Kya is claimed; DFX_DSR and DFY_DSA are the tangents of the evaluated force | characteristics.md section 1.2; policies.md section 9 |
+| Primary confirmation of the peak relation E = (B*x_m - tan(pi/(2C)))/(B*x_m - atan(B*x_m)) and its equation number (Pacejka 2006, or Besselink et al. 2010). It is cited only through the Penn State notes, which cite Pacejka 2006; the stationary-point algebra is the project's own | used as cited-through-secondary plus derived | characteristics.md section 4.1 |
+| No offline MFeval cross-check of the characteristics (needs Octave and MFeval) | the characteristics are checked against closed forms (test-data.md section 6), not against a second implementation | test-data.md section 6 |
+| Coordinate identification still obtains its indicator derivatives by central differences; replacing them with DFY_DSA is possible but out of scope here | unchanged | coordinate-systems.md section 7; characteristics.md section 7 |
 
 ## 2. Settled points
 
 - [UNITS] aliases: none; SI only (policies.md section 3).
 - FITTYP 5 or 21 under MF 5.2: error, no opt-in (policies.md section 3).
-- Extra outputs (t, Mzr, Kx, Ky): none. The output vector is Fx, Fy, Mz, Mx, My plus the five 0/1 flags (policies.md section 1).
+- Extra outputs (t, Mzr, Kx, Ky): none in the output vector, which stays Fx, Fy, Mz, Mx, My plus the five 0/1 flags (policies.md section 1). The earlier statement that no extra outputs exist is superseded for the eight characteristics (tangent and secant stiffnesses, DY, DX, slips at the peaks), which are a separate vector (characteristics.md; policies.md section 9).
+- Characteristic derivatives are obtained by forward-mode differentiation (dual numbers) of the closed-form kernels, which counts as analytic (policies.md section 9; characteristics.md section 3).
+- Peak slips are the first stationary point from zero on the side of the row's slip, not the global one; two stationary points inside one scan cell (width |segment end|/32) are not resolved (policies.md section 9; characteristics.md section 5).
 - Committed reference outputs are kept (policies.md section 6).
 - Out of scope: turn slip and transient behaviour (pac2002.md section 1).
