@@ -60,7 +60,9 @@ argument-hint: "[feature <request> | review [scope]]"
 | Python files under `python/` (incl. `python/pyproject.toml` and the example notebook) and structural changes to `python/CMakeLists.txt` (target, options, link lines) | `general-developer` (the `cpp-developer` packet that creates, renames or deletes a binding source registers it in `MF_PYTHON_SOURCES`) |
 | venv creation, `pip install ./python`, `pytest python/tests` | `test-runner` |
 | CMake/Conan glue (targets, dependencies, options, compile definitions, cmake/ modules, presets), scripts, GitHub Actions, hooks, PR template, docs, research notes, git/PR mechanics | `general-developer` (exception: minimal build-file changes inside Verify-phase / test-failure fixes belong to `cpp-developer`, see below) |
-| Build, ctest, coverage gate, benchmarks, clang-format/tidy checks | `test-runner` |
+| C++ in `wasm/` (`mf_wasm.cpp`, the embind adapter) | `cpp-developer` |
+| TypeScript/React under `web/`; wasm/web build files (`wasm/CMakeLists.txt`, `wasm/*.sh`, `conan/profiles/wasm`, `web/package.json` and configs) | `general-developer` |
+| Build, ctest, coverage gate, benchmarks, clang-format/tidy checks; `npm install`/`npm ci`, Vitest, `wasm/setup-emsdk.sh`, `wasm/build.sh` | `test-runner` |
 | Find files, map classes/inheritance/patterns/call sites; all reading for the researcher (papers/PDFs/web pages, repo files, `docs/research/`) | `project-explorer` |
 | Literature questions: equations, coefficients, version differences, sign conventions | `researcher` |
 | Code review: bugs, numerics, plan conformance, missing tests/coverage | `reviewer` |
@@ -113,7 +115,8 @@ One rule, stated the same way in `cpp-developer`, `planner`, `cpp-conventions` a
   - `tests/support/CMakeLists.txt`: `MF_TEST_SUPPORT_HEADERS`, the INTERFACE target `mf_test_support` (alias `mf::test_support`: `fixtures.hpp`, `MF_TEST_DATA_DIR`, `mf::mflib`, `GTest::gtest`);
   - `tests/unit/CMakeLists.txt` and `tests/module/CMakeLists.txt`: `MF_UNIT_TESTS` / `MF_MODULE_TESTS`, one `mf_add_test(<file> unit|module)` per `*_test.cpp` (`cmake/MfTesting.cmake`; target name = file stem; links `mf::mflib`, `mf::test_support`, `GTest::gtest_main`);
   - `bench/CMakeLists.txt`: `MF_BENCH_SOURCES`, `mf_bench` (always configured; target only with `MF_BUILD_BENCH`);
-  - `python/CMakeLists.txt`: `MF_PYTHON_SOURCES`, `mf_python` (always configured; target only with `MF_BUILD_PYTHON`).
+  - `python/CMakeLists.txt`: `MF_PYTHON_SOURCES`, `mf_python` (always configured; target only with `MF_BUILD_PYTHON`);
+  - `wasm/CMakeLists.txt`: `MF_WASM_SOURCES`, `mf_wasm` (always configured; target only with `MF_BUILD_WASM`, wasm preset).
 
   The root `CMakeLists.txt` only composes and is never edited to add a file. Each list also feeds `clang-format_all` (and `clang-tidy_all` for `mflib` and `mf`) through `cmake/MfQualityGates.cmake`.
 - **Registration:** the packet that creates, renames or deletes a C++ file updates the owning list in the same packet. One path per line, relative to that `CMakeLists.txt`, `LC_ALL=C` sorted; create the file before listing it, because a listed file that does not exist fails configure. This is the only build-file edit a `cpp-developer` makes during Implement.

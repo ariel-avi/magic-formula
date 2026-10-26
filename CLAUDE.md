@@ -12,7 +12,7 @@ A C++ library and CLI that implement Pacejka Magic Formula tire models.
 
 ## Tech stack
 
-C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19; CI also builds with MSVC on Windows and Homebrew LLVM 21 on macOS) · CMake >= 4.0 · Conan 2 · Eigen (vectorised batch evaluation) · GoogleTest · Google Benchmark · CTest · gcovr (coverage) · clang-format / clang-tidy · Python bindings: Python >= 3.10, pybind11 3, scikit-build-core, NumPy, pytest / pytest-cov, Jupyter (nbclient).
+C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19; CI also builds with MSVC on Windows and Homebrew LLVM 21 on macOS) · CMake >= 4.0 · Conan 2 · Eigen (vectorised batch evaluation) · GoogleTest · Google Benchmark · CTest · gcovr (coverage) · clang-format / clang-tidy · Python bindings: Python >= 3.10, pybind11 3, scikit-build-core, NumPy, pytest / pytest-cov, Jupyter (nbclient) · Emscripten 5.0.7 (project-local emsdk in `.emsdk/`) for the WebAssembly module · web app: Node 24, npm, TypeScript (strict), React, Vite, Tailwind CSS v4, shadcn/ui, Recharts, three.js (lazy-loaded 3D convention view), Vitest, Playwright.
 
 ## Layout (contract)
 
@@ -55,11 +55,21 @@ cmake/                   ClangFormat, ClangTidy, Coverage (verbatim from ariel-a
                          MfCompileOptions, MfTesting (mf_add_test), MfQualityGates (per-directory clang-format/clang-tidy
                          registration) (project glue)
 .clang-format, .clang-tidy  verbatim copies of ariel-avi/lab/cpp/*
-conanfile.py             dependencies (eigen; test: gtest, benchmark by default for Release only, override with -o with_benchmark=True|False; generators in build/conan/<build_type>)
-CMakePresets.json        configure/build/test presets: debug, release, coverage
+wasm/                    mf_wasm.cpp: embind adapter (namespace mf::wasm; not in mflib, not coverage-gated, built only by
+                         the wasm preset); setup-emsdk.sh, build.sh, CMakeLists.txt (sources listed in
+                         MF_WASM_SOURCES; always configured so they stay in clang-format_all)
+web/                     Vite + React app with its own package.json: src/domain/ (pure TS, 100% Vitest threshold),
+                         src/wasm/ (solver.ts adapter; mf_wasm.d.ts committed contract, mf_wasm.js generated and
+                         gitignored), src/components/ (inputs/, chart/, coordinates/ (CoordinateSystemPanel and
+                         the lazy TireScene), parameters/, shell components), src/components/ui/ (shadcn), e2e/ (Playwright; playwright.config.ts,
+                         tsconfig.e2e.json)
+conan/profiles/wasm      Emscripten host profile (tests off) used by wasm/build.sh
+.emsdk/                  project-local Emscripten SDK (gitignored; created by wasm/setup-emsdk.sh)
+conanfile.py             dependencies (eigen; test: gtest, benchmark by default for Release only, override with -o with_benchmark=True|False; -o with_tests=False drops both; generators in build/conan/<build_type>, or build/conan/wasm for os=Emscripten)
+CMakePresets.json        configure/build/test presets: debug, release, coverage; configure/build only: wasm
 .github/workflows/ci.yml CI: quality (format/tidy), build-test matrix (linux gcc-14 + clang-19,
                          windows-2025 MSVC, macos-15 Homebrew LLVM 21), coverage (gcc-14, 100/100),
-                         python (gcc-14, pytest + notebook)
+                         python (gcc-14, pytest + notebook); no web/wasm job yet (follow-up)
 .claude/                 agents, skills, workflows, hooks, settings
 ```
 
@@ -83,6 +93,13 @@ conan install . --build=missing -s build_type=Release -s compiler.cppstd=26 -o w
 python3.12 -m venv .venv
 CC=gcc-14 CXX=g++-14 .venv/bin/python -m pip install "./python[test]"
 .venv/bin/python -m pytest python/tests
+# WebAssembly module + web frontend (macOS/Linux; bash scripts)
+bash wasm/setup-emsdk.sh          # once: project-local emsdk 5.0.7 in .emsdk/
+bash wasm/build.sh                # conan (wasm profile) + cmake --preset wasm -> web/src/wasm/mf_wasm.js
+cd web && npm ci                  # dependencies from the committed package-lock.json
+npm run dev                       # http://localhost:5173
+npm run typecheck && npm run test:unit && npm run test:coverage && npm run test:smoke && npm run build
+npm run test:e2e                  # Playwright UI tests (Chrome; PLAYWRIGHT_CHANNEL=chromium fallback)
 ```
 
 macOS Python note: use `python3.12` or `python3.13` and the Homebrew LLVM 21 `CC`/`CXX`/`SDKROOT` environment and Conan flags from the `build-and-test` skill, for both `conan install` and `pip install`.

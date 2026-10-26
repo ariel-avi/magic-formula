@@ -64,7 +64,11 @@ def test_load_tir_partial_combined_raises_missing_key(data_dir):
 
 def test_parse_tir_matches_load_tir(pac2002, pac2002_text, s_vectors):
     parsed = mf.parse_tir(pac2002_text)
-    assert np.array_equal(parsed.evaluate_batch(s_vectors), pac2002.evaluate_batch(s_vectors))
+    with pytest.warns(mf.MagicFormulaWarning, match='FZ < 0'):
+        from_parsed = parsed.evaluate_batch(s_vectors)
+    with pytest.warns(mf.MagicFormulaWarning, match='FZ < 0'):
+        from_loaded = pac2002.evaluate_batch(s_vectors)
+    assert np.array_equal(from_parsed, from_loaded)
 
 
 def test_parse_tir_syntax_error_reports_line():

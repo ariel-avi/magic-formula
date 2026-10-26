@@ -28,7 +28,6 @@ compile_commands.json
 .idea/
 *.swp
 .DS_Store
-`
 # Claude Code local overrides
 .claude/settings.local.json
 .claude/worktrees
@@ -44,3 +43,12 @@ __pycache__/
 htmlcov/
 coverage.xml
 .coverage.*
+
+# WebAssembly toolchain and web app
+/.emsdk/
+/web/node_modules/
+/web/dist/
+/web/coverage/
+/web/test-results/
+/web/playwright-report/
+/web/src/wasm/mf_wasm.js

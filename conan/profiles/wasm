@@ -1,0 +1,17 @@
+# Conan host profile for the WebAssembly module (Emscripten 5.0.7 from the project-local .emsdk/).
+# Used by wasm/build.sh: conan install . --profile:host=conan/profiles/wasm --profile:build=default --build=missing
+{% set emsdk = os.getenv("MF_EMSDK_DIR", os.path.normpath(os.path.join(profile_dir, "..", "..", ".emsdk"))) %}
+{% set emscripten = os.path.join(emsdk, "upstream", "emscripten") %}
+[settings]
+os=Emscripten
+arch=wasm
+compiler=emcc
+compiler.version=5.0.7
+compiler.libcxx=libc++
+compiler.cppstd=26
+build_type=Release
+[options]
+&:with_tests=False
+[conf]
+tools.cmake.cmaketoolchain:user_toolchain=["{{ os.path.join(emscripten, 'cmake', 'Modules', 'Platform', 'Emscripten.cmake') }}"]
+tools.build:compiler_executables={"c": "{{ os.path.join(emscripten, 'emcc') }}", "cpp": "{{ os.path.join(emscripten, 'em++') }}"}

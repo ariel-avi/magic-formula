@@ -9,6 +9,8 @@
 #include <format>
 #include <gtest/gtest.h>
 #include <limits>
+#include <magic_formula/coordinate_identification.hpp>
+#include <magic_formula/coordinate_system.hpp>
 #include <magic_formula/detail/lanes.hpp>
 #include <magic_formula/error.hpp>
 #include <magic_formula/evaluation_types.hpp>
@@ -16,12 +18,15 @@
 #include <magic_formula/mf5x_coefficients.hpp>
 #include <magic_formula/mf5x_forms.hpp>
 #include <magic_formula/mf5x_layout.hpp>
+#include <magic_formula/mf5x_model.hpp>
 #include <magic_formula/model_layout.hpp>
 #include <magic_formula/pac2002_model.hpp>
+#include <magic_formula/sign_transform.hpp>
 #include <magic_formula/tire_model.hpp>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <typeinfo>
 #include <utility>
 #include <vector>
 
@@ -52,6 +57,13 @@ namespace {
       {.name = "Pac2002Shifts_Uncombined", .kind = model_kind::PAC2002_SHIFTS, .mode = slip_mode::UNCOMBINED},
       {.name = "Mf52_Combined", .kind = model_kind::MF52, .mode = slip_mode::COMBINED},
       {.name = "Mf52_Uncombined", .kind = model_kind::MF52, .mode = slip_mode::UNCOMBINED},
+  }};
+
+  /// The plans of the transformed-model tests: VERTICAL, LATERAL, both.
+  constexpr std::array<mf::sign_transforms, 3> PLANS{{
+      {.vertical = true, .lateral = false},
+      {.vertical = false, .lateral = true},
+      {.vertical = true, .lateral = true},
   }};
 
   // True for the forces and moments; false for the 0.0/1.0 flag outputs.
@@ -198,6 +210,98 @@ TEST_P(model_contract, RawPoint_BitEqualRefPoint) {
 TEST_P(model_contract, Batch_AllOutputsFinite_OnRegimeGrid) {
   const Eigen::MatrixXd batch = model_->evaluate_batch(mf::test::regime_grid(POINT_ROWS));
   EXPECT_TRUE(batch.allFinite());
+}
+
+TEST_P(model_contract, ReferenceInput_Size_EqualsInputLength) {
+  EXPECT_EQ(model_->reference_input().size(), model_->input_length());
+}
+
+TEST_P(model_contract, NegatedBy_Channels_ValidAndLimitSignsWellFormed) {
+  for (const mf::input_channel &channel : model_->layout().inputs) {
+    mf::sign_transform expected = mf::sign_transform::NONE;
+    if (channel.name == "FZ") {
+      expected = mf::sign_transform::VERTICAL;
+    } else if (channel.name == "SA") {
+      expected = mf::sign_transform::LATERAL;
+    }
+    EXPECT_EQ(channel.negated_by, expected) << channel.name;
+  }
+  for (const mf::output_channel &channel : model_->layout().outputs) {
+    const bool vertical = channel.name == "FY" || channel.name == "MZ" || channel.name == "MY";
+    EXPECT_EQ(channel.negated_by, vertical ? mf::sign_transform::VERTICAL : mf::sign_transform::NONE) << channel.name;
+  }
+  EXPECT_TRUE(mf::limit_pairs_well_formed(model_->layout().limits));
+  EXPECT_TRUE(mf::limit_signs_well_formed(model_->layout().limits));
+}
+
+TEST_P(model_contract, Transformed_EachPlan_SameDynamicTypeNameOptionsMetadata) {
+  const auto *const pac = dynamic_cast<const mf::pac2002_model *>(model_.get());
+  for (const mf::sign_transforms &plan : PLANS) {
+    SCOPED_TRACE(std::format("vertical {} lateral {}", plan.vertical, plan.lateral));
+    const std::unique_ptr<mf::tire_model> copy = model_->transformed(plan);
+    ASSERT_TRUE(copy != nullptr);
+    const mf::tire_model *const copy_ptr = copy.get();
+    const mf::tire_model *const source_ptr = model_.get();
+    EXPECT_TRUE(typeid(*copy_ptr) == typeid(*source_ptr));
+    EXPECT_EQ(copy->name(), model_->name());
+    EXPECT_EQ(copy->options().mode, model_->options().mode);
+    EXPECT_EQ(copy->options().throw_if_model_failure, model_->options().throw_if_model_failure);
+    EXPECT_EQ(copy->metadata().fittyp, model_->metadata().fittyp);
+    EXPECT_EQ(copy->metadata().use_mode, model_->metadata().use_mode);
+    EXPECT_EQ(copy->metadata().side, model_->metadata().side);
+    EXPECT_EQ(copy->limits().size(), model_->limits().size());
+    if (pac != nullptr) {
+      const auto *const pac_copy = dynamic_cast<const mf::pac2002_model *>(copy.get());
+      ASSERT_TRUE(pac_copy != nullptr);
+      EXPECT_EQ(pac_copy->method(), pac->method());
+      EXPECT_EQ(pac_copy->uses_my_from_shifts(), pac->uses_my_from_shifts());
+    }
+  }
+}
+
+TEST_P(model_contract, Transformed_Parameters_PassCreate) {
+  const auto *const pac = dynamic_cast<const mf::pac2002_model *>(model_.get());
+  for (const mf::sign_transforms &plan : PLANS) {
+    SCOPED_TRACE(std::format("vertical {} lateral {}", plan.vertical, plan.lateral));
+    const std::unique_ptr<mf::tire_model> copy = model_->transformed(plan);
+    const auto *const typed = dynamic_cast<const mf::mf5x_model *>(copy.get());
+    ASSERT_TRUE(typed != nullptr);
+    const mf::mf5x_parameters parameters{
+        .coefficients = typed->coefficients(), .limits = typed->limits(), .metadata = typed->metadata()};
+    if (pac != nullptr) {
+      const auto created = mf::pac2002_model::create(parameters, pac->method(), model_->options());
+      EXPECT_TRUE(created.has_value());
+    } else {
+      const auto created = mf::mf52_model::create(parameters, model_->options());
+      EXPECT_TRUE(created.has_value());
+    }
+  }
+}
+
+TEST_P(model_contract, LoadedSide_FlipsUnderVerticalOnly) {
+  EXPECT_EQ(model_->loaded_side(), mf::coordinate_system::ISO);
+  EXPECT_EQ(model_->transformed(PLANS[0])->loaded_side(), mf::coordinate_system::SAE);
+  EXPECT_EQ(model_->transformed(PLANS[1])->loaded_side(), mf::coordinate_system::ISO);
+  EXPECT_EQ(model_->transformed(PLANS[2])->loaded_side(), mf::coordinate_system::SAE);
+  EXPECT_EQ(model_->transformed(PLANS[0])->transformed(PLANS[0])->loaded_side(), mf::coordinate_system::ISO);
+}
+
+TEST_P(model_contract, FindCoordinateSystem_ReferenceInputSizeAnd29Readings) {
+  const mf::coordinate_identification identification = model_->find_coordinate_system();
+  EXPECT_EQ(identification.readings.size(), 29U);
+  for (const mf::indicator_reading &reading : identification.readings) {
+    EXPECT_NE(reading.status, mf::reading_status::MISSING_CHANNEL) << reading.definition.name;
+    EXPECT_NE(reading.status, mf::reading_status::CLAMPED) << reading.definition.name;
+    EXPECT_NE(reading.status, mf::reading_status::NOT_FINITE) << reading.definition.name;
+  }
+  EXPECT_EQ(identification.classification, mf::system_classification::MIXED);
+  EXPECT_EQ(identification.warnings.size(), 1U);
+  const Eigen::VectorXd reference = model_->reference_input();
+  ASSERT_EQ(identification.reference_input.size(), reference.size());
+  EXPECT_EQ(identification.reference_input.size(), model_->input_length());
+  for (Eigen::Index i = 0; i < reference.size(); ++i) {
+    EXPECT_EQ(bits(identification.reference_input(i)), bits(reference(i))) << "element " << i;
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(models, model_contract, ::testing::ValuesIn(CASES),

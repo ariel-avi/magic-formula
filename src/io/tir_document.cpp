@@ -26,6 +26,8 @@ namespace mf::io {
 
     /// Mutable parse state. The pointers refer to members of the `tir_document` under construction.
     struct parse_state {
+      /// The full text given to `parse`, before a leading BOM is removed; every line view points into it.
+      std::string_view source;
       const std::string *file = nullptr;
       std::vector<tir_entry> *entries = nullptr;
       std::vector<tir_table> *tables = nullptr;
@@ -40,10 +42,12 @@ namespace mf::io {
       std::vector<std::string> discarded_rows;
     };
 
-    /// A parsed value: the text and whether it was quoted.
+    /// A parsed value: the text, whether it was quoted, and where it was written (see `tir_entry::value_offset`).
     struct parsed_value {
       std::string text;
       bool quoted = false;
+      std::size_t offset = 0;
+      std::size_t length = 0;
     };
 
     /// Characters allowed in a key.
@@ -132,12 +136,21 @@ namespace mf::io {
     }
 
     /// Value part of `KEY = value`: single-quoted (verbatim between the quotes; only blanks or a `$` comment may
-    /// follow) or unquoted (cut at the first `$`, trimmed, may be empty; '!' is part of the value).
+    /// follow) or unquoted (cut at the first `$`, trimmed, may be empty; '!' is part of the value). `raw` is a view
+    /// into `state.source`.
+    ///
+    /// Invariant: for every entry, `source.substr(offset, length)` equals the value when unquoted and `'` + value + `'`
+    /// when quoted, where `source` is the text given to `parse` (BOM included). The offset is computed from `raw`
+    /// (never from the possibly default-constructed result of `detail::trim`).
     std::expected<parsed_value, error> parse_value(const parse_state &state, std::size_t line, const std::string &key,
                                                    std::string_view raw) {
+      const auto raw_offset = static_cast<std::size_t>(raw.data() - state.source.data());
+      const std::size_t blanks = std::min(raw.find_first_not_of(detail::BLANKS), raw.size());
+      const std::size_t offset = raw_offset + blanks;
       const std::string_view value = detail::trim(raw);
       if (!value.starts_with('\'')) {
-        return parsed_value{.text = std::string(detail::trim(value.substr(0, value.find('$')))), .quoted = false};
+        const std::string_view text = detail::trim(value.substr(0, value.find('$')));
+        return parsed_value{.text = std::string(text), .quoted = false, .offset = offset, .length = text.size()};
       }
       const std::size_t close = value.find('\'', 1);
       if (close == std::string_view::npos) {
@@ -147,7 +160,8 @@ namespace mf::io {
       if (!after.empty() && after.front() != '$') {
         return syntax_error(state, line, "unexpected text after quoted value", key);
       }
-      return parsed_value{.text = std::string(value.substr(1, close - 1)), .quoted = true};
+      return parsed_value{
+          .text = std::string(value.substr(1, close - 1)), .quoted = true, .offset = offset, .length = close + 1};
     }
 
     /// Earlier entry with the same identity as `key` in the current section (identity = key, or (section, key) for
@@ -187,7 +201,9 @@ namespace mf::io {
                       .key = std::move(key),
                       .value = std::move(value->text),
                       .quoted = value->quoted,
-                      .line = line};
+                      .line = line,
+                      .value_offset = value->offset,
+                      .value_length = value->length};
       state.entries->push_back(std::move(entry));
       return {};
     }
@@ -246,11 +262,13 @@ namespace mf::io {
     if (!no_nul.has_value()) {
       return std::unexpected<error>(no_nul.error());
     }
+    const std::string_view source = text;
     constexpr std::string_view bom = "\xEF\xBB\xBF";
     if (text.starts_with(bom)) {
       text.remove_prefix(bom.size());
     }
     parse_state state;
+    state.source = source;
     state.file = &document.file_name_;
     state.entries = &document.entries_;
     state.tables = &document.tables_;

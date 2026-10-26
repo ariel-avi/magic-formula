@@ -102,9 +102,51 @@ Methods:
 - `evaluate(*, check=True, **inputs) -> dict[str, ndarray]`: keywords `fz, sa, sr, ia, vx` (scalars or array-likes,
   all required). Inputs are broadcast with NumPy rules. Returns a dict keyed `fx, fy, mz, mx, my, fz_clamped,
   sr_clamped, sa_clamped, ia_clamped, below_vxlow`, each with the broadcast shape (0-d arrays for scalars).
+- `find_coordinate_system() -> CoordinateIdentification`, `convert_coordinate_system(target) -> TireModel`,
+  `convert_inputs(values, *, source, target)` and `convert_outputs(values, *, source, target)`: see
+  "Coordinate systems" below.
+
 
 `check=True` validates inputs and outputs. `check=False` is the unchecked fast path: values are computed as is (NaN in
 gives NaN out). A wrong input shape is always an error, whatever `check` is.
+
+## Coordinate systems
+
+- **ISO**: x forward, y left, z up. A loaded tire has FZ > 0 and dFy/dSA > 0.
+- **SAE**: x forward, y right, z down. A loaded tire has FZ < 0 and dFy/dSA < 0.
+- Slip angle, slip ratio and inclination angle have the same meaning in both systems. FZ, FY, MZ and MY change sign
+  between them; FX and MX do not.
+- Evaluation never converts anything: inputs go straight to the equations, and results are in the model's own system.
+  A model expressed in SAE expects FZ < 0.
+
+`find_coordinate_system()` identifies the system of a model from its evaluated behaviour (not from the raw coefficient
+signs). The vertical axis (the sign of the loaded FZ) and the lateral axis (the sign of dFy/dSA) are identified
+separately, each from several weighted indicators evaluated at several loads. It returns a `CoordinateIdentification`:
+
+| Field | Meaning |
+|-------|---------|
+| `classification` | `'ISO'`, `'SAE'` or `'MIXED'` (the two axes disagree) |
+| `vertical`, `lateral` | `AxisDecision(sign, basis, confidence, positive_weight, negative_weight)`; `sign` is `'POSITIVE'` (ISO side), `'NEGATIVE'` (SAE side) or `'UNDETERMINED'`; `basis` is `'DECIDED'`, `'INSUFFICIENT_EVIDENCE'` or `'CONFLICTING_EVIDENCE'` |
+| `effective_vertical`, `effective_lateral` | the signs used for the classification (`'POSITIVE'` or `'NEGATIVE'`); an undetermined axis takes the other axis's sign |
+| `readings` | tuple of `IndicatorReading(name, meaning, unit, axis, load_scale, load, value, normalised, status, vote, weight)`, one per indicator and probe load; `status` is `'VOTE'`, `'BELOW_THRESHOLD'`, `'NOT_FINITE'`, `'CLAMPED'` or `'MISSING_CHANNEL'`; `vote` is +1, -1 or 0 |
+| `reference_input` | NumPy array, the reference operating point in input order |
+| `warnings` | tuple of strings: disagreeing indicators, undetermined axes, and mixed conventions |
+
+A model whose coefficients mix conventions (for example a positive FNOMIN with a negative dFy/dSA) is classified
+`'MIXED'` and carries a warning containing "mix conventions".
+
+`convert_coordinate_system(target)` returns a new `TireModel` in `'ISO'` or `'SAE'` (case-insensitive). The conversion
+flips coefficient signs; the equations never change, and converting twice restores the original coefficients. Other
+names, including `'ISO-W'`, raise `MagicFormulaError` with code `INVALID_ARGUMENT`.
+
+`convert_inputs` and `convert_outputs` are a data utility, never used by evaluation: they convert rows (a 1-D array is
+one row) between `'ISO'` and `'SAE'` (case-insensitive). Inputs: only FZ changes sign. Outputs: FY, MZ and MY change
+sign.
+
+`evaluate_batch` and `evaluate` emit a `MagicFormulaWarning` ("row R: ..." / "FZ < 0 in N row(s) of an ISO table ...")
+when rows have FZ on the unloaded side of the model; those rows are lift-off with zero forces and moments. This
+happens with `check=False` too. The v1 keywords `input_system` and `output_system` (and the `'auto'` detection) no
+longer exist.
 
 ## Errors and warnings
 
@@ -115,14 +157,17 @@ gives NaN out). A wrong input shape is always an error, whatever `check` is.
 - `TypeError` for missing or unknown keywords in `evaluate`.
 - NumPy's `ValueError` for shapes that do not broadcast.
 - `MagicFormulaWarning` (a `UserWarning`) is emitted once per load warning (for example defaulted coefficients,
-  `TYRESIDE = 'RIGHT'`) and kept on `TireModel.warnings`.
+  `TYRESIDE = 'RIGHT'`) and kept on `TireModel.warnings`. `evaluate` and `evaluate_batch` also emit it for the
+  load-side warning (FZ on the unloaded side).
+- An unknown axis-system name for `target` / `source` raises `MagicFormulaError`
+  with code `INVALID_ARGUMENT`.
 
 Clamped inputs and speeds below VXLOW are reported through the flag outputs, not through warnings.
 
 ## Units and conventions
 
-SI units throughout: N, m/s, N*m; angles (slip angle, inclination) in radians; slip ratio dimensionless. Sign
-convention is ISO-W; My is negative when rolling forward. Flag outputs are floats, 0.0 or 1.0. Use `np.deg2rad` for
+SI units throughout: N, m/s, N*m; angles (slip angle, inclination) in radians; slip ratio dimensionless. Axis
+systems are described under "Coordinate systems" (in ISO, My is negative when rolling forward). Flag outputs are floats, 0.0 or 1.0. Use `np.deg2rad` for
 degrees.
 
 ## Performance

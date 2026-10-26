@@ -4,9 +4,14 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <magic_formula/coordinate_identification.hpp>
+#include <magic_formula/coordinate_system.hpp>
 #include <magic_formula/error.hpp>
 #include <magic_formula/evaluation_types.hpp>
 #include <magic_formula/io/model_loader.hpp>
+#include <magic_formula/io/tir_conversion.hpp>
 #include <magic_formula/mf5x_layout.hpp>
 #include <magic_formula/tire_model.hpp>
 #include <numbers>
@@ -19,6 +24,8 @@ namespace {
   constexpr std::string_view PAC2002_TIR = "pac2002_S.tir";
   /// MF 5.2 property file (FITTYP 6).
   constexpr std::string_view MF52_TIR = "mf52_S52.tir";
+  /// PAC2002 property file of a consistent ISO set.
+  constexpr std::string_view PAC2002_ISO_TIR = "pac2002_S_iso.tir";
 
   using load_result = std::expected<mf::io::loaded_model, mf::error>;
 
@@ -200,8 +207,104 @@ namespace {
     run_with(state, mf52_unchecked(), "MF 5.2", run_batch_raw);
   }
 
+  /// PAC2002 model of pac2002_S_iso.tir (consistent ISO), loaded on first use.
+  [[nodiscard]] const load_result &pac2002_iso() {
+    static const load_result loaded = load_model(PAC2002_ISO_TIR, false);
+    return loaded;
+  }
+
+  /// `rows` loaded ISO points (FZ 2000..6000 N, SA +-0.2 rad, SR +-0.1, IA 0, VX 16.6 m/s).
+  [[nodiscard]] Eigen::MatrixXd make_table_inputs(Eigen::Index rows) {
+    Eigen::MatrixXd inputs(rows, mf::mf5x::INPUT_LENGTH);
+    for (Eigen::Index i = 0; i < rows; ++i) {
+      const double phase = (static_cast<double>(i) + 0.5) / static_cast<double>(rows);
+      inputs(i, mf::mf5x::FZ) = 2000.0 + (4000.0 * phase);
+      inputs(i, mf::mf5x::SA) = -0.2 + (0.4 * phase);
+      inputs(i, mf::mf5x::SR) = -0.1 + (0.2 * (1.0 - phase));
+      inputs(i, mf::mf5x::IA) = 0.0;
+      inputs(i, mf::mf5x::VX) = 16.6;
+    }
+    return inputs;
+  }
+
+  /// Unchecked `evaluate_batch` on an ISO table of the consistent ISO model.
+  void BM_EvaluateBatch_IsoTable(benchmark::State &state) {
+    const load_result &loaded = pac2002_iso();
+    if (!loaded.has_value()) {
+      state.SkipWithError(mf::to_string(loaded.error()));
+      return;
+    }
+    const mf::tire_model &model = *loaded->model;
+    const Eigen::Index rows = static_cast<Eigen::Index>(state.range(0));
+    const Eigen::MatrixXd inputs = make_table_inputs(rows);
+    for (auto _ : state) {
+      Eigen::MatrixXd outputs = model.evaluate_batch(inputs);
+      benchmark::DoNotOptimize(outputs);
+      benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * static_cast<std::int64_t>(rows));
+  }
+
+  /// Coordinate-system identification of the model (29 readings from one batch of 55 probe rows).
+  void BM_FindCoordinateSystem(benchmark::State &state) {
+    const load_result &loaded = pac2002_iso();
+    if (!loaded.has_value()) {
+      state.SkipWithError(mf::to_string(loaded.error()));
+      return;
+    }
+    const mf::tire_model &model = *loaded->model;
+    for (auto _ : state) {
+      mf::coordinate_identification identification = model.find_coordinate_system();
+      benchmark::DoNotOptimize(identification);
+      benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations());
+  }
+
+  /// Model conversion to SAE (identification, plan and coefficient sign flips).
+  void BM_ConvertCoordinateSystem(benchmark::State &state) {
+    const load_result &loaded = pac2002_iso();
+    if (!loaded.has_value()) {
+      state.SkipWithError(mf::to_string(loaded.error()));
+      return;
+    }
+    const mf::tire_model &model = *loaded->model;
+    for (auto _ : state) {
+      mf::model_conversion conversion = model.convert_coordinate_system(mf::coordinate_system::SAE);
+      benchmark::DoNotOptimize(conversion);
+      benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations());
+  }
+
+  /// Text conversion of pac2002_S_iso.tir to SAE (parse, load, identification, splicing).
+  void BM_ConvertTir(benchmark::State &state) {
+    const std::filesystem::path path =
+        std::filesystem::path{MF_TEST_DATA_DIR} / std::filesystem::path{std::string{PAC2002_ISO_TIR}};
+    std::ifstream stream{path};
+    if (!stream.is_open()) {
+      state.SkipWithError("cannot open " + path.string());
+      return;
+    }
+    const std::string text{std::istreambuf_iterator<char>{stream}, std::istreambuf_iterator<char>{}};
+    for (auto _ : state) {
+      auto converted = mf::io::convert_tir(text, mf::coordinate_system::SAE, std::string{PAC2002_ISO_TIR});
+      if (!converted.has_value()) {
+        state.SkipWithError(mf::to_string(converted.error()));
+        return;
+      }
+      benchmark::DoNotOptimize(converted);
+      benchmark::ClobberMemory();
+    }
+    state.SetBytesProcessed(state.iterations() * static_cast<std::int64_t>(text.size()));
+  }
+
 } // namespace
 
+BENCHMARK(BM_EvaluateBatch_IsoTable)->ArgName("rows")->Arg(64)->Arg(4096)->Arg(65536);
+BENCHMARK(BM_FindCoordinateSystem);
+BENCHMARK(BM_ConvertCoordinateSystem);
+BENCHMARK(BM_ConvertTir);
 BENCHMARK(BM_Pac2002_EvaluatePointEigen)->ArgName("points")->Arg(1)->Arg(8)->Arg(64)->Arg(1024)->Arg(16384);
 BENCHMARK(BM_Pac2002_EvaluatePointRaw)->ArgName("points")->Arg(1)->Arg(8)->Arg(64)->Arg(1024)->Arg(16384);
 BENCHMARK(BM_Pac2002_EvaluateBatchEigen)->ArgName("points")->Arg(1)->Arg(8)->Arg(64)->Arg(1024)->Arg(16384);

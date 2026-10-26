@@ -129,6 +129,30 @@ cmake --preset release && cmake --build --preset release --target mf_bench
 
 Benchmarks are informational unless the caller gives a threshold; report name, time/iteration and items/s only. A benchmark that prints `ERROR OCCURRED` (SkipWithError) or a non-zero exit is a FAIL.
 
+## WebAssembly module and web app
+
+Prerequisites: git, python3 and network access once (for the project-local emsdk 5.0.7 in `.emsdk/`; nothing system-wide), Node 24 and npm. The bash scripts are macOS/Linux only in the POC (Windows is a follow-up).
+
+```bash
+bash wasm/setup-emsdk.sh          # once; idempotent
+bash wasm/build.sh                # conan install (conan/profiles/wasm) + cmake --preset wasm + cmake --build --preset wasm
+cd web && npm ci
+npm run typecheck && npm run test:unit && npm run test:coverage && npm run test:smoke && npm run build
+npm run test:e2e                  # Playwright UI tests (Chrome; PLAYWRIGHT_CHANNEL=chromium fallback)
+npm run dev                       # http://localhost:5173
+```
+
+- The `wasm` preset builds only the target `mf_wasm` and writes `web/src/wasm/mf_wasm.js` (gitignored). It has no test preset; the native `debug`/`release`/`coverage` presets are unaffected.
+- `npm test` = unit + smoke. The smoke test needs the built module; the `pretest` hooks fail with "run npm run wasm:build" when it is missing.
+- `npm run test:coverage` enforces 100% thresholds on `web/src/domain`.
+- Localhost check: start `npm run dev` in the background, then `curl -sf http://localhost:5173/` must return 200; stop the server afterwards.
+- `clang-format` covers `wasm/*.cpp`; `clang-tidy` does not (it needs the Emscripten headers).
+- `npm run test:e2e` runs `web/e2e/*.spec.ts` against the Vite dev server that `playwright.config.ts` starts (`webServer`, localhost:5173, reused locally if already running). The browser is the installed Google Chrome (channel `chrome`). If it cannot launch: `npx playwright install chromium`, then `PLAYWRIGHT_CHANNEL=chromium npm run test:e2e`. The `pretest:e2e` hook checks the wasm module. `forbidOnly` is on and retries are 0.
+- Playwright artifacts (all gitignored): traces in `web/test-results/artifacts/`, screenshots in `web/test-results/screenshots/`, HTML report in `web/playwright-report/`.
+- Raw-element check (shadcn components only outside `components/ui/`): `grep -rnE "<(input|select|button|table|textarea)[ >]" web/src --include=*.tsx | grep -v src/components/ui/` must print nothing.
+- Playwright results go into the report as passed/failed counts per spec file under `### Failed tests`, naming failing tests only (same style as the Vitest line below).
+- Vitest results go into the report template below as counts of passed/failed tests per Vitest project (`unit`, `smoke`) under `### Failed tests`, naming failing tests only.
+
 ## Python bindings
 
 `python/` builds the pybind11 extension `magic_formula._core` through scikit-build-core, using the Conan Release toolchain. All commands run from the repository root.

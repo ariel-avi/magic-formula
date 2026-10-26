@@ -24,6 +24,14 @@ namespace mf::io {
     bool quoted = false;
     /// 1-based line of the entry.
     std::size_t line = 0;
+    /// Byte offset, in the text given to `tir_document::parse` (a leading UTF-8 BOM counts), of the value as written:
+    /// the opening quote of a quoted value, otherwise its first character. For an empty unquoted value: the offset of
+    /// the first non-blank byte after '=' within the line's content (the '$' of a trailing comment), or the end of the
+    /// line's content.
+    std::size_t value_offset = 0;
+    /// Byte length of the value as written: quotes included, trailing `$` comment and blanks excluded; 0 for an empty
+    /// unquoted value.
+    std::size_t value_length = 0;
   };
 
   /// A table section such as [SHAPE]: a section whose first content line starts with '{'.

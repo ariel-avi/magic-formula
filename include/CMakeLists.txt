@@ -3,6 +3,9 @@
 # is added to MF_PUBLIC_HEADERS (one path per line, LC_ALL=C sorted); it also feeds clang-format_all.
 set(MF_PUBLIC_HEADERS
         magic_formula/cli/cli.hpp
+        magic_formula/coordinate_identification.hpp
+        magic_formula/coordinate_system.hpp
+        magic_formula/detail/identification_probes.hpp
         magic_formula/detail/lanes.hpp
         magic_formula/detail/mf5x_kernels.hpp
         magic_formula/detail/text.hpp
@@ -15,7 +18,9 @@ set(MF_PUBLIC_HEADERS
         magic_formula/io/number.hpp
         magic_formula/io/result_writer.hpp
         magic_formula/io/text_file.hpp
+        magic_formula/io/tir_conversion.hpp
         magic_formula/io/tir_document.hpp
+        magic_formula/io/tir_editor.hpp
         magic_formula/io/tir_reader.hpp
         magic_formula/io/units.hpp
         magic_formula/mf52_model.hpp
@@ -23,9 +28,11 @@ set(MF_PUBLIC_HEADERS
         magic_formula/mf5x_forms.hpp
         magic_formula/mf5x_layout.hpp
         magic_formula/mf5x_model.hpp
+        magic_formula/mf5x_signs.hpp
         magic_formula/model_checks.hpp
         magic_formula/model_layout.hpp
         magic_formula/pac2002_model.hpp
+        magic_formula/sign_transform.hpp
         magic_formula/tire_model.hpp
         magic_formula/version.hpp)
 

@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 #include <magic_formula/mf5x_layout.hpp>
 #include <magic_formula/model_layout.hpp>
+#include <magic_formula/sign_transform.hpp>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -123,6 +124,58 @@ TEST(mf5x_layout, Enumerators_AreVectorPositions) {
   EXPECT_EQ(static_cast<int>(layout::FX), 0);
   EXPECT_EQ(static_cast<int>(layout::BELOW_VXLOW), 9);
   EXPECT_EQ(static_cast<int>(layout::VXLOW), 8);
+}
+
+TEST(mf5x_layout, NegatedBy_Pac2002Inputs_FzVerticalSaLateralRestNone) {
+  for (std::size_t i = 0; i < layout::PAC2002_INPUTS.size(); ++i) {
+    mf::sign_transform expected = mf::sign_transform::NONE;
+    if (i == std::size_t{layout::FZ}) {
+      expected = mf::sign_transform::VERTICAL;
+    }
+    if (i == std::size_t{layout::SA}) {
+      expected = mf::sign_transform::LATERAL;
+    }
+    EXPECT_EQ(layout::PAC2002_INPUTS[i].negated_by, expected) << layout::PAC2002_INPUTS[i].name;
+  }
+}
+
+TEST(mf5x_layout, NegatedBy_Mf52Inputs_FzVerticalSaLateralRestNone) {
+  for (std::size_t i = 0; i < layout::MF52_INPUTS.size(); ++i) {
+    mf::sign_transform expected = mf::sign_transform::NONE;
+    if (i == std::size_t{layout::FZ}) {
+      expected = mf::sign_transform::VERTICAL;
+    }
+    if (i == std::size_t{layout::SA}) {
+      expected = mf::sign_transform::LATERAL;
+    }
+    EXPECT_EQ(layout::MF52_INPUTS[i].negated_by, expected) << layout::MF52_INPUTS[i].name;
+  }
+}
+
+TEST(mf5x_layout, NegatedBy_Outputs_FyMzMyVerticalRestNone) {
+  for (std::size_t i = 0; i < layout::OUTPUTS.size(); ++i) {
+    const bool vertical = i == std::size_t{layout::FY} || i == std::size_t{layout::MZ} || i == std::size_t{layout::MY};
+    const mf::sign_transform expected = vertical ? mf::sign_transform::VERTICAL : mf::sign_transform::NONE;
+    EXPECT_EQ(layout::OUTPUTS[i].negated_by, expected) << layout::OUTPUTS[i].name;
+  }
+}
+
+TEST(mf5x_layout, NegatedBy_Limits_FzVerticalAlpLateralRestNone) {
+  for (std::size_t i = 0; i < layout::LIMITS.size(); ++i) {
+    mf::sign_transform expected = mf::sign_transform::NONE;
+    if (i == std::size_t{layout::FZMIN} || i == std::size_t{layout::FZMAX}) {
+      expected = mf::sign_transform::VERTICAL;
+    }
+    if (i == std::size_t{layout::ALPMIN} || i == std::size_t{layout::ALPMAX}) {
+      expected = mf::sign_transform::LATERAL;
+    }
+    EXPECT_EQ(layout::LIMITS[i].negated_by, expected) << layout::LIMITS[i].key;
+  }
+}
+
+TEST(mf5x_layout, LimitSignsWellFormed_Limits_True) {
+  const std::vector<mf::limit_channel> channels(layout::LIMITS.begin(), layout::LIMITS.end());
+  EXPECT_TRUE(mf::limit_signs_well_formed(channels));
 }
 
 TEST(mf5x_layout, LimitPairs_WellFormedAtRuntime) {

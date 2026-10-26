@@ -5,6 +5,9 @@
 #include <string_view>
 
 namespace mf::detail {
+  /// The blank characters `trim` strips: ' ', '\t', '\r', '\v', '\f'.
+  inline constexpr std::string_view BLANKS = " \t\r\v\f";
+
   /// Returns `text` without leading and trailing blanks (' ', '\t', '\r', '\v', '\f'). The result views `text`.
   [[nodiscard]] std::string_view trim(std::string_view text) noexcept;
 

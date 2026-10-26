@@ -2,7 +2,9 @@
 
 #include <cstdint>
 #include <expected>
+#include <magic_formula/coordinate_system.hpp>
 #include <magic_formula/evaluation_types.hpp>
+#include <optional>
 #include <ostream>
 #include <span>
 #include <string>
@@ -35,17 +37,27 @@ namespace mf::cli {
     std::string tir_path;
     /// `--uncombined` selects pure-slip outputs, otherwise combined slip.
     slip_mode mode = slip_mode::COMBINED;
-    /// `--verbose` prints the model information and the ignored .tir keys on stderr.
+    /// `--verbose` prints on stderr the model information, the ignored .tir keys, the coordinate-system
+    /// identification summary, every indicator reading, the conversion line and the table-system line.
     bool verbose = false;
+    /// `--system=iso|sae`: the model is converted to this system before evaluation (coefficient sign flips, applied
+    /// only when its identified system differs); empty (default): the model as identified, no conversion.
+    std::optional<coordinate_system> target_system;
+    /// `--table-system=iso|sae`: the system of the input table and of the printed rows; empty (default): the evaluated
+    /// model's loaded side (`loaded_side()`), so no data conversion.
+    std::optional<coordinate_system> table_system;
   };
 
   /// Parses the command line (without the program name). The arguments are scanned left to right:
-  /// `--uncombined` and `--verbose` set their option, `-h` / `--help` return `command::HELP` and `--version`
-  /// returns `command::VERSION` immediately (whatever else is on the line), any other argument that starts with '-'
-  /// (including a lone "-") is an error, and everything else is a positional argument. A `command::RUN` needs exactly
-  /// two positional arguments: the input table and the .tir file.
+  /// `--uncombined` and `--verbose` set their option, `--system=<v>` and `--table-system=<v>` set theirs (<v> is iso
+  /// or sae in any letter case; the last occurrence wins; the forms without '=' are unknown options), `-h` / `--help`
+  /// return `command::HELP` and `--version` returns `command::VERSION` immediately (whatever else is on the line),
+  /// any other argument that starts with '-' (including a lone "-") is an error, and everything else is a positional
+  /// argument. A `command::RUN` needs exactly two positional arguments: the input table and the .tir file.
   /// @param args command-line arguments, `argv[0]` excluded
-  /// @return the options, or the usage-error message ("unknown option '<arg>'" or
+  /// @return the options, or the usage-error message ("unknown option '<arg>'",
+  ///         "invalid value '<v>' for --system (expected iso or sae)",
+  ///         "invalid value '<v>' for --table-system (expected iso or sae)" or
   ///         "expected 2 arguments <inputs-table> <file.tir>, got <n>")
   [[nodiscard]] std::expected<options, std::string> parse_command_line(std::span<const std::string_view> args);
 
@@ -53,11 +65,19 @@ namespace mf::cli {
   /// units, separators, comments), the output header, and the exit statuses. Ends with a newline.
   [[nodiscard]] std::string_view usage() noexcept;
 
-  /// The application: parses the command line, loads the .tir file, reads the input table, evaluates every row and
-  /// writes the results as CSV (`io::write_results`) to `out`: 15 columns, the five inputs, the five outputs and the
-  /// five 0/1 flag columns (FZ_CLAMPED, SR_CLAMPED, SA_CLAMPED, IA_CLAMPED, BELOW_VXLOW). Diagnostics go to `err`:
-  /// load warnings, optional `--verbose` information, one warning per table column that the model has no input for
-  /// (for example P), and one clamp / VXLOW warning per flag naming the first table line and the number of rows.
+  /// The application: parses the command line, loads the .tir file, identifies its coordinate system
+  /// (`tire_model::find_coordinate_system`), converts the model with `--system` (`convert_coordinate_system`; the
+  /// equations never change), reads the input table, converts the table values from the table system
+  /// (`--table-system`, default the evaluated model's `loaded_side()`, so no conversion) to the model's side
+  /// (`convert_inputs`), evaluates them with `checked_evaluate_batch`, converts the outputs back to the table system
+  /// (`convert_outputs`) and writes the results as CSV (`io::write_results`) to `out`: 15 columns, the five inputs
+  /// (echoed as read, in the table system), the five outputs and the five 0/1 flag columns (FZ_CLAMPED, SR_CLAMPED,
+  /// SA_CLAMPED, IA_CLAMPED, BELOW_VXLOW). Diagnostics go to `err`, in this order: load warnings, the identification
+  /// warnings of the evaluated model, optional `--verbose` information (model information, ignored keys, the
+  /// identification of the model as loaded with every indicator reading, the conversion, the table system), one
+  /// warning per table column that the model has no input for (for example P), the load-side warning
+  /// (`load_side_warning` in the table system) naming the first offending table line, and one clamp / VXLOW warning
+  /// per flag naming the first table line and the number of rows.
   /// Nothing is written to `out` for a usage, file, model,
   /// input-table or evaluation error, because the results are written only after every row has been evaluated. The
   /// results are then streamed to `out` row by row, so if `out` fails or throws while they are written, the rows

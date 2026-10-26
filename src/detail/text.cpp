@@ -20,7 +20,7 @@ namespace mf::detail {
   } // namespace
 
   std::string_view trim(std::string_view text) noexcept {
-    constexpr std::string_view blanks = " \t\r\v\f";
+    constexpr std::string_view blanks = BLANKS;
     const std::size_t first = text.find_first_not_of(blanks);
     if (first == std::string_view::npos) {
       return {};

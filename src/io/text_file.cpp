@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <ios>
+#include <istream>
 #include <magic_formula/error.hpp>
 #include <magic_formula/io/text_file.hpp>
 #include <string>
@@ -24,6 +25,11 @@ namespace mf::io {
       const location where{.file = path.string(), .line = 0, .key = {}};
       return make_error(error_code::IO, "cannot open file for reading", where);
     }
+    const std::string name = path.string();
+    return read_text_stream(input, name);
+  }
+
+  std::expected<std::string, error> read_text_stream(std::istream &input, const std::string &name) {
     constexpr std::size_t chunk_bytes = 4096;
     std::array<char, chunk_bytes> chunk{};
     std::string content;
@@ -34,7 +40,7 @@ namespace mf::io {
       content.append(chunk.data(), static_cast<std::size_t>(input.gcount()));
     }
     if (input.bad()) {
-      const location where{.file = path.string(), .line = 0, .key = {}};
+      const location where{.file = name, .line = 0, .key = {}};
       return make_error(error_code::IO, "cannot read file", where);
     }
     return content;

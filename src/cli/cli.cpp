@@ -6,6 +6,8 @@
 #include <expected>
 #include <format>
 #include <magic_formula/cli/cli.hpp>
+#include <magic_formula/coordinate_identification.hpp>
+#include <magic_formula/coordinate_system.hpp>
 #include <magic_formula/detail/text.hpp>
 #include <magic_formula/error.hpp>
 #include <magic_formula/evaluation_types.hpp>
@@ -35,9 +37,25 @@ Fx, Fy, Mz, Mx and My, and the clamp and low-speed flags, for every row as CSV o
 
 Options:
   --uncombined   print the pure-slip outputs (Fx0, Fy0, Mz0) instead of the combined-slip ones
-  --verbose      print the model information and the ignored .tir keys on stderr
+  --verbose      print on stderr the model information, the ignored .tir keys, the coordinate-system
+                 identification summary, every indicator reading, the conversion line and the
+                 table-system line
+  --system=iso|sae
+                 convert the model to this coordinate system before evaluation (coefficient sign
+                 flips, applied only when its identified system differs); default: the model as identified
+  --table-system=iso|sae
+                 coordinate system of the input table and of the printed rows; default: the side the
+                 evaluated model is loaded on (FZ > 0: iso, FZ < 0: sae), so no data conversion
   -h, --help     print this text on stdout and exit
   --version      print the version on stdout and exit
+
+Coordinate systems:
+  ISO: x forward, y left, z up; a loaded tire has FZ > 0 and dFy/dSA > 0.
+  SAE: x forward, y right, z down; a loaded tire has FZ < 0 and dFy/dSA < 0.
+  SA, SR and IA have the same definition in both; FZ, FY, MZ and MY change sign.
+  The model's system is identified from its evaluated behaviour and reported as a warning when the
+  coefficients mix conventions or the evidence is weak (details with --verbose).
+  Converting a model flips coefficient signs; the equations never change.
 
 Input table (plain text, one operating point per row):
   - A line whose first non-blank character is '#' is a comment; blank lines are ignored.
@@ -57,9 +75,10 @@ Input table (plain text, one operating point per row):
 Output (stdout):
   FZ[N],SA[rad],SR[-],IA[rad],VX[m/s],FX[N],FY[N],MZ[N*m],MX[N*m],MY[N*m],FZ_CLAMPED[-],SR_CLAMPED[-],SA_CLAMPED[-],IA_CLAMPED[-],BELOW_VXLOW[-]
   followed by one line per input row, in input order. The inputs are echoed unclamped in SI units
-  (angles in rad), followed by the five outputs in the ISO W-axis sign convention, then five flags
-  (1 = FZ/SR/SA/IA was clamped to the property-file range or VX is below VXLOW, 0 otherwise). Nothing is
-  written to stdout when an error occurs. Warnings (clamped inputs, low speed, ignored column) go to stderr.
+  (angles in rad), followed by the five outputs, then five flags (1 = FZ/SR/SA/IA was clamped to the
+  property-file range or VX is below VXLOW, 0 otherwise). The inputs and outputs are printed in the table system
+  (--table-system). Nothing is written to stdout when an error occurs.
+  Warnings (load side, coordinate system, clamped inputs, low speed, ignored column) go to stderr.
 
 Exit status:
   0  success (also --help and --version)
@@ -70,6 +89,53 @@ Exit status:
 
     /// The names of `tyre_side`, indexed by the enumerator value.
     constexpr std::array<std::string_view, 2> SIDE_NAMES{"LEFT", "RIGHT"};
+
+    /// Prefix of the `--system` option.
+    constexpr std::string_view SYSTEM_PREFIX = "--system=";
+
+    /// Prefix of the `--table-system` option.
+    constexpr std::string_view TABLE_SYSTEM_PREFIX = "--table-system=";
+
+    /// "no" and "yes", indexed by a bool.
+    constexpr std::array<std::string_view, 2> YES_NO{"no", "yes"};
+
+    /// The FZ relation of a loaded tire, indexed by `coordinate_system` (ISO, SAE).
+    constexpr std::array<std::string_view, 2> LOADED_FZ_WORDS{"> 0", "< 0"};
+
+    /// The vote as text, indexed by vote + 1.
+    constexpr std::array<std::string_view, 3> VOTE_WORDS{"-1", "0", "+1"};
+
+    /// The value of a `--system=` or `--table-system=` argument, or the usage error.
+    std::expected<coordinate_system, std::string> system_value(std::string_view arg, std::string_view prefix) {
+      const std::string_view value = arg.substr(prefix.size());
+      const std::optional<coordinate_system> system = parse_coordinate_system(value);
+      if (!system.has_value()) {
+        const std::string_view option = prefix.substr(0, prefix.size() - 1);
+        return std::unexpected(std::format("invalid value '{}' for {} (expected iso or sae)", value, option));
+      }
+      return *system;
+    }
+
+    /// Applies `--system=<v>` or `--table-system=<v>`; false when `arg` is neither.
+    std::expected<bool, std::string> apply_system_option(std::string_view arg, options &parsed) {
+      if (arg.starts_with(SYSTEM_PREFIX)) {
+        const std::expected<coordinate_system, std::string> value = system_value(arg, SYSTEM_PREFIX);
+        if (!value.has_value()) {
+          return std::unexpected(value.error());
+        }
+        parsed.target_system = *value;
+        return true;
+      }
+      if (arg.starts_with(TABLE_SYSTEM_PREFIX)) {
+        const std::expected<coordinate_system, std::string> value = system_value(arg, TABLE_SYSTEM_PREFIX);
+        if (!value.has_value()) {
+          return std::unexpected(value.error());
+        }
+        parsed.table_system = *value;
+        return true;
+      }
+      return false;
+    }
 
     /// The words of the warning of one flag output channel.
     struct flag_wording {
@@ -117,12 +183,17 @@ Exit status:
 
     /// The value as text, or "absent".
     std::string describe(const std::optional<int> &value) {
-      return value.transform([](int number) { return std::to_string(number); }).value_or("absent");
+      if (!value.has_value()) {
+        return "absent";
+      }
+      return std::to_string(*value);
     }
 
     /// Writes "mf: error: <failure>" and returns `EXIT_ERROR`.
     int fail(std::ostream &err, const error &failure) {
-      err << "mf: error: " << to_string(failure) << '\n';
+      // A named local keeps its destructor on the normal path of the closing brace, so that line is executed.
+      const std::string text = to_string(failure);
+      err << "mf: error: " << text << '\n';
       return EXIT_ERROR;
     }
 
@@ -178,25 +249,99 @@ Exit status:
       }
     }
 
-    /// Everything printed to stderr on success, in this order: load warnings, `--verbose` information, one warning per
-    /// ignored table column, and the flag warnings.
-    void print_diagnostics(std::ostream &err, const options &parsed, const io::loaded_model &loaded,
+    /// `--verbose`: one indicator reading as an "mf: info: coordinate indicator ..." line.
+    void print_reading(std::ostream &err, const indicator_reading &reading) {
+      const std::span<const std::string_view> votes{VOTE_WORDS};
+      const int vote_index = reading.vote + 1;
+      err << std::format("mf: info: coordinate indicator {} at {:g} x F'z0 ({:.6g} N): {:.6g} {}, normalised {:.3g}, "
+                         "{}, vote {}, weight {:.3g}\n",
+                         reading.definition.name, reading.load_scale, reading.load_n, reading.value,
+                         reading.definition.unit, reading.normalised, reading_status_name(reading.status),
+                         votes[static_cast<std::size_t>(vote_index)], reading.weight);
+    }
+
+    /// `--verbose`: the decision of one axis as "<SIGN> (<BASIS>, confidence <c>)".
+    std::string describe_decision(const axis_decision &decision) {
+      return std::format("{} ({}, confidence {:.2f})", axis_sign_name(decision.sign),
+                         decision_basis_name(decision.basis), decision.confidence);
+    }
+
+    /// `--verbose`: the identification of the source model and every reading behind it.
+    void print_identification(std::ostream &err, const coordinate_identification &identification) {
+      const std::string vertical = describe_decision(identification.vertical);
+      const std::string lateral = describe_decision(identification.lateral);
+      err << std::format("mf: info: coordinate system of the model: {}; vertical {}; lateral {}\n",
+                         system_classification_name(identification.classification), vertical, lateral);
+      for (const indicator_reading &reading : identification.readings) {
+        print_reading(err, reading);
+      }
+    }
+
+    /// `--verbose`: the conversion line (only when the model was converted) and the table line.
+    void print_conversion_info(std::ostream &err, const options &parsed,
+                               const std::optional<model_conversion> &conversion, coordinate_system table,
+                               coordinate_system side) {
+      const std::span<const std::string_view> yes_no{YES_NO};
+      if (conversion.has_value()) {
+        err << std::format("mf: info: model converted to {} (vertical transform: {}, lateral transform: {})\n",
+                           coordinate_system_name(parsed.target_system.value_or(side)),
+                           yes_no[static_cast<std::size_t>(conversion->applied.vertical)],
+                           yes_no[static_cast<std::size_t>(conversion->applied.lateral)]);
+      }
+      const std::span<const std::string_view> relations{LOADED_FZ_WORDS};
+      err << std::format("mf: info: table in {}; the model is loaded at FZ {}\n", coordinate_system_name(table),
+                         relations[static_cast<std::size_t>(side)]);
+    }
+
+    /// What `print_diagnostics` needs besides the streams, the options and the results.
+    struct diagnostics_input {
+      /// The loaded model (warnings and ignored keys); the converted model, when any, is `evaluated`.
+      const io::loaded_model *loaded = nullptr;
+      /// The model that was evaluated.
+      const tire_model *evaluated = nullptr;
+      /// Identification of the model as loaded.
+      const coordinate_identification *source_id = nullptr;
+      /// Identification of the evaluated model (its warnings are printed).
+      const coordinate_identification *evaluated_id = nullptr;
+      /// The conversion, when `--system` was given.
+      const std::optional<model_conversion> *conversion = nullptr;
+      /// The system of the table.
+      coordinate_system table = coordinate_system::ISO;
+      /// The loaded side of the evaluated model.
+      coordinate_system side = coordinate_system::ISO;
+    };
+
+    /// Everything printed to stderr on success, in this order: load warnings, the identification warnings of the
+    /// evaluated model, `--verbose` information, one warning per ignored table column, the load-side warning of the
+    /// table (in the table system, naming the first offending table line), and the flag warnings.
+    void print_diagnostics(std::ostream &err, const options &parsed, const diagnostics_input &state,
                            const io::model_inputs &inputs, const Eigen::Ref<const Eigen::MatrixXd> &outputs) {
-      for (const warning &item : loaded.warnings) {
+      const tire_model &model = *state.evaluated;
+      for (const warning &item : state.loaded->warnings) {
+        print_warning(err, item);
+      }
+      for (const warning &item : state.evaluated_id->warnings) {
         print_warning(err, item);
       }
       if (parsed.verbose) {
-        print_info(err, loaded);
+        print_info(err, *state.loaded);
+        print_identification(err, *state.source_id);
+        print_conversion_info(err, parsed, *state.conversion, state.table, state.side);
       }
       for (const std::string &column : inputs.ignored_columns) {
         const std::string message =
-            std::format("column {} is ignored: {} has no {} input", column, loaded.model->name(), column);
+            std::format("column {} is ignored: {} has no {} input", column, model.name(), column);
         print_warning(err, message, parsed.inputs_path, 0, column);
       }
-      print_flag_warnings(err, parsed.inputs_path, inputs.lines, loaded.model->layout(), outputs);
+      const std::optional<batch_warning> side =
+          load_side_warning(census_fz(model.layout(), inputs.values), state.table);
+      if (side.has_value()) {
+        print_warning(err, side->cause.message, parsed.inputs_path, inputs.lines[side->index], side->cause.where.key);
+      }
+      print_flag_warnings(err, parsed.inputs_path, inputs.lines, model.layout(), outputs);
     }
 
-    /// The `command::RUN` action: load, read, evaluate, report, write.
+    /// The `command::RUN` action: load, identify, convert, read, evaluate, report, write.
     int execute(const options &parsed, std::ostream &out, std::ostream &err) {
       const model_options evaluation{.mode = parsed.mode, .throw_if_model_failure = false};
       const std::expected<io::loaded_model, error> loaded = io::load_tire_model_file(parsed.tir_path, evaluation);
@@ -204,21 +349,40 @@ Exit status:
         return fail(err, loaded.error());
       }
       const tire_model &model = *loaded->model;
+      const coordinate_identification source_id = model.find_coordinate_system();
+      std::optional<model_conversion> conversion;
+      if (parsed.target_system.has_value()) {
+        conversion.emplace(model.convert_coordinate_system(*parsed.target_system));
+      }
+      const tire_model &evaluated = conversion.has_value() ? *conversion->model : model;
+      const coordinate_identification evaluated_id = evaluated.find_coordinate_system();
       const std::expected<io::model_inputs, error> inputs =
-          io::read_model_inputs(parsed.inputs_path, model.layout().inputs);
+          io::read_model_inputs(parsed.inputs_path, evaluated.layout().inputs);
       if (!inputs.has_value()) {
         return fail(err, inputs.error());
       }
-      std::expected<Eigen::MatrixXd, batch_error> results = checked_evaluate_batch(model, inputs->values);
-      if (!results.has_value()) {
+      const coordinate_system side = evaluated.loaded_side();
+      const coordinate_system table = parsed.table_system.value_or(side);
+      Eigen::MatrixXd values = inputs->values;
+      convert_inputs(evaluated.layout(), table, side, values);
+      std::expected<Eigen::MatrixXd, batch_error> outputs = checked_evaluate_batch(evaluated, values);
+      if (!outputs.has_value()) {
         // The failure is located in the input table: file and 1-based line of the failing row (the key is kept).
-        batch_error &failure = results.error();
+        batch_error &failure = outputs.error();
         failure.cause.where.file = parsed.inputs_path;
         failure.cause.where.line = inputs->lines[failure.index];
         return fail(err, failure.cause);
       }
-      print_diagnostics(err, parsed, *loaded, *inputs, *results);
-      io::write_results(out, model.layout(), inputs->values, *results);
+      convert_outputs(evaluated.layout(), side, table, *outputs);
+      const diagnostics_input state{.loaded = &*loaded,
+                                    .evaluated = &evaluated,
+                                    .source_id = &source_id,
+                                    .evaluated_id = &evaluated_id,
+                                    .conversion = &conversion,
+                                    .table = table,
+                                    .side = side};
+      print_diagnostics(err, parsed, state, *inputs, *outputs);
+      io::write_results(out, evaluated.layout(), inputs->values, *outputs);
       out.flush();
       if (out.fail()) {
         err << "mf: error: cannot write results\n";
@@ -248,6 +412,13 @@ Exit status:
       }
       if (arg == "--verbose") {
         parsed.verbose = true;
+        continue;
+      }
+      const std::expected<bool, std::string> handled = apply_system_option(arg, parsed);
+      if (!handled.has_value()) {
+        return std::unexpected(handled.error());
+      }
+      if (*handled) {
         continue;
       }
       if (arg.starts_with('-')) {

@@ -159,9 +159,8 @@ namespace {
 
   constexpr double QUIET_NAN = std::numeric_limits<double>::quiet_NaN();
 
-  constexpr std::array<invalid_case, 12> INVALID_CASES{
+  constexpr std::array<invalid_case, 11> INVALID_CASES{
       invalid_case{.member = &coeffs::FNOMIN, .key = "FNOMIN", .value = 0.0},
-      invalid_case{.member = &coeffs::FNOMIN, .key = "FNOMIN", .value = -1.0},
       invalid_case{.member = &coeffs::FNOMIN, .key = "FNOMIN", .value = QUIET_NAN},
       invalid_case{.member = &coeffs::UNLOADED_RADIUS, .key = "UNLOADED_RADIUS", .value = 0.0},
       invalid_case{.member = &coeffs::UNLOADED_RADIUS, .key = "UNLOADED_RADIUS", .value = -0.3},
@@ -264,12 +263,26 @@ TEST(validate_coefficients, ValidateCoefficients_SeveralInvalid_ReportsFirstInDo
   EXPECT_EQ(result.error().where.key, "LONGVL");
 }
 
-TEST(validate_coefficients, ValidateCoefficients_NegativeFnomin_MessageNamesKeyAndValue) {
+TEST(validate_coefficients, ValidateCoefficients_NegativeFnomin_IsAcceptedAsNonZero) {
   coeffs c = mf::test::fixture_s().coefficients;
   c.FNOMIN = -1.0;
+  EXPECT_TRUE(mf::validate_coefficients(c).has_value());
+}
+
+TEST(validate_coefficients, ValidateCoefficients_ZeroFnomin_MessageSaysNonZero) {
+  coeffs c = mf::test::fixture_s().coefficients;
+  c.FNOMIN = 0.0;
   const auto result = mf::validate_coefficients(c);
   ASSERT_FALSE(result.has_value());
-  EXPECT_EQ(result.error().message, "FNOMIN must be > 0 (got -1)");
+  EXPECT_EQ(result.error().message, "FNOMIN must be non-zero (got 0)");
+}
+
+TEST(validate_coefficients, ValidateCoefficients_NanFnomin_MessageSaysNonZero) {
+  coeffs c = mf::test::fixture_s().coefficients;
+  c.FNOMIN = QUIET_NAN;
+  const auto result = mf::validate_coefficients(c);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().message, "FNOMIN must be non-zero (got nan)");
 }
 
 TEST(validate_coefficients, ValidateCoefficients_NegativeLmuy_IsAcceptedAsNonZero) {

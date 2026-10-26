@@ -1,0 +1,5 @@
+# synthetic, authored for magic-formula; not derived from any vendor file
+FZ,SA,SR,IA,VX,P
+N,rad,-,rad,m/s,Pa
+4000,0.05,0.1,0,10,220000
+-100,0.05,0.1,0,10,220000

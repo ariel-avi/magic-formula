@@ -1,5 +1,6 @@
 #include <Eigen/Core>
 #include <algorithm>
+#include <array>
 #include <expected>
 #include <magic_formula/detail/lanes.hpp>
 #include <magic_formula/detail/mf5x_kernels.hpp>
@@ -9,8 +10,11 @@
 #include <magic_formula/mf5x_forms.hpp>
 #include <magic_formula/mf5x_layout.hpp>
 #include <magic_formula/mf5x_model.hpp>
+#include <magic_formula/mf5x_signs.hpp>
 #include <magic_formula/model_layout.hpp>
+#include <magic_formula/sign_transform.hpp>
 #include <magic_formula/tire_model.hpp>
+#include <memory>
 
 namespace mf {
   namespace {
@@ -80,6 +84,14 @@ namespace mf {
     return mf5x::OUTPUT_LENGTH;
   }
 
+  Eigen::VectorXd mf5x_model::reference_input() const {
+    // Plain array first: only the final vector owns memory, so no cleanup path exists between its steps.
+    std::array<double, mf5x::INPUT_LENGTH> values{};
+    values[mf5x::FZ] = coefficients_.FNOMIN * coefficients_.LFZO;
+    values[mf5x::VX] = coefficients_.LONGVL;
+    return Eigen::Map<const Eigen::VectorXd>(values.data(), mf5x::INPUT_LENGTH);
+  }
+
   const mf5x_coefficients &mf5x_model::coefficients() const noexcept {
     return coefficients_;
   }
@@ -93,6 +105,15 @@ namespace mf {
       return std::unexpected<error>(valid.error());
     }
     return validate_limits(parameters.limits, mf5x::LIMITS);
+  }
+
+  std::unique_ptr<tire_model> mf5x_model::rebuild(const sign_transforms &transforms,
+                                                  const Eigen::VectorXd &limits) const {
+    mf5x_parameters parameters;
+    parameters.coefficients = mf5x::transform_coefficients(coefficients_, transforms);
+    parameters.limits = limits;
+    parameters.metadata = metadata();
+    return with_parameters(parameters);
   }
 
   void mf5x_model::compute(const Eigen::Ref<const Eigen::VectorXd> &input,

@@ -137,7 +137,8 @@ namespace mf::io {
     /// "FZ: N, SA: rad|deg, SR: -, IA: rad|deg, VX: m/s" for `columns` in header order (P gives "P: Pa").
     std::string unit_hint(std::span<const column_def *const> columns) {
       const auto describe = [](const column_def *def) {
-        return std::format("{}: {}", def->name, supported_units(def->name, "|"));
+        const std::string units = supported_units(def->name, "|");
+        return std::format("{}: {}", def->name, units);
       };
       auto described = columns | std::views::transform(describe);
       const std::vector<std::string> parts = std::ranges::to<std::vector>(described);

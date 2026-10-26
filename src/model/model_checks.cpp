@@ -24,7 +24,8 @@ namespace mf {
 
     /// An `error` value with the given code, message and key.
     error key_error(error_code code, std::string message, std::string_view key) {
-      return make_error(code, std::move(message), key_location(key)).error();
+      std::unexpected<error> failure = make_error(code, std::move(message), key_location(key));
+      return std::move(failure).error();
     }
 
     /// A `batch_error` for `row`, built member by member.
@@ -113,13 +114,21 @@ namespace mf {
     return {};
   }
 
-  std::expected<void, batch_error> validate_inputs(const tire_model &model,
-                                                   const Eigen::Ref<const Eigen::MatrixXd> &inputs) {
+  std::expected<void, batch_error> check_input_shape(const tire_model &model,
+                                                     const Eigen::Ref<const Eigen::MatrixXd> &inputs) {
     if (inputs.cols() != model.input_length()) {
       return batch_failure(0, make_error(error_code::INVALID_ARGUMENT,
                                          std::format("input matrix has {} columns, the {} model expects {}",
                                                      inputs.cols(), model.name(), model.input_length()))
                                   .error());
+    }
+    return {};
+  }
+
+  std::expected<void, batch_error> validate_inputs(const tire_model &model,
+                                                   const Eigen::Ref<const Eigen::MatrixXd> &inputs) {
+    if (const std::expected<void, batch_error> shape = check_input_shape(model, inputs); !shape.has_value()) {
+      return std::unexpected<batch_error>(shape.error());
     }
     const std::span<const input_channel> channels = model.layout().inputs;
     const auto ok = [channels](Eigen::Index c, double v) { return channel_ok(at(channels, c), v); };

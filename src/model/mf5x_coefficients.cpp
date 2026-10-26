@@ -1,3 +1,4 @@
+#include <cmath>
 #include <expected>
 #include <format>
 #include <magic_formula/error.hpp>
@@ -20,9 +21,9 @@ namespace mf {
   } // namespace
 
   std::expected<void, error> validate_coefficients(const mf5x_coefficients &coefficients) {
-    // The "!(x > 0)" form also rejects NaN.
-    if (!(coefficients.FNOMIN > 0.0)) {
-      return invalid_coefficient("FNOMIN", "> 0", coefficients.FNOMIN);
+    // FNOMIN may be negative (its sign is the loaded side); zero and NaN are rejected.
+    if (coefficients.FNOMIN == 0.0 || std::isnan(coefficients.FNOMIN)) {
+      return invalid_coefficient("FNOMIN", "non-zero", coefficients.FNOMIN);
     }
     if (!(coefficients.UNLOADED_RADIUS > 0.0)) {
       return invalid_coefficient("UNLOADED_RADIUS", "> 0", coefficients.UNLOADED_RADIUS);

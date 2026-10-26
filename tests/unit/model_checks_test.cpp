@@ -13,7 +13,9 @@
 #include <magic_formula/model_checks.hpp>
 #include <magic_formula/model_layout.hpp>
 #include <magic_formula/pac2002_model.hpp>
+#include <magic_formula/sign_transform.hpp>
 #include <magic_formula/tire_model.hpp>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -51,8 +53,16 @@ namespace {
     [[nodiscard]] const mf::model_layout &layout() const noexcept override {
       return STUB_LAYOUT;
     }
+    [[nodiscard]] Eigen::VectorXd reference_input() const override {
+      return Eigen::VectorXd::Zero(input_length());
+    }
 
   private:
+    [[nodiscard]] std::unique_ptr<mf::tire_model> rebuild(const mf::sign_transforms & /*transforms*/,
+                                                          const Eigen::VectorXd & /*limits*/) const override {
+      return std::make_unique<stub_model>(emit_nan_);
+    }
+
     void compute(const Eigen::Ref<const Eigen::VectorXd> &input,
                  Eigen::Ref<Eigen::VectorXd> output) const noexcept override {
       output(0) = input(0) + input(1);
@@ -195,6 +205,21 @@ TEST(validate_inputs, WrongColumns_InvalidArgumentIndexZero) {
   EXPECT_EQ(result.error().index, 0U);
   EXPECT_EQ(result.error().cause.code, mf::error_code::INVALID_ARGUMENT);
   EXPECT_TRUE(contains(result.error().cause.message, "input matrix has 4 columns, the PAC2002 model expects 5"));
+}
+
+TEST(validate_inputs, CheckInputShape_MatchingColumns_Succeeds) {
+  const mf::pac2002_model model = make_pac2002();
+  EXPECT_TRUE(mf::check_input_shape(model, Eigen::MatrixXd::Zero(3, 5)).has_value());
+  EXPECT_TRUE(mf::check_input_shape(model, Eigen::MatrixXd(0, 5)).has_value());
+}
+
+TEST(validate_inputs, CheckInputShape_WrongColumns_InvalidArgumentAtRowZero) {
+  const stub_model model(false);
+  const auto result = mf::check_input_shape(model, Eigen::MatrixXd::Zero(3, 4));
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().index, 0U);
+  EXPECT_EQ(result.error().cause.code, mf::error_code::INVALID_ARGUMENT);
+  EXPECT_EQ(result.error().cause.message, "input matrix has 4 columns, the stub model expects 2");
 }
 
 TEST(validate_inputs, ZeroRows_Succeeds) {

@@ -1,12 +1,18 @@
 #pragma once
 
 #include <Eigen/Core>
+#include <magic_formula/coordinate_identification.hpp>
 #include <magic_formula/error.hpp>
 #include <magic_formula/evaluation_types.hpp>
 #include <magic_formula/model_layout.hpp>
+#include <magic_formula/sign_transform.hpp>
+#include <memory>
+#include <span>
 #include <string_view>
 
 namespace mf {
+  struct model_conversion;
+
   /// Abstract base tire-model formulation with an index-mapped, vectorised evaluation interface.
   ///
   /// A model maps an input vector (one value per `layout().inputs` channel) to an output vector (one value per
@@ -61,6 +67,35 @@ namespace mf {
     /// must not overlap.
     void evaluate_batch(const double *inputs, int rows, double *data, int len) const;
 
+    /// The input vector (`input_length()` values, input order) of the model's reference operating point: nominal
+    /// load, zero slip ratio, slip angle and inclination, reference speed (and the nominal pressure for formulations
+    /// with a pressure input). `find_coordinate_system` probes around it.
+    [[nodiscard]] virtual Eigen::VectorXd reference_input() const = 0;
+
+    /// `find_coordinate_system(IDENTIFICATION_INDICATORS)`.
+    [[nodiscard]] coordinate_identification find_coordinate_system() const;
+
+    /// Identifies the coordinate system of the coefficient set from its evaluated behaviour (coordinate-systems.md):
+    /// reference = `reference_input()`; probes = `detail::plan_probes(layout(), reference, indicators)`; one unchecked
+    /// `compute_batch` on the probe rows (so it never throws `model_failure`, whatever the options);
+    /// `assemble_identification(detail::read_probes(...), reference)`. Total: may throw only std::bad_alloc. Const and
+    /// thread-safe. The returned readings copy the definitions' string_views: the string data of `indicators` must
+    /// outlive the returned identification.
+    [[nodiscard]] coordinate_identification
+    find_coordinate_system(std::span<const indicator_definition> indicators) const;
+
+    /// SAE when the reference FZ (`reference_input()`) is negative, else ISO; also ISO when the layout has no FZ input.
+    [[nodiscard]] coordinate_system loaded_side() const;
+
+    /// A new model of the same formulation, forms, options and metadata with its coefficients and limits transformed
+    /// by `transforms` (exact sign flips; an empty set gives an identical copy):
+    /// evaluate(transformed(T), T_in(x)) == T_out(evaluate(x)); applying it twice restores the values.
+    /// = rebuild(transforms, transform_limits(limits(), layout().limits, transforms)).
+    [[nodiscard]] std::unique_ptr<tire_model> transformed(const sign_transforms &transforms) const;
+
+    /// `find_coordinate_system()`, then `plan_conversion(identification.effective, target)`, then `transformed(plan)`.
+    [[nodiscard]] model_conversion convert_coordinate_system(coordinate_system target) const;
+
     /// Limits vector, indexed by the model's limit_index.
     [[nodiscard]] const Eigen::VectorXd &limits() const noexcept;
 
@@ -80,6 +115,11 @@ namespace mf {
     tire_model &operator=(tire_model &&) noexcept = default;
 
   private:
+    /// Primitive of `transformed`: a new model of this formulation with its coefficients transformed by `transforms`
+    /// and the given (already transformed) limits; options and metadata copied.
+    [[nodiscard]] virtual std::unique_ptr<tire_model> rebuild(const sign_transforms &transforms,
+                                                              const Eigen::VectorXd &limits) const = 0;
+
     /// One point, no checks, no allocation. The sizes are guaranteed by the caller.
     virtual void compute(const Eigen::Ref<const Eigen::VectorXd> &input,
                          Eigen::Ref<Eigen::VectorXd> output) const noexcept = 0;
@@ -100,5 +140,15 @@ namespace mf {
     Eigen::VectorXd limits_;
     model_metadata metadata_;
     model_options options_;
+  };
+
+  /// The result of `tire_model::convert_coordinate_system`.
+  struct model_conversion {
+    /// Never null; an identical copy when nothing was applied.
+    std::unique_ptr<tire_model> model;
+    /// The plan that was applied.
+    sign_transforms applied;
+    /// Of the source model.
+    coordinate_identification identification;
   };
 } // namespace mf

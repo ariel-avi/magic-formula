@@ -6,6 +6,8 @@
 #include <magic_formula/mf5x_coefficients.hpp>
 #include <magic_formula/mf5x_model.hpp>
 #include <magic_formula/model_layout.hpp>
+#include <magic_formula/tire_model.hpp>
+#include <memory>
 #include <string_view>
 
 namespace mf {
@@ -28,6 +30,9 @@ namespace mf {
     [[nodiscard]] const model_layout &layout() const noexcept override;
 
   private:
+    /// An MF 5.2 model with `parameters` and this model's options.
+    [[nodiscard]] std::unique_ptr<tire_model> with_parameters(const mf5x_parameters &parameters) const final;
+
     mf52_model(const mf5x_parameters &parameters, const model_options &options);
   };
 } // namespace mf

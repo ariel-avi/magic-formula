@@ -7,6 +7,8 @@
 #include <magic_formula/mf5x_forms.hpp>
 #include <magic_formula/mf5x_model.hpp>
 #include <magic_formula/model_layout.hpp>
+#include <magic_formula/tire_model.hpp>
+#include <memory>
 #include <string_view>
 
 namespace mf {
@@ -36,6 +38,9 @@ namespace mf {
     [[nodiscard]] bool uses_my_from_shifts() const noexcept;
 
   private:
+    /// A PAC2002 model with `parameters`, this model's forms and options.
+    [[nodiscard]] std::unique_ptr<tire_model> with_parameters(const mf5x_parameters &parameters) const final;
+
     pac2002_model(const mf5x_parameters &parameters, const mf5x_forms &forms, const model_options &options);
   };
 } // namespace mf

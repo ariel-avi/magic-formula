@@ -3,6 +3,7 @@
 # and clang-tidy_all.
 set(MF_LIB_SOURCES
         cli/cli.cpp
+        detail/identification_probes.cpp
         detail/text.cpp
         error.cpp
         io/input_table.cpp
@@ -12,12 +13,17 @@ set(MF_LIB_SOURCES
         io/number.cpp
         io/result_writer.cpp
         io/text_file.cpp
+        io/tir_conversion.cpp
         io/tir_document.cpp
+        io/tir_editor.cpp
         io/tir_reader.cpp
         io/units.cpp
+        model/coordinate_identification.cpp
+        model/coordinate_system.cpp
         model/mf52_model.cpp
         model/mf5x_coefficients.cpp
         model/mf5x_model.cpp
+        model/mf5x_signs.cpp
         model/model_checks.cpp
         model/model_layout.cpp
         model/pac2002_model.cpp

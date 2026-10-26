@@ -20,6 +20,12 @@ namespace mf {
   [[nodiscard]] std::expected<void, error> validate_input(const tire_model &model,
                                                           const Eigen::Ref<const Eigen::VectorXd> &input);
 
+  /// Checks only the column count of a rows x input_length() matrix: INVALID_ARGUMENT at row 0 with the message of
+  /// `validate_inputs` ("input matrix has <c> columns, the <model> model expects <n>"). `validate_inputs` runs it
+  /// first.
+  [[nodiscard]] std::expected<void, batch_error> check_input_shape(const tire_model &model,
+                                                                   const Eigen::Ref<const Eigen::MatrixXd> &inputs);
+
   /// Checks a rows x input_length() matrix like `validate_input`, column by column. A wrong column count is an
   /// INVALID_ARGUMENT at row 0. No allocation on success; zero rows succeed.
   [[nodiscard]] std::expected<void, batch_error> validate_inputs(const tire_model &model,

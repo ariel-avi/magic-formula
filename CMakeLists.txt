@@ -28,6 +28,7 @@ option(MF_ENABLE_COVERAGE "Instrument project targets for gcov coverage and add 
 option(MF_WARNINGS_AS_ERRORS "Treat compiler warnings as errors on project targets" ON)
 option(MF_BUILD_PYTHON "Build the pybind11 extension magic_formula._core from python/ (python/pyproject.toml sets it; not a CTest test, not coverage-gated)" OFF)
 option(MF_BUILD_BENCH "Build the Google Benchmark executable mf_bench from bench/ (not a CTest test, not coverage-gated)" OFF)
+option(MF_BUILD_WASM "Build the WebAssembly module mf_wasm from wasm/ (Emscripten toolchain, wasm preset)" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(Coverage)
@@ -49,6 +50,7 @@ endif ()
 add_subdirectory(tests)     # unit, module, support (MF_BUILD_TESTS)
 add_subdirectory(bench)     # mf_bench (MF_BUILD_BENCH)
 add_subdirectory(python)    # mf_python (MF_BUILD_PYTHON)
+add_subdirectory(wasm)      # mf_wasm (MF_BUILD_WASM, Emscripten wasm preset only)
 
 if (MF_ENABLE_COVERAGE)
     get_property(MF_TEST_TARGETS GLOBAL PROPERTY MF_TEST_TARGETS)

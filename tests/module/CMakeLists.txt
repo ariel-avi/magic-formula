@@ -3,7 +3,8 @@
 set(MF_MODULE_TESTS
         cli_test.cpp
         fixtures_test.cpp
-        mfeval_reference_test.cpp)
+        mfeval_reference_test.cpp
+        tir_edit_test.cpp)
 
 mf_add_clang_format(mf_module_tests FILES ${MF_MODULE_TESTS})
 

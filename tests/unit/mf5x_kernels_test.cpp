@@ -1192,6 +1192,21 @@ TEST(mf5x_kernels, MyFromShifts_MatchesV10) {
   EXPECT_TRUE(rel_near_result(kernels::my_from_shifts(c, lon)(0), -36.0, REL_TOL_CLOSED_FORM));
 }
 
+TEST(mf5x_kernels, MyFromShifts_NegativeFnomin_NegatesPositiveFnominValue) {
+  const coeffs positive = rich_coefficients();
+  coeffs negative = positive;
+  negative.FNOMIN = -positive.FNOMIN;
+  on_each_lane_type(grid_points(true), [&](const auto &in) {
+    const auto state = kernels::evaluate_slip_state(positive, in);
+    const auto expected = kernels::my_from_shifts(positive, state.lon);
+    const auto actual = kernels::my_from_shifts(negative, state.lon);
+    ASSERT_EQ(actual.size(), expected.size());
+    for (Eigen::Index i = 0; i < actual.size(); ++i) {
+      EXPECT_EQ(bits(actual(i)), bits(-expected(i))) << "row " << i;
+    }
+  });
+}
+
 // ---- block lane against point lanes -----------------------------------------------------------------------------
 
 TEST(mf5x_kernels, SineMagicFormula_BlockVsPoint_Agree) {

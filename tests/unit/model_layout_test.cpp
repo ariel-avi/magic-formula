@@ -1,4 +1,7 @@
+#include "../support/fixtures.hpp"
+
 #include <Eigen/Core>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <gtest/gtest.h>
@@ -6,11 +9,113 @@
 #include <magic_formula/error.hpp>
 #include <magic_formula/mf5x_layout.hpp>
 #include <magic_formula/model_layout.hpp>
+#include <magic_formula/sign_transform.hpp>
+#include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
   constexpr double INF = std::numeric_limits<double>::infinity();
+  constexpr double QUIET_NAN = std::numeric_limits<double>::quiet_NaN();
+
+  using mf::sign_transform;
+  using mf::sign_transforms;
+  using mf::test::bits;
+
+  // The four conversion plans: identity, VERTICAL, LATERAL and both.
+  constexpr std::array<sign_transforms, 4> ALL_SETS{{
+      {.vertical = false, .lateral = false},
+      {.vertical = true, .lateral = false},
+      {.vertical = false, .lateral = true},
+      {.vertical = true, .lateral = true},
+  }};
+
+  // Four channels: A never negated, B and D VERTICAL, C LATERAL.
+  constexpr std::array<mf::input_channel, 4> SIGN_INPUTS{{
+      {.name = "A", .unit = "-"},
+      {.name = "B", .unit = "-", .negated_by = sign_transform::VERTICAL},
+      {.name = "C", .unit = "-", .negated_by = sign_transform::LATERAL},
+      {.name = "D", .unit = "-", .negated_by = sign_transform::VERTICAL},
+  }};
+
+  constexpr std::array<mf::output_channel, 4> SIGN_OUTPUTS{{
+      {.name = "A", .unit = "-"},
+      {.name = "B", .unit = "-", .negated_by = sign_transform::VERTICAL},
+      {.name = "C", .unit = "-", .negated_by = sign_transform::LATERAL},
+      {.name = "D", .unit = "-", .negated_by = sign_transform::VERTICAL},
+  }};
+
+  // Finite values, a NaN, +0.0 and -0.0 in every column.
+  Eigen::MatrixXd sign_sample() {
+    const std::array<double, 12> flat{1.5, -2.5, 3.25, QUIET_NAN, QUIET_NAN, 0.0, -0.0, 7.0, 0.0, -0.0, 8.5, -9.0};
+    Eigen::MatrixXd values(3, 4);
+    for (Eigen::Index i = 0; i < 12; ++i) {
+      values(i / 4, i % 4) = flat[static_cast<std::size_t>(i)];
+    }
+    return values;
+  }
+
+  // Same bit pattern, or both NaN (the payload of a NaN is not part of the contract).
+  void expect_same_value_bits(double actual, double expected) {
+    if (std::isnan(expected)) {
+      EXPECT_TRUE(std::isnan(actual));
+    } else {
+      EXPECT_EQ(bits(actual), bits(expected));
+    }
+  }
+
+  template <typename Channel_T>
+  void expect_flips_declared_columns(std::span<const Channel_T> channels, const sign_transforms &set) {
+    const Eigen::MatrixXd original = sign_sample();
+    Eigen::MatrixXd values = original;
+    mf::apply_sign_transforms(channels, set, values);
+    for (Eigen::Index c = 0; c < values.cols(); ++c) {
+      const bool flipped = mf::contains(set, channels[static_cast<std::size_t>(c)].negated_by);
+      for (Eigen::Index r = 0; r < values.rows(); ++r) {
+        SCOPED_TRACE(testing::Message() << "row " << r << " column " << c);
+        expect_same_value_bits(values(r, c), flipped ? -original(r, c) : original(r, c));
+      }
+    }
+    mf::apply_sign_transforms(channels, set, values);
+    for (Eigen::Index c = 0; c < values.cols(); ++c) {
+      for (Eigen::Index r = 0; r < values.rows(); ++r) {
+        SCOPED_TRACE(testing::Message() << "row " << r << " column " << c);
+        expect_same_value_bits(values(r, c), original(r, c));
+      }
+    }
+  }
+
+  struct sign_row {
+    mf::limit_role role;
+    sign_transform negated_by;
+  };
+
+  bool signs_ok(const std::vector<sign_row> &rows) {
+    std::vector<mf::limit_channel> channels;
+    for (const sign_row &row : rows) {
+      channels.push_back(mf::limit_channel{.key = "K", .role = row.role, .negated_by = row.negated_by});
+    }
+    return mf::limit_signs_well_formed(channels);
+  }
+
+  // P: a VERTICAL pair, Q: a LATERAL pair, V: a plain value.
+  constexpr std::array<mf::limit_channel, 5> PAIR_CHANNELS{{
+      {.key = "P_LO", .role = mf::limit_role::LOWER, .negated_by = sign_transform::VERTICAL},
+      {.key = "P_HI", .role = mf::limit_role::UPPER, .negated_by = sign_transform::VERTICAL},
+      {.key = "Q_LO", .role = mf::limit_role::LOWER, .negated_by = sign_transform::LATERAL},
+      {.key = "Q_HI", .role = mf::limit_role::UPPER, .negated_by = sign_transform::LATERAL},
+      {.key = "V", .role = mf::limit_role::VALUE},
+  }};
+
+  Eigen::VectorXd limits_of(const std::array<double, 5> &values) {
+    Eigen::VectorXd limits(5);
+    for (Eigen::Index i = 0; i < 5; ++i) {
+      limits(i) = values[static_cast<std::size_t>(i)];
+    }
+    return limits;
+  }
 
   // Built at run time on purpose, so that the coverage tools see the constexpr function being executed.
   std::vector<mf::limit_channel> make_channels(const std::vector<mf::limit_role> &roles) {
@@ -142,4 +247,103 @@ TEST(validate_limits, EmptyChannelsEmptyVector_Succeeds) {
   const std::vector<mf::limit_channel> channels;
   const Eigen::VectorXd limits;
   EXPECT_TRUE(mf::validate_limits(limits, channels).has_value());
+}
+
+TEST(find_channel, InputPresent_ReturnsIndex) {
+  const std::span<const mf::input_channel> inputs = mf::mf5x::PAC2002_INPUTS;
+  const std::optional<std::size_t> index = mf::find_channel(inputs, "IA");
+  ASSERT_TRUE(index.has_value());
+  EXPECT_EQ(*index, 3U);
+}
+
+TEST(find_channel, OutputPresent_ReturnsIndex) {
+  const std::span<const mf::output_channel> outputs = mf::mf5x::OUTPUTS;
+  const std::optional<std::size_t> index = mf::find_channel(outputs, "MZ");
+  ASSERT_TRUE(index.has_value());
+  EXPECT_EQ(*index, 2U);
+}
+
+TEST(find_channel, Absent_ReturnsEmpty) {
+  const std::span<const mf::input_channel> inputs = mf::mf5x::PAC2002_INPUTS;
+  EXPECT_FALSE(mf::find_channel(inputs, "P").has_value());
+  EXPECT_FALSE(mf::find_channel(inputs, "fz").has_value());
+  EXPECT_FALSE(mf::find_channel(std::span<const mf::input_channel>{}, "FZ").has_value());
+}
+
+TEST(find_channel, OutputAbsent_ReturnsEmpty) {
+  const std::span<const mf::output_channel> outputs = mf::mf5x::OUTPUTS;
+  EXPECT_FALSE(mf::find_channel(outputs, "FZ").has_value());
+  EXPECT_FALSE(mf::find_channel(outputs, "mz").has_value());
+  EXPECT_FALSE(mf::find_channel(std::span<const mf::output_channel>{}, "MZ").has_value());
+}
+
+TEST(find_channel, LastOutput_ReturnsLastIndex) {
+  const std::span<const mf::output_channel> outputs = mf::mf5x::OUTPUTS;
+  const std::optional<std::size_t> index = mf::find_channel(outputs, "BELOW_VXLOW");
+  ASSERT_TRUE(index.has_value());
+  EXPECT_EQ(*index, 9U);
+}
+
+TEST(sign_transform, Contains_EachSetAndTransform_MatchesMembership) {
+  for (const sign_transforms &set : ALL_SETS) {
+    SCOPED_TRACE(testing::Message() << "vertical " << set.vertical << " lateral " << set.lateral);
+    EXPECT_FALSE(mf::contains(set, sign_transform::NONE));
+    EXPECT_EQ(mf::contains(set, sign_transform::VERTICAL), set.vertical);
+    EXPECT_EQ(mf::contains(set, sign_transform::LATERAL), set.lateral);
+  }
+}
+
+TEST(sign_transform, Name_EachEnumerator_ReturnsSpelling) {
+  EXPECT_EQ(mf::sign_transform_name(sign_transform::NONE), "NONE");
+  EXPECT_EQ(mf::sign_transform_name(sign_transform::VERTICAL), "VERTICAL");
+  EXPECT_EQ(mf::sign_transform_name(sign_transform::LATERAL), "LATERAL");
+}
+
+TEST(model_layout, NegatedBy_DefaultChannels_AreNone) {
+  EXPECT_EQ(mf::input_channel{}.negated_by, sign_transform::NONE);
+  EXPECT_EQ(mf::output_channel{}.negated_by, sign_transform::NONE);
+  EXPECT_EQ(mf::limit_channel{}.negated_by, sign_transform::NONE);
+}
+
+TEST(model_layout, ApplySignTransforms_InputsEachSet_FlipsExactlyDeclaredColumns) {
+  for (const sign_transforms &set : ALL_SETS) {
+    expect_flips_declared_columns<mf::input_channel>(SIGN_INPUTS, set);
+  }
+}
+
+TEST(model_layout, ApplySignTransforms_OutputsEachSet_FlipsExactlyDeclaredColumns) {
+  for (const sign_transforms &set : ALL_SETS) {
+    expect_flips_declared_columns<mf::output_channel>(SIGN_OUTPUTS, set);
+  }
+}
+
+TEST(model_layout, TransformLimits_EachSet_NegatesAndSwapsDeclaredPairs) {
+  const Eigen::VectorXd original = limits_of({200.0, 10000.0, -INF, 0.5, 1.0});
+  const Eigen::VectorXd vertical_only = limits_of({-10000.0, -200.0, -INF, 0.5, 1.0});
+  const Eigen::VectorXd lateral_only = limits_of({200.0, 10000.0, -0.5, INF, 1.0});
+  const Eigen::VectorXd both = limits_of({-10000.0, -200.0, -0.5, INF, 1.0});
+  const std::array<Eigen::VectorXd, 4> expected{original, vertical_only, lateral_only, both};
+  for (std::size_t k = 0; k < ALL_SETS.size(); ++k) {
+    SCOPED_TRACE(k);
+    const Eigen::VectorXd result = mf::transform_limits(original, PAIR_CHANNELS, ALL_SETS[k]);
+    EXPECT_TRUE(mf::test::limits_bitwise_equal(result, expected[k]));
+    EXPECT_LE(result(0), result(1));
+    EXPECT_LE(result(2), result(3));
+    const Eigen::VectorXd twice = mf::transform_limits(result, PAIR_CHANNELS, ALL_SETS[k]);
+    EXPECT_TRUE(mf::test::limits_bitwise_equal(twice, original));
+  }
+}
+
+TEST(model_layout, LimitSignsWellFormed_Cases_DetectsMismatch) {
+  constexpr mf::limit_role lower = mf::limit_role::LOWER;
+  constexpr mf::limit_role upper = mf::limit_role::UPPER;
+  constexpr mf::limit_role value = mf::limit_role::VALUE;
+  constexpr sign_transform vertical = sign_transform::VERTICAL;
+  constexpr sign_transform lateral = sign_transform::LATERAL;
+  constexpr sign_transform none = sign_transform::NONE;
+  EXPECT_TRUE(signs_ok({}));
+  EXPECT_TRUE(signs_ok({{lower, vertical}, {upper, vertical}, {lower, lateral}, {upper, lateral}, {value, none}}));
+  EXPECT_FALSE(signs_ok({{lower, vertical}, {upper, lateral}}));
+  EXPECT_FALSE(signs_ok({{value, vertical}}));
+  EXPECT_FALSE(signs_ok({{value, none}, {lower, none}}));
 }

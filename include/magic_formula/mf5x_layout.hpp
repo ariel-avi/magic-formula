@@ -35,8 +35,8 @@ namespace mf::mf5x {
 
   /// Input channels of PAC2002: Vx >= 0.
   inline constexpr std::array<input_channel, INPUT_LENGTH> PAC2002_INPUTS{{
-      {.name = "FZ", .unit = "N"},
-      {.name = "SA", .unit = "rad"},
+      {.name = "FZ", .unit = "N", .negated_by = sign_transform::VERTICAL},
+      {.name = "SA", .unit = "rad", .negated_by = sign_transform::LATERAL},
       {.name = "SR", .unit = "-"},
       {.name = "IA", .unit = "rad"},
       {.name = "VX", .unit = "m/s", .minimum = 0.0, .minimum_inclusive = true},
@@ -44,8 +44,8 @@ namespace mf::mf5x {
 
   /// Input channels of MF 5.2: Vx > 0.
   inline constexpr std::array<input_channel, INPUT_LENGTH> MF52_INPUTS{{
-      {.name = "FZ", .unit = "N"},
-      {.name = "SA", .unit = "rad"},
+      {.name = "FZ", .unit = "N", .negated_by = sign_transform::VERTICAL},
+      {.name = "SA", .unit = "rad", .negated_by = sign_transform::LATERAL},
       {.name = "SR", .unit = "-"},
       {.name = "IA", .unit = "rad"},
       {.name = "VX", .unit = "m/s", .minimum = 0.0, .minimum_inclusive = false},
@@ -54,10 +54,10 @@ namespace mf::mf5x {
   /// Output channels shared by the MF 5.x models.
   inline constexpr std::array<output_channel, OUTPUT_LENGTH> OUTPUTS{{
       {.name = "FX", .unit = "N"},
-      {.name = "FY", .unit = "N"},
-      {.name = "MZ", .unit = "N*m"},
+      {.name = "FY", .unit = "N", .negated_by = sign_transform::VERTICAL},
+      {.name = "MZ", .unit = "N*m", .negated_by = sign_transform::VERTICAL},
       {.name = "MX", .unit = "N*m"},
-      {.name = "MY", .unit = "N*m"},
+      {.name = "MY", .unit = "N*m", .negated_by = sign_transform::VERTICAL},
       {.name = "FZ_CLAMPED", .unit = "-"},
       {.name = "SR_CLAMPED", .unit = "-"},
       {.name = "SA_CLAMPED", .unit = "-"},
@@ -67,12 +67,12 @@ namespace mf::mf5x {
 
   /// Limit channels shared by the MF 5.x models. An absent bound is -inf / +inf.
   inline constexpr std::array<limit_channel, LIMITS_LENGTH> LIMITS{{
-      {.key = "FZMIN", .role = limit_role::LOWER, .default_value = -INF},
-      {.key = "FZMAX", .role = limit_role::UPPER, .default_value = INF},
+      {.key = "FZMIN", .role = limit_role::LOWER, .default_value = -INF, .negated_by = sign_transform::VERTICAL},
+      {.key = "FZMAX", .role = limit_role::UPPER, .default_value = INF, .negated_by = sign_transform::VERTICAL},
       {.key = "KPUMIN", .role = limit_role::LOWER, .default_value = -INF},
       {.key = "KPUMAX", .role = limit_role::UPPER, .default_value = INF},
-      {.key = "ALPMIN", .role = limit_role::LOWER, .default_value = -INF},
-      {.key = "ALPMAX", .role = limit_role::UPPER, .default_value = INF},
+      {.key = "ALPMIN", .role = limit_role::LOWER, .default_value = -INF, .negated_by = sign_transform::LATERAL},
+      {.key = "ALPMAX", .role = limit_role::UPPER, .default_value = INF, .negated_by = sign_transform::LATERAL},
       {.key = "CAMMIN", .role = limit_role::LOWER, .default_value = -INF},
       {.key = "CAMMAX", .role = limit_role::UPPER, .default_value = INF},
       {.key = "VXLOW", .role = limit_role::VALUE, .default_value = 1.0},
@@ -111,6 +111,37 @@ namespace mf::mf5x {
   static_assert(OUTPUTS[SA_CLAMPED].name == "SA_CLAMPED");
   static_assert(OUTPUTS[IA_CLAMPED].name == "IA_CLAMPED");
   static_assert(OUTPUTS[BELOW_VXLOW].name == "BELOW_VXLOW");
+
+  static_assert(PAC2002_INPUTS[FZ].negated_by == sign_transform::VERTICAL);
+  static_assert(PAC2002_INPUTS[SA].negated_by == sign_transform::LATERAL);
+  static_assert(PAC2002_INPUTS[SR].negated_by == sign_transform::NONE);
+  static_assert(PAC2002_INPUTS[IA].negated_by == sign_transform::NONE);
+  static_assert(PAC2002_INPUTS[VX].negated_by == sign_transform::NONE);
+  static_assert(MF52_INPUTS[FZ].negated_by == sign_transform::VERTICAL);
+  static_assert(MF52_INPUTS[SA].negated_by == sign_transform::LATERAL);
+  static_assert(MF52_INPUTS[SR].negated_by == sign_transform::NONE);
+  static_assert(MF52_INPUTS[IA].negated_by == sign_transform::NONE);
+  static_assert(MF52_INPUTS[VX].negated_by == sign_transform::NONE);
+  static_assert(OUTPUTS[FX].negated_by == sign_transform::NONE);
+  static_assert(OUTPUTS[FY].negated_by == sign_transform::VERTICAL);
+  static_assert(OUTPUTS[MZ].negated_by == sign_transform::VERTICAL);
+  static_assert(OUTPUTS[MX].negated_by == sign_transform::NONE);
+  static_assert(OUTPUTS[MY].negated_by == sign_transform::VERTICAL);
+  static_assert(OUTPUTS[FZ_CLAMPED].negated_by == sign_transform::NONE);
+  static_assert(OUTPUTS[SR_CLAMPED].negated_by == sign_transform::NONE);
+  static_assert(OUTPUTS[SA_CLAMPED].negated_by == sign_transform::NONE);
+  static_assert(OUTPUTS[IA_CLAMPED].negated_by == sign_transform::NONE);
+  static_assert(OUTPUTS[BELOW_VXLOW].negated_by == sign_transform::NONE);
+  static_assert(LIMITS[FZMIN].negated_by == sign_transform::VERTICAL);
+  static_assert(LIMITS[FZMAX].negated_by == sign_transform::VERTICAL);
+  static_assert(LIMITS[KPUMIN].negated_by == sign_transform::NONE);
+  static_assert(LIMITS[KPUMAX].negated_by == sign_transform::NONE);
+  static_assert(LIMITS[ALPMIN].negated_by == sign_transform::LATERAL);
+  static_assert(LIMITS[ALPMAX].negated_by == sign_transform::LATERAL);
+  static_assert(LIMITS[CAMMIN].negated_by == sign_transform::NONE);
+  static_assert(LIMITS[CAMMAX].negated_by == sign_transform::NONE);
+  static_assert(LIMITS[VXLOW].negated_by == sign_transform::NONE);
+  static_assert(limit_signs_well_formed(LIMITS));
 
   static_assert(LIMITS[FZMIN].key == "FZMIN");
   static_assert(LIMITS[FZMAX].key == "FZMAX");

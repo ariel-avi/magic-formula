@@ -7,6 +7,8 @@
 #include <expected>
 #include <filesystem>
 #include <gtest/gtest.h>
+#include <magic_formula/coordinate_identification.hpp>
+#include <magic_formula/coordinate_system.hpp>
 #include <magic_formula/error.hpp>
 #include <magic_formula/evaluation_types.hpp>
 #include <magic_formula/io/input_table.hpp>
@@ -15,7 +17,12 @@
 #include <magic_formula/mf5x_coefficients.hpp>
 #include <magic_formula/mf5x_layout.hpp>
 #include <magic_formula/mf5x_model.hpp>
+#include <magic_formula/mf5x_signs.hpp>
+#include <magic_formula/model_layout.hpp>
 #include <magic_formula/pac2002_model.hpp>
+#include <magic_formula/sign_transform.hpp>
+#include <magic_formula/tire_model.hpp>
+#include <memory>
 #include <optional>
 #include <set>
 #include <span>
@@ -43,8 +50,10 @@ namespace {
 
   // clang-format off
   /// All .tir files of tests/data and their documented outcome (tests/data/README.md).
-  constexpr std::array<expected_file, 8> EXPECTED_FILES{
+  constexpr std::array<expected_file, 10> EXPECTED_FILES{
       expected_file{.name = "pac2002_S.tir", .failure = std::nullopt},
+      expected_file{.name = "pac2002_S_iso.tir", .failure = std::nullopt},
+      expected_file{.name = "pac2002_S_sae.tir", .failure = std::nullopt},
       expected_file{.name = "mf52_S52.tir", .failure = std::nullopt},
       expected_file{.name = "mf52_user_pff.tir", .failure = std::nullopt},
       expected_file{.name = "pac2002_S_rng.tir", .failure = std::nullopt},
@@ -67,10 +76,12 @@ namespace {
   };
 
   /// All inputs_* files of tests/data and their documented outcome (tests/data/README.md).
-  constexpr std::array<expected_table, 14> EXPECTED_TABLES{
+  constexpr std::array<expected_table, 16> EXPECTED_TABLES{
       expected_table{.name = "inputs_s_vectors.csv", .rows = 6, .failure = std::nullopt, .line = 0},
       expected_table{.name = "inputs_degrees.txt", .rows = 6, .failure = std::nullopt, .line = 0},
+      expected_table{.name = "inputs_sae.csv", .rows = 4, .failure = std::nullopt, .line = 0},
       expected_table{.name = "inputs_pressure.csv", .rows = 1, .failure = std::nullopt, .line = 0},
+      expected_table{.name = "inputs_pressure_mixed_fz.csv", .rows = 2, .failure = std::nullopt, .line = 0},
       expected_table{.name = "inputs_ranges.csv", .rows = 6, .failure = std::nullopt, .line = 0},
       expected_table{.name = "inputs_low_speed.csv", .rows = 2, .failure = std::nullopt, .line = 0},
       expected_table{.name = "inputs_negative_vx.csv", .rows = 2, .failure = std::nullopt, .line = 0},
@@ -232,6 +243,40 @@ TEST(data_fixtures, PacS_LoadsAsFixtureS) {
   EXPECT_EQ(loaded->ignored_keys, S_IGNORED_KEYS);
 }
 
+// Zeros written in a file load as +0.0 while the sign transforms give -0.0, so the comparisons below are by value.
+TEST(data_fixtures, PacSIso_LoadsAsLateralTransformOfS) {
+  const load_result loaded = load_fixture("pac2002_S_iso.tir");
+  ASSERT_TRUE(loaded.has_value()) << describe(loaded);
+  EXPECT_EQ(loaded->model->name(), "PAC2002");
+  EXPECT_TRUE(loaded->warnings.empty());
+  const mf::sign_transforms lateral{.vertical = false, .lateral = true};
+  const mf::mf5x_parameters source = mf::test::fixture_s();
+  mf::mf5x_coefficients expected = mf::mf5x::transform_coefficients(source.coefficients, lateral);
+  expected.PVY3 = -0.1;
+  EXPECT_TRUE(mf::test::coefficients_value_equal(coefficients_of(*loaded), expected));
+  EXPECT_TRUE(mf::test::limits_value_equal(loaded->model->limits(),
+                                           mf::transform_limits(source.limits, mf::mf5x::LIMITS, lateral)));
+  EXPECT_EQ(bits(coefficients_of(*loaded).PKY1), bits(15.0));
+  EXPECT_EQ(loaded->model->find_coordinate_system().classification, mf::system_classification::ISO);
+}
+
+TEST(data_fixtures, PacSSae_LoadsAsVerticalTransformOfSIso) {
+  const load_result loaded = load_fixture("pac2002_S_sae.tir");
+  const load_result iso = load_fixture("pac2002_S_iso.tir");
+  ASSERT_TRUE(loaded.has_value()) << describe(loaded);
+  ASSERT_TRUE(iso.has_value()) << describe(iso);
+  EXPECT_EQ(loaded->model->name(), "PAC2002");
+  EXPECT_TRUE(loaded->warnings.empty());
+  const std::unique_ptr<mf::tire_model> flipped = iso->model->transformed(mf::sign_transforms{.vertical = true});
+  const auto *const flipped_model = dynamic_cast<const mf::mf5x_model *>(flipped.get());
+  ASSERT_NE(flipped_model, nullptr);
+  EXPECT_TRUE(mf::test::coefficients_value_equal(coefficients_of(*loaded), flipped_model->coefficients()));
+  EXPECT_TRUE(mf::test::limits_value_equal(loaded->model->limits(), flipped_model->limits()));
+  EXPECT_EQ(bits(coefficients_of(*loaded).FNOMIN), bits(-4000.0));
+  EXPECT_EQ(loaded->model->find_coordinate_system().classification, mf::system_classification::SAE);
+  EXPECT_EQ(loaded->model->loaded_side(), mf::coordinate_system::SAE);
+}
+
 TEST(data_fixtures, Mf52S52_LoadsAsFixtureS52) {
   const load_result loaded = load_fixture("mf52_S52.tir");
   ASSERT_TRUE(loaded.has_value()) << describe(loaded);
@@ -336,6 +381,15 @@ TEST(data_fixtures, EveryInputTable_HasExpectedOutcome) {
   for (const expected_table &table : EXPECTED_TABLES) {
     expect_table_outcome(table);
   }
+
+  // inputs_sae.csv is an SAE table: every FZ is negative (data lines 4-7).
+  const mf::io::model_inputs sae =
+      mf::io::read_model_inputs(data_file("inputs_sae.csv"), mf::mf5x::PAC2002_INPUTS).value();
+  ASSERT_EQ(sae.values.rows(), 4);
+  EXPECT_TRUE((sae.values.col(mf::mf5x::FZ).array() < 0.0).all());
+  EXPECT_EQ(sae.lines, (std::vector<std::size_t>{4, 5, 6, 7}));
+  EXPECT_EQ(mf::census_fz(mf::mf5x::PAC2002_LAYOUT, sae.values).negative, 4U);
+  EXPECT_EQ(mf::census_fz(mf::mf5x::PAC2002_LAYOUT, sae.values).positive, 0U);
 }
 
 TEST(data_fixtures, EveryTirFile_HasExpectedOutcome) {
@@ -348,4 +402,35 @@ TEST(data_fixtures, EveryTirFile_HasExpectedOutcome) {
   for (const expected_file &file : EXPECTED_FILES) {
     expect_outcome(file);
   }
+}
+
+TEST(data_fixtures, EveryLoadableTirFile_IdentifiesAsDocumented) {
+  const std::string mixed =
+      "coordinate system: the coefficients mix conventions: the vertical axis is ISO (a loaded tire has FZ > 0) but "
+      "the lateral axis is SAE (dFy/dSA < 0); convert the model to ISO or SAE";
+  std::size_t checked = 0;
+  for (const expected_file &file : EXPECTED_FILES) {
+    if (file.failure.has_value()) {
+      continue;
+    }
+    SCOPED_TRACE(std::string(file.name));
+    const load_result loaded = load_fixture(file.name);
+    ASSERT_TRUE(loaded.has_value()) << describe(loaded);
+    const mf::coordinate_identification id = loaded->model->find_coordinate_system();
+    EXPECT_EQ(id.vertical.basis, mf::decision_basis::DECIDED);
+    EXPECT_EQ(id.lateral.basis, mf::decision_basis::DECIDED);
+    if (file.name == "pac2002_S_iso.tir") {
+      EXPECT_EQ(id.classification, mf::system_classification::ISO);
+      EXPECT_TRUE(id.warnings.empty());
+    } else if (file.name == "pac2002_S_sae.tir") {
+      EXPECT_EQ(id.classification, mf::system_classification::SAE);
+      EXPECT_TRUE(id.warnings.empty());
+    } else {
+      EXPECT_EQ(id.classification, mf::system_classification::MIXED);
+      ASSERT_EQ(id.warnings.size(), 1U);
+      EXPECT_EQ(id.warnings[0].message, mixed);
+    }
+    ++checked;
+  }
+  EXPECT_EQ(checked, 8U);
 }

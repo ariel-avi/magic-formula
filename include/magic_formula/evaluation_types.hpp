@@ -40,4 +40,12 @@ namespace mf {
     /// Why that point failed.
     error cause;
   };
+
+  /// A non-fatal diagnostic about a batch of points, with the first point it concerns.
+  struct batch_warning {
+    /// Zero-based index of the first point the warning concerns.
+    std::size_t index = 0;
+    /// The warning; where.key names the input channel ("FZ"); file and line are empty.
+    warning cause;
+  };
 } // namespace mf

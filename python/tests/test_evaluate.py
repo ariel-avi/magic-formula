@@ -43,10 +43,12 @@ def test_keys_are_lower_case_output_names(pac2002):
 
 
 def test_matches_evaluate_batch_columns(pac2002, s_vectors):
-    result = pac2002.evaluate(
-        fz=s_vectors[:, 0], sa=s_vectors[:, 1], sr=s_vectors[:, 2], ia=s_vectors[:, 3], vx=s_vectors[:, 4]
-    )
-    batch = pac2002.evaluate_batch(s_vectors)
+    with pytest.warns(mf.MagicFormulaWarning, match='FZ < 0'):
+        result = pac2002.evaluate(
+            fz=s_vectors[:, 0], sa=s_vectors[:, 1], sr=s_vectors[:, 2], ia=s_vectors[:, 3], vx=s_vectors[:, 4]
+        )
+    with pytest.warns(mf.MagicFormulaWarning, match='FZ < 0'):
+        batch = pac2002.evaluate_batch(s_vectors)
     for j, key in enumerate(OUTPUT_KEYS):
         assert np.array_equal(result[key], batch[:, j])
 
