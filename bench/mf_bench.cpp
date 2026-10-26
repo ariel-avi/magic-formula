@@ -55,6 +55,15 @@ namespace {
     return loaded;
   }
 
+  /// PAC2002 property file with the friction-ellipse combined slip.
+  constexpr std::string_view PAC2002_ELLIPSE_TIR = "pac2002_S_ell.tir";
+
+  /// PAC2002 ellipse model without checks, loaded on first use.
+  [[nodiscard]] const load_result &pac2002_ellipse_unchecked() {
+    static const load_result loaded = load_model(PAC2002_ELLIPSE_TIR, false);
+    return loaded;
+  }
+
   /// `points` deterministic operating points, one row per point and one column per input index (column-major).
   [[nodiscard]] Eigen::MatrixXd make_batch_inputs(Eigen::Index points) {
     constexpr double two_pi = 2.0 * std::numbers::pi;
@@ -160,6 +169,43 @@ namespace {
       benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * static_cast<std::int64_t>(points));
+  }
+
+  /// Batch evaluation of the characteristics channels.
+  void run_characteristics_batch(benchmark::State &state, const mf::tire_model &model) {
+    const Eigen::Index rows = static_cast<Eigen::Index>(state.range(0));
+    const Eigen::MatrixXd inputs = make_batch_inputs(rows);
+    for (auto _ : state) {
+      Eigen::MatrixXd result = model.evaluate_characteristics_batch(inputs);
+      benchmark::DoNotOptimize(result);
+      benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * static_cast<std::int64_t>(rows));
+  }
+
+  /// PAC2002 (cosine combined slip), characteristics batch.
+  void BM_Pac2002_CharacteristicsBatch(benchmark::State &state) {
+    run_with(state, pac2002_unchecked(), "PAC2002", run_characteristics_batch);
+  }
+
+  /// MF 5.2, characteristics batch.
+  void BM_Mf52_CharacteristicsBatch(benchmark::State &state) {
+    run_with(state, mf52_unchecked(), "MF 5.2", run_characteristics_batch);
+  }
+
+  /// PAC2002 with the friction ellipse, characteristics batch.
+  void BM_Pac2002Ellipse_CharacteristicsBatch(benchmark::State &state) {
+    run_with(state, pac2002_ellipse_unchecked(), "PAC2002", run_characteristics_batch);
+  }
+
+  /// PAC2002 with the friction ellipse, per point, Eigen form.
+  void BM_Pac2002Ellipse_EvaluatePointEigen(benchmark::State &state) {
+    run_with(state, pac2002_ellipse_unchecked(), "PAC2002", run_point_eigen);
+  }
+
+  /// PAC2002 with the friction ellipse, batch, Eigen form.
+  void BM_Pac2002Ellipse_EvaluateBatchEigen(benchmark::State &state) {
+    run_with(state, pac2002_ellipse_unchecked(), "PAC2002", run_batch_eigen);
   }
 
   /// PAC2002, per point, Eigen form.
@@ -314,3 +360,8 @@ BENCHMARK(BM_Mf52_EvaluatePointEigen)->ArgName("points")->Arg(1)->Arg(8)->Arg(64
 BENCHMARK(BM_Mf52_EvaluatePointRaw)->ArgName("points")->Arg(1)->Arg(8)->Arg(64)->Arg(1024)->Arg(16384);
 BENCHMARK(BM_Mf52_EvaluateBatchEigen)->ArgName("points")->Arg(1)->Arg(8)->Arg(64)->Arg(1024)->Arg(16384);
 BENCHMARK(BM_Mf52_EvaluateBatchRaw)->ArgName("points")->Arg(1)->Arg(8)->Arg(64)->Arg(1024)->Arg(16384);
+BENCHMARK(BM_Pac2002Ellipse_EvaluatePointEigen)->ArgName("points")->Arg(1)->Arg(8)->Arg(64)->Arg(1024)->Arg(16384);
+BENCHMARK(BM_Pac2002Ellipse_EvaluateBatchEigen)->ArgName("points")->Arg(1)->Arg(8)->Arg(64)->Arg(1024)->Arg(16384);
+BENCHMARK(BM_Pac2002_CharacteristicsBatch)->ArgName("rows")->Range(1, 4096);
+BENCHMARK(BM_Mf52_CharacteristicsBatch)->ArgName("rows")->Range(1, 4096);
+BENCHMARK(BM_Pac2002Ellipse_CharacteristicsBatch)->ArgName("rows")->Range(1, 4096);

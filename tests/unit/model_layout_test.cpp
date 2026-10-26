@@ -47,6 +47,13 @@ namespace {
       {.name = "D", .unit = "-", .negated_by = sign_transform::VERTICAL},
   }};
 
+  // Three characteristic channels: A never negated, B negated by VERTICAL and LATERAL together, C by VERTICAL only.
+  constexpr std::array<mf::characteristic_channel, 3> SIGN_CHARACTERISTICS{{
+      {.name = "A", .unit = "-", .negated_by = {.vertical = false, .lateral = false}, .nan_allowed = false},
+      {.name = "B", .unit = "-", .negated_by = {.vertical = true, .lateral = true}, .nan_allowed = false},
+      {.name = "C", .unit = "-", .negated_by = {.vertical = true, .lateral = false}, .nan_allowed = false},
+  }};
+
   // Finite values, a NaN, +0.0 and -0.0 in every column.
   Eigen::MatrixXd sign_sample() {
     const std::array<double, 12> flat{1.5, -2.5, 3.25, QUIET_NAN, QUIET_NAN, 0.0, -0.0, 7.0, 0.0, -0.0, 8.5, -9.0};
@@ -303,6 +310,78 @@ TEST(model_layout, NegatedBy_DefaultChannels_AreNone) {
   EXPECT_EQ(mf::input_channel{}.negated_by, sign_transform::NONE);
   EXPECT_EQ(mf::output_channel{}.negated_by, sign_transform::NONE);
   EXPECT_EQ(mf::limit_channel{}.negated_by, sign_transform::NONE);
+}
+
+TEST(sign_transform, Negates_AllSixteenCombinations_OddParity) {
+  for (const sign_transforms &negators : ALL_SETS) {
+    for (const sign_transforms &plan : ALL_SETS) {
+      const int count = ((negators.vertical && plan.vertical) ? 1 : 0) + ((negators.lateral && plan.lateral) ? 1 : 0);
+      SCOPED_TRACE(testing::Message() << "negators " << negators.vertical << negators.lateral << " plan "
+                                      << plan.vertical << plan.lateral);
+      EXPECT_EQ(mf::negates(negators, plan), count % 2 == 1);
+    }
+  }
+}
+
+TEST(model_layout, Layout_WithoutCharacteristics_EmptySpan) {
+  const mf::model_layout layout{.inputs = SIGN_INPUTS, .outputs = SIGN_OUTPUTS, .limits = {}};
+  EXPECT_TRUE(layout.characteristics.empty());
+}
+
+TEST(model_layout, ApplySignTransformsCharacteristics_EachPlan_NegatesOddParityColumns) {
+  const Eigen::MatrixXd original = sign_sample().leftCols(3);
+  const std::array<bool, 4> expected_vertical{false, true, true, false};
+  const std::array<bool, 4> expected_lateral{false, true, false, false};
+  const std::array<bool, 4> expected_both{false, false, true, false};
+  const std::array<bool, 4> expected_none{false, false, false, false};
+  const std::array<std::array<bool, 4>, 4> expected{expected_none, expected_vertical, expected_lateral, expected_both};
+  for (std::size_t k = 0; k < ALL_SETS.size(); ++k) {
+    SCOPED_TRACE(k);
+    Eigen::MatrixXd values = original;
+    mf::apply_sign_transforms(SIGN_CHARACTERISTICS, ALL_SETS[k], values);
+    for (Eigen::Index c = 0; c < values.cols(); ++c) {
+      const bool flipped = expected[k][static_cast<std::size_t>(c)];
+      for (Eigen::Index r = 0; r < values.rows(); ++r) {
+        expect_same_value_bits(values(r, c), flipped ? -original(r, c) : original(r, c));
+      }
+    }
+  }
+}
+
+TEST(model_layout, ApplySignTransformsCharacteristics_EmptyPlan_BitIdentity) {
+  const Eigen::MatrixXd original = sign_sample().leftCols(3);
+  Eigen::MatrixXd values = original;
+  mf::apply_sign_transforms(SIGN_CHARACTERISTICS, ALL_SETS[0], values);
+  for (Eigen::Index c = 0; c < values.cols(); ++c) {
+    for (Eigen::Index r = 0; r < values.rows(); ++r) {
+      EXPECT_EQ(bits(values(r, c)), bits(original(r, c)));
+    }
+  }
+}
+
+TEST(model_layout, ApplySignTransformsCharacteristics_NaN_FlipsSignBitOnly) {
+  Eigen::MatrixXd values(1, 3);
+  values << QUIET_NAN, QUIET_NAN, QUIET_NAN;
+  const bool before = std::signbit(values(0, 1));
+  mf::apply_sign_transforms(SIGN_CHARACTERISTICS, sign_transforms{.vertical = true, .lateral = false}, values);
+  EXPECT_TRUE(std::isnan(values(0, 1)));
+  EXPECT_NE(std::signbit(values(0, 1)), before);
+  EXPECT_TRUE(std::isnan(values(0, 0)));
+  EXPECT_EQ(std::signbit(values(0, 0)), before);
+}
+
+TEST(model_layout, ApplySignTransformsCharacteristics_AppliedTwice_RestoresBits) {
+  const Eigen::MatrixXd original = sign_sample().leftCols(3);
+  for (const sign_transforms &set : ALL_SETS) {
+    Eigen::MatrixXd values = original;
+    mf::apply_sign_transforms(SIGN_CHARACTERISTICS, set, values);
+    mf::apply_sign_transforms(SIGN_CHARACTERISTICS, set, values);
+    for (Eigen::Index c = 0; c < values.cols(); ++c) {
+      for (Eigen::Index r = 0; r < values.rows(); ++r) {
+        expect_same_value_bits(values(r, c), original(r, c));
+      }
+    }
+  }
 }
 
 TEST(model_layout, ApplySignTransforms_InputsEachSet_FlipsExactlyDeclaredColumns) {

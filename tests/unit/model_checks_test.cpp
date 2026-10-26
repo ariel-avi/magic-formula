@@ -1,7 +1,9 @@
 #include "../support/fixtures.hpp"
 
 #include <Eigen/Core>
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <expected>
 #include <gtest/gtest.h>
@@ -34,12 +36,20 @@ namespace {
       {.name = "Y", .unit = "-"},
       {.name = "Z", .unit = "-"},
   }};
-  constexpr mf::model_layout STUB_LAYOUT{.inputs = STUB_INPUTS, .outputs = STUB_OUTPUTS, .limits = {}};
+  /// Characteristics CA (NaN allowed) and CB.
+  constexpr std::array<mf::characteristic_channel, 2> STUB_CHARACTERISTICS{{
+      {.name = "CA", .unit = "-", .nan_allowed = true},
+      {.name = "CB", .unit = "-"},
+  }};
+  constexpr mf::model_layout STUB_LAYOUT{
+      .inputs = STUB_INPUTS, .outputs = STUB_OUTPUTS, .limits = {}, .characteristics = STUB_CHARACTERISTICS};
 
+  /// The characteristics are {1, 2} for every row except the last row of a batch, which gets `characteristic_values`.
   class stub_model final : public mf::tire_model {
   public:
-    explicit stub_model(bool emit_nan)
-        : tire_model(2, 3, Eigen::VectorXd(), mf::model_metadata{}, {}), emit_nan_(emit_nan) {}
+    explicit stub_model(bool emit_nan, std::array<double, 2> characteristic_values = {1.0, 2.0})
+        : tire_model(2, 3, Eigen::VectorXd(), mf::model_metadata{}, {}), emit_nan_(emit_nan),
+          characteristic_values_(characteristic_values) {}
 
     [[nodiscard]] std::string_view name() const noexcept override {
       return "stub";
@@ -60,7 +70,7 @@ namespace {
   private:
     [[nodiscard]] std::unique_ptr<mf::tire_model> rebuild(const mf::sign_transforms & /*transforms*/,
                                                           const Eigen::VectorXd & /*limits*/) const override {
-      return std::make_unique<stub_model>(emit_nan_);
+      return std::make_unique<stub_model>(emit_nan_, characteristic_values_);
     }
 
     void compute(const Eigen::Ref<const Eigen::VectorXd> &input,
@@ -77,7 +87,24 @@ namespace {
       outputs.col(2).setConstant(emit_nan_ ? QUIET_NAN : 1.0);
     }
 
+    void compute_characteristics(const Eigen::Ref<const Eigen::VectorXd> & /*input*/,
+                                 Eigen::Ref<Eigen::VectorXd> characteristics) const noexcept override {
+      characteristics(0) = characteristic_values_[0];
+      characteristics(1) = characteristic_values_[1];
+    }
+
+    void compute_characteristics_batch(const Eigen::Ref<const Eigen::MatrixXd> &inputs,
+                                       Eigen::Ref<Eigen::MatrixXd> characteristics) const noexcept override {
+      characteristics.col(0).setConstant(1.0);
+      characteristics.col(1).setConstant(2.0);
+      if (inputs.rows() > 0) {
+        characteristics(inputs.rows() - 1, 0) = characteristic_values_[0];
+        characteristics(inputs.rows() - 1, 1) = characteristic_values_[1];
+      }
+    }
+
     bool emit_nan_;
+    std::array<double, 2> characteristic_values_;
   };
 
   mf::pac2002_model make_pac2002() {
@@ -326,6 +353,132 @@ TEST(check_outputs, Finite_Succeeds) {
   EXPECT_TRUE(mf::check_outputs(model, finite_outputs(4)).has_value());
 }
 
+TEST(check_characteristics, WrongSize_InvalidArgumentMessage) {
+  const stub_model model(false);
+  const auto result = mf::check_characteristics(model, Eigen::VectorXd::Zero(3));
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code, mf::error_code::INVALID_ARGUMENT);
+  EXPECT_EQ(result.error().message, "characteristics has 3 values, the stub model produces 2");
+}
+
+TEST(check_characteristics, AllFinite_Succeeds) {
+  const stub_model model(false);
+  EXPECT_TRUE(mf::check_characteristics(model, Eigen::VectorXd::Zero(2)).has_value());
+}
+
+TEST(check_characteristics, NaNInAllowedChannel_Succeeds) {
+  const stub_model model(false);
+  Eigen::VectorXd values = Eigen::VectorXd::Zero(2);
+  values(0) = QUIET_NAN;
+  EXPECT_TRUE(mf::check_characteristics(model, values).has_value());
+}
+
+TEST(check_characteristics, NaNInDisallowedChannel_NumericalWithKey) {
+  const stub_model model(false);
+  Eigen::VectorXd values = Eigen::VectorXd::Zero(2);
+  values(1) = QUIET_NAN;
+  const auto result = mf::check_characteristics(model, values);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code, mf::error_code::NUMERICAL);
+  EXPECT_EQ(result.error().where.key, "CB");
+  EXPECT_EQ(result.error().message, "non-finite CB characteristic (nan)");
+}
+
+TEST(check_characteristics, InfInAllowedChannel_Numerical) {
+  const stub_model model(false);
+  Eigen::VectorXd values = Eigen::VectorXd::Zero(2);
+  values(0) = POSITIVE_INF;
+  const auto result = mf::check_characteristics(model, values);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code, mf::error_code::NUMERICAL);
+  EXPECT_EQ(result.error().where.key, "CA");
+  EXPECT_EQ(result.error().message, "non-finite CA characteristic (inf)");
+}
+
+TEST(check_characteristics_batch, ColumnMismatch_InvalidArgumentAtRow0) {
+  const stub_model model(false);
+  const auto result = mf::check_characteristics_batch(model, Eigen::MatrixXd::Zero(3, 3));
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().index, 0U);
+  EXPECT_EQ(result.error().cause.code, mf::error_code::INVALID_ARGUMENT);
+  EXPECT_EQ(result.error().cause.message, "characteristics matrix has 3 columns, the stub model produces 2");
+}
+
+TEST(check_characteristics_batch, ZeroRows_Succeeds) {
+  const stub_model model(false);
+  EXPECT_TRUE(mf::check_characteristics_batch(model, Eigen::MatrixXd(0, 2)).has_value());
+}
+
+TEST(check_characteristics_batch, SmallestFailingRow_FirstChannelOnTie) {
+  const stub_model model(false);
+  Eigen::MatrixXd values = Eigen::MatrixXd::Zero(4, 2);
+  values(2, 1) = POSITIVE_INF;
+  values(1, 1) = POSITIVE_INF;
+  values(1, 0) = POSITIVE_INF;
+  const auto result = mf::check_characteristics_batch(model, values);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().index, 1U);
+  EXPECT_EQ(result.error().cause.code, mf::error_code::NUMERICAL);
+  EXPECT_EQ(result.error().cause.where.key, "CA");
+}
+
+TEST(check_characteristics_batch, AllowedNaNColumn_Succeeds) {
+  const stub_model model(false);
+  Eigen::MatrixXd values = Eigen::MatrixXd::Zero(3, 2);
+  values.col(0).setConstant(QUIET_NAN);
+  EXPECT_TRUE(mf::check_characteristics_batch(model, values).has_value());
+}
+
+TEST(checked_evaluate_characteristics_batch, InvalidInput_InputErrorFirst) {
+  const stub_model model(false, {1.0, POSITIVE_INF});
+  Eigen::MatrixXd inputs(4, 2);
+  inputs << 1.0, 2.0, 3.0, 4.0, -1.0, 5.0, 6.0, 7.0;
+  const auto result = mf::checked_evaluate_characteristics_batch(model, inputs);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().index, 2U);
+  EXPECT_EQ(result.error().cause.code, mf::error_code::INVALID_INPUT);
+  EXPECT_EQ(result.error().cause.where.key, "A");
+}
+
+TEST(checked_evaluate_characteristics_batch, NonFiniteCharacteristic_NumericalAtRow) {
+  const stub_model model(false, {1.0, POSITIVE_INF});
+  Eigen::MatrixXd inputs(4, 2);
+  inputs << 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0;
+  const auto result = mf::checked_evaluate_characteristics_batch(model, inputs);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().index, 3U);
+  EXPECT_EQ(result.error().cause.code, mf::error_code::NUMERICAL);
+  EXPECT_EQ(result.error().cause.where.key, "CB");
+}
+
+TEST(checked_evaluate_characteristics_batch, Valid_ReturnsMatrix) {
+  const stub_model model(false, {QUIET_NAN, 5.0});
+  Eigen::MatrixXd inputs(3, 2);
+  inputs << 1.0, 2.0, 3.0, 4.0, 5.0, 6.0;
+  const auto result = mf::checked_evaluate_characteristics_batch(model, inputs);
+  ASSERT_TRUE(result.has_value());
+  ASSERT_EQ(result->rows(), 3);
+  ASSERT_EQ(result->cols(), 2);
+  EXPECT_EQ((*result)(0, 0), 1.0);
+  EXPECT_EQ((*result)(1, 1), 2.0);
+  EXPECT_TRUE(std::isnan((*result)(2, 0)));
+  EXPECT_EQ((*result)(2, 1), 5.0);
+}
+
+TEST(checked_evaluate_characteristics_batch, Pac2002OverflowFz_NumericalAtRow) {
+  const mf::pac2002_model model = make_pac2002();
+  Eigen::MatrixXd inputs = nominal_inputs(3);
+  inputs(1, mf::mf5x::FZ) = 1e308;
+  const auto result = mf::checked_evaluate_characteristics_batch(model, inputs);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().index, 1U);
+  EXPECT_EQ(result.error().cause.code, mf::error_code::NUMERICAL);
+  const auto names_match = [&](const mf::characteristic_channel &channel) {
+    return channel.name == result.error().cause.where.key;
+  };
+  EXPECT_TRUE(std::ranges::any_of(mf::mf5x::CHARACTERISTICS, names_match));
+}
+
 TEST(check_buffers, NullInput) {
   const mf::pac2002_model model = make_pac2002();
   const std::array<double, 10> data{};
@@ -445,6 +598,39 @@ TEST(checked_evaluate_batch, Valid_ReturnsSameAsEvaluateBatch) {
       EXPECT_EQ(mf::test::bits((*result)(r, c)), mf::test::bits(expected(r, c))) << "row " << r << " col " << c;
     }
   }
+}
+
+TEST(checked_evaluate_batch_with_characteristics, Valid_ReturnsBothMatrices) {
+  const stub_model model(false);
+  Eigen::MatrixXd inputs(3, 2);
+  inputs << 1.0, 2.0, 3.0, 4.0, 5.0, 6.0;
+  const auto result = mf::checked_evaluate_batch_with_characteristics(model, inputs);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->outputs.rows(), 3);
+  EXPECT_EQ(result->outputs.cols(), 3);
+  EXPECT_EQ(result->characteristics.rows(), 3);
+  EXPECT_EQ(result->characteristics.cols(), 2);
+}
+
+TEST(checked_evaluate_batch_with_characteristics, NonFiniteOutput_OutputErrorFirst) {
+  const stub_model model(true, {1.0, POSITIVE_INF});
+  Eigen::MatrixXd inputs(3, 2);
+  inputs << 1.0, 2.0, 3.0, 4.0, 5.0, 6.0;
+  const auto result = mf::checked_evaluate_batch_with_characteristics(model, inputs);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().cause.code, mf::error_code::NUMERICAL);
+  EXPECT_EQ(result.error().cause.where.key, "Z");
+}
+
+TEST(checked_evaluate_batch_with_characteristics, NonFiniteCharacteristic_CharacteristicError) {
+  const stub_model model(false, {1.0, POSITIVE_INF});
+  Eigen::MatrixXd inputs(3, 2);
+  inputs << 1.0, 2.0, 3.0, 4.0, 5.0, 6.0;
+  const auto result = mf::checked_evaluate_batch_with_characteristics(model, inputs);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().index, 2U);
+  EXPECT_EQ(result.error().cause.code, mf::error_code::NUMERICAL);
+  EXPECT_EQ(result.error().cause.where.key, "CB");
 }
 
 TEST(checked_evaluate_batch, InvalidInput_ReturnsInputError) {

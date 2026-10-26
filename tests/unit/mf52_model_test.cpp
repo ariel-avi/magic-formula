@@ -19,12 +19,14 @@
 #include <magic_formula/mf5x_layout.hpp>
 #include <magic_formula/model_checks.hpp>
 #include <magic_formula/model_layout.hpp>
+#include <magic_formula/pac2002_model.hpp>
 #include <magic_formula/tire_model.hpp>
 #include <memory>
 #include <numbers>
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace {
   namespace kernels = mf::detail;
@@ -455,5 +457,120 @@ TEST(mf52_model, Evaluate_NonPositiveFz_ExactZeros) {
       EXPECT_EQ(bits(out.mx_nm), bits(0.0));
       EXPECT_EQ(bits(out.my_nm), bits(0.0));
     }
+  }
+}
+
+// ---- characteristics --------------------------------------------------------------------------------------------
+
+namespace {
+  // The operating points of the characteristics vectors: pure and combined slip of both signs, zero slips, no contact.
+  std::vector<point_t> characteristic_points() {
+    std::vector<point_t> points;
+    points.push_back(make_point(FZ_NOMINAL, 0.1, 0.0));
+    points.push_back(make_point(FZ_NOMINAL, 0.0, 0.05));
+    points.push_back(make_point(FZ_NOMINAL, 0.1, 0.1));
+    points.push_back(make_point(FZ_NOMINAL, 0.0, 0.0));
+    points.push_back(make_point(FZ_NOMINAL, 0.0, -0.05));
+    points.push_back(make_point(FZ_NOMINAL, -0.1, 0.0));
+    points.push_back(make_point(FZ_NOMINAL, 0.05, -0.03));
+    points.push_back(make_point(0.0, 0.1, 0.05));
+    points.push_back(make_point(-100.0, 0.0, 0.0));
+    return points;
+  }
+
+  // Both models of fixture S (PAC2002) and S52 (MF 5.2) in the given slip mode.
+  struct model_pair {
+    mf::pac2002_model pac2002;
+    mf::mf52_model mf52;
+  };
+
+  std::optional<model_pair> make_pair(slip_mode mode) {
+    std::expected<mf::pac2002_model, mf::error> pac =
+        mf::pac2002_model::create(mf::test::fixture_s(), mf::combined_method::COSINE, mf::model_options{.mode = mode});
+    std::optional<mf::mf52_model> mf52 = make_model(mf::test::fixture_s52(), mode);
+    if (!pac.has_value()) {
+      ADD_FAILURE() << mf::to_string(pac.error());
+      return std::nullopt;
+    }
+    if (!mf52.has_value()) {
+      return std::nullopt;
+    }
+    return model_pair{.pac2002 = std::move(*pac), .mf52 = std::move(*mf52)};
+  }
+
+  // Bit-equality, with any NaN equal to any NaN (the sign bit of a NaN carries no information).
+  bool same_value(double actual, double expected) {
+    if (std::isnan(actual) || std::isnan(expected)) {
+      return std::isnan(actual) && std::isnan(expected);
+    }
+    return bits(actual) == bits(expected);
+  }
+} // namespace
+
+namespace {
+  // Point and batch characteristics of both models agree bit for bit on every row of `inputs`.
+  void expect_models_bit_equal(const model_pair &models, const Eigen::MatrixXd &inputs) {
+    const Eigen::MatrixXd batch_pac = models.pac2002.evaluate_characteristics_batch(inputs);
+    const Eigen::MatrixXd batch_mf52 = models.mf52.evaluate_characteristics_batch(inputs);
+    ASSERT_EQ(batch_pac.rows(), batch_mf52.rows());
+    ASSERT_EQ(batch_pac.cols(), mf::mf5x::CHARACTERISTICS_LENGTH);
+    for (Eigen::Index r = 0; r < inputs.rows(); ++r) {
+      const Eigen::VectorXd input = inputs.row(r).transpose();
+      const Eigen::VectorXd point_pac = models.pac2002.evaluate_characteristics(input);
+      const Eigen::VectorXd point_mf52 = models.mf52.evaluate_characteristics(input);
+      for (Eigen::Index j = 0; j < point_pac.size(); ++j) {
+        EXPECT_TRUE(same_value(point_mf52(j), point_pac(j))) << "point row " << r << " characteristic " << j;
+        EXPECT_TRUE(same_value(batch_mf52(r, j), batch_pac(r, j))) << "batch row " << r << " characteristic " << j;
+      }
+    }
+  }
+
+  // The batch characteristics of `model` equal its point characteristics at a scaled relative tolerance.
+  void expect_batch_equals_point(const mf::mf52_model &model, const Eigen::MatrixXd &inputs) {
+    // Slopes in N and N/rad, peak slips in rad and 1.
+    constexpr double slope_scale = 1e4;
+    constexpr double peak_scale = 0.1;
+    const Eigen::MatrixXd batch = model.evaluate_characteristics_batch(inputs);
+    ASSERT_EQ(batch.rows(), inputs.rows());
+    ASSERT_EQ(batch.cols(), model.characteristics_length());
+    for (Eigen::Index r = 0; r < inputs.rows(); ++r) {
+      const Eigen::VectorXd input = inputs.row(r).transpose();
+      const Eigen::VectorXd expected = model.evaluate_characteristics(input);
+      for (Eigen::Index j = 0; j < expected.size(); ++j) {
+        SCOPED_TRACE(std::format("row {} characteristic {}", r, j));
+        if (same_value(batch(r, j), expected(j))) {
+          continue;
+        }
+        const bool peak = j == mf::mf5x::SA_AT_PEAK_FY || j == mf::mf5x::SR_AT_PEAK_FX;
+        const double scale = peak ? peak_scale : slope_scale;
+        EXPECT_TRUE(mf::test::near_scaled(batch(r, j), expected(j), mf::test::BATCH_REL_TOL, scale));
+      }
+    }
+  }
+} // namespace
+
+TEST(mf52_model, EvaluateCharacteristics_S52_BitEqualPac2002S) {
+  const std::vector<point_t> points = characteristic_points();
+  const Eigen::MatrixXd inputs = mf::test::inputs_of(points);
+  for (const slip_mode mode : {slip_mode::COMBINED, slip_mode::UNCOMBINED}) {
+    SCOPED_TRACE(mode == slip_mode::COMBINED ? "combined" : "uncombined");
+    const std::optional<model_pair> models = make_pair(mode);
+    if (!models.has_value()) {
+      return;
+    }
+    expect_models_bit_equal(*models, inputs);
+  }
+}
+
+TEST(mf52_model, EvaluateCharacteristicsBatch_EqualPoint) {
+  const std::vector<point_t> points = characteristic_points();
+  const Eigen::MatrixXd inputs = mf::test::inputs_of(points);
+  for (const slip_mode mode : {slip_mode::COMBINED, slip_mode::UNCOMBINED}) {
+    SCOPED_TRACE(mode == slip_mode::COMBINED ? "combined" : "uncombined");
+    const std::optional<mf::mf52_model> model = make_model(mf::test::fixture_s52(), mode);
+    if (!model.has_value()) {
+      return;
+    }
+    expect_batch_equals_point(*model, inputs);
   }
 }

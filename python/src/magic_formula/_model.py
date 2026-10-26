@@ -92,13 +92,14 @@ class TireModel:
     from another thread while a call is using it.
     """
 
-    __slots__ = ('_core', '_inputs', '_outputs', '_limits')
+    __slots__ = ('_core', '_inputs', '_outputs', '_characteristics', '_limits')
 
     def __init__(self, core: _core.Model) -> None:
         """Wrap a ``_core.Model``; use ``load_tir`` or ``parse_tir`` instead."""
         self._core = core
         self._inputs = tuple(Channel(n, u) for n, u in core.inputs)
         self._outputs = tuple(Channel(n, u) for n, u in core.outputs)
+        self._characteristics = tuple(Channel(n, u) for n, u in core.characteristics)
         self._limits = dict(core.limits)
 
     def __repr__(self) -> str:
@@ -124,6 +125,15 @@ class TireModel:
     def outputs(self) -> tuple[Channel, ...]:
         """Output channels in column order."""
         return self._outputs
+
+    @property
+    def characteristic_channels(self) -> tuple[Channel, ...]:
+        """Characteristic channels in column order.
+
+        DFY_DSA [N/rad], DFX_DSR [N], FY_OVER_SA [N/rad], FX_OVER_SR [N],
+        DY [N], DX [N], SA_AT_PEAK_FY [rad], SR_AT_PEAK_FX [-].
+        """
+        return self._characteristics
 
     @property
     def limits(self) -> dict[str, float]:
@@ -250,16 +260,39 @@ class TireModel:
             unloaded side of the model are lift-off (zero forces and moments)
             and are reported as MagicFormulaWarning.
         """
-        return self._evaluate_batch(inputs, check, stacklevel=3)
+        return self._run(self._core.evaluate_batch, inputs, check, stacklevel=3)
 
-    def _evaluate_batch(
-        self, inputs: npt.ArrayLike, check: bool, *, stacklevel: int
-    ) -> npt.NDArray[np.float64]:
-        """Evaluate and warn at ``stacklevel`` frames above this helper's caller."""
-        solution = _checked(self._core.evaluate_batch(inputs, check))
+    def _run(self, core_method, matrix, check: bool, *, stacklevel: int) -> npt.NDArray[np.float64]:
+        """Run a ``_core`` batch method and re-emit its warnings at ``stacklevel``."""
+        solution = _checked(core_method(matrix, check))
         for message in solution.warnings:
             _warnings.warn(message, MagicFormulaWarning, stacklevel=stacklevel)
         return solution.outputs
+
+    def _pack(
+        self, inputs: dict[str, npt.ArrayLike], method: str
+    ) -> tuple[tuple[int, ...], np.ndarray]:
+        """Validate names, broadcast, and build the F-ordered input matrix."""
+        names = [c.name.lower() for c in self._inputs]
+        unknown = sorted(set(inputs) - set(names))
+        if unknown:
+            raise TypeError(
+                f'{method}() got unexpected input(s) for {self.name}: '
+                f'{", ".join(unknown)}; expected {", ".join(names)}'
+            )
+        missing = [n for n in names if n not in inputs]
+        if missing:
+            raise TypeError(
+                f'{method}() missing input(s) for {self.name}: {", ".join(missing)}'
+            )
+        arrays = np.broadcast_arrays(
+            *(np.asarray(inputs[n], dtype=np.float64) for n in names)
+        )
+        shape = arrays[0].shape
+        matrix = np.empty((arrays[0].size, len(names)), dtype=np.float64, order='F')
+        for j, a in enumerate(arrays):
+            matrix[:, j] = a.reshape(-1)
+        return shape, matrix
 
     def evaluate(
         self,
@@ -283,27 +316,56 @@ class TireModel:
             TypeError: an input is missing or unknown.
             ValueError: the input shapes do not broadcast.
         """
-        names = [c.name.lower() for c in self._inputs]
-        unknown = sorted(set(inputs) - set(names))
-        if unknown:
-            raise TypeError(
-                f'evaluate() got unexpected input(s) for {self.name}: '
-                f'{", ".join(unknown)}; expected {", ".join(names)}'
-            )
-        missing = [n for n in names if n not in inputs]
-        if missing:
-            raise TypeError(
-                f'evaluate() missing input(s) for {self.name}: {", ".join(missing)}'
-            )
-        arrays = np.broadcast_arrays(
-            *(np.asarray(inputs[n], dtype=np.float64) for n in names)
-        )
-        shape = arrays[0].shape
-        matrix = np.empty((arrays[0].size, len(names)), dtype=np.float64, order='F')
-        for j, a in enumerate(arrays):
-            matrix[:, j] = a.reshape(-1)
-        out = self._evaluate_batch(matrix, check, stacklevel=3)
+        shape, matrix = self._pack(inputs, 'evaluate')
+        out = self._run(self._core.evaluate_batch, matrix, check, stacklevel=3)
         return {c.name.lower(): out[:, j].reshape(shape) for j, c in enumerate(self._outputs)}
+
+    def characteristics_batch(
+        self,
+        inputs: npt.ArrayLike,
+        *,
+        check: bool = True,
+    ) -> npt.NDArray[np.float64]:
+        """Evaluate the tire characteristics of rows of operating points.
+
+        The channels are listed in ``characteristic_channels``: the slopes
+        ``DFY_DSA`` and ``DFX_DSR`` of the full (combined) force at the row, the
+        secants ``FY_OVER_SA`` and ``FX_OVER_SR`` (force over raw slip), the pure
+        slip peak forces ``DY`` and ``DX``, and the slips at the peaks
+        ``SA_AT_PEAK_FY`` and ``SR_AT_PEAK_FX``. All are analytic.
+
+        NaN occurs only in ``SA_AT_PEAK_FY`` and ``SR_AT_PEAK_FX`` (no stationary
+        point in range, or no contact). At zero slip the secant equals the slope
+        (``FY_OVER_SA == DFY_DSA``, ``FX_OVER_SR == DFX_DSR``). Rows without
+        contact give 0 in every channel except the two peak slips.
+
+        Args:
+            inputs: see ``evaluate_batch``.
+            check: see ``evaluate_batch``.
+
+        Returns:
+            A float64 array of shape ``(N, 8)``. Load-side warnings behave as in
+            ``evaluate_batch``.
+        """
+        return self._run(self._core.evaluate_characteristics_batch, inputs, check, stacklevel=3)
+
+    def characteristics(
+        self,
+        *,
+        check: bool = True,
+        **inputs: npt.ArrayLike,
+    ) -> dict[str, npt.NDArray[np.float64]]:
+        """Evaluate the characteristics of named channels with NumPy broadcasting.
+
+        Inputs and errors are as in ``evaluate``. Returns a dict keyed
+        ``dfy_dsa, dfx_dsr, fy_over_sa, fx_over_sr, dy, dx, sa_at_peak_fy,
+        sr_at_peak_fx``, each with the broadcast shape. NaN occurs only in
+        ``sa_at_peak_fy`` and ``sr_at_peak_fx``; at zero slip ``fy_over_sa ==
+        dfy_dsa`` and ``fx_over_sr == dfx_dsr``; rows without contact give 0.
+        """
+        shape, matrix = self._pack(inputs, 'characteristics')
+        out = self._run(self._core.evaluate_characteristics_batch, matrix, check, stacklevel=3)
+        return {c.name.lower(): out[:, j].reshape(shape) for j, c in enumerate(self._characteristics)}
 
 
 def _wrap(result) -> TireModel:

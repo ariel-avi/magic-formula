@@ -5,9 +5,12 @@ set(MF_PUBLIC_HEADERS
         magic_formula/cli/cli.hpp
         magic_formula/coordinate_identification.hpp
         magic_formula/coordinate_system.hpp
+        magic_formula/detail/dual_lane.hpp
         magic_formula/detail/identification_probes.hpp
         magic_formula/detail/lanes.hpp
+        magic_formula/detail/mf5x_characteristics.hpp
         magic_formula/detail/mf5x_kernels.hpp
+        magic_formula/detail/stationary_point.hpp
         magic_formula/detail/text.hpp
         magic_formula/error.hpp
         magic_formula/evaluation_types.hpp

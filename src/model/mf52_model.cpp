@@ -10,6 +10,7 @@
 #include <magic_formula/tire_model.hpp>
 #include <memory>
 #include <string_view>
+#include <utility>
 
 namespace mf {
   namespace {
@@ -34,7 +35,8 @@ namespace mf {
       : mf5x_model(parameters, MF52_FORMS, options) {}
 
   std::unique_ptr<tire_model> mf52_model::with_parameters(const mf5x_parameters &parameters) const {
-    return std::make_unique<mf52_model>(mf52_model(parameters, options()));
+    mf52_model model(parameters, options());
+    return std::make_unique<mf52_model>(std::move(model));
   }
 
   std::string_view mf52_model::name() const noexcept {

@@ -117,7 +117,7 @@ mf --help | -h
 mf --version
 ```
 
-`mf` evaluates the tire model described by `<file.tir>` at every row of `<inputs-table>` and prints Fx, Fy, Mz, Mx and My for every row as CSV on stdout.
+`mf` evaluates the tire model described by `<file.tir>` at every row of `<inputs-table>` and prints Fx, Fy, Mz, Mx and My, the clamp flags and eight tire characteristics for every row as CSV on stdout.
 
 | Option | Meaning |
 |--------|---------|
@@ -193,12 +193,12 @@ N,deg,-,deg,m/s
 CSV on stdout. The header line is
 
 ```
-FZ[N],SA[rad],SR[-],IA[rad],VX[m/s],FX[N],FY[N],MZ[N*m],MX[N*m],MY[N*m],FZ_CLAMPED[-],SR_CLAMPED[-],SA_CLAMPED[-],IA_CLAMPED[-],BELOW_VXLOW[-]
+FZ[N],SA[rad],SR[-],IA[rad],VX[m/s],FX[N],FY[N],MZ[N*m],MX[N*m],MY[N*m],FZ_CLAMPED[-],SR_CLAMPED[-],SA_CLAMPED[-],IA_CLAMPED[-],BELOW_VXLOW[-],DFY_DSA[N/rad],DFX_DSR[N],FY_OVER_SA[N/rad],FX_OVER_SR[N],DY[N],DX[N],SA_AT_PEAK_FY[rad],SR_AT_PEAK_FX[-]
 ```
 
-The results header keeps the `NAME[unit]` form (the units of the echoed inputs and of the outputs); the input table has its units on the unit line instead.
+The results header keeps the `NAME[unit]` form (the units of the echoed inputs, of the outputs and of the characteristics); the input table has its units on the unit line instead.
 
-15 columns, followed by one line per input row, in input order. The inputs are echoed unclamped in SI units (angles in rad), followed by the five outputs and five 0/1 flag columns. The echoed inputs and the outputs are in the table system (default: the evaluated model's loaded side; in ISO My is negative when the wheel rolls forward; see "Coordinate systems"); the flags are unchanged. The flag columns are `FZ_CLAMPED`, `SR_CLAMPED`, `SA_CLAMPED` and `IA_CLAMPED` are 1 when that input was clamped to the `.tir` range, and `BELOW_VXLOW` is 1 when Vx is below `VXLOW`. Warnings about the flags are still printed on stderr. Nothing is written to stdout unless every row evaluated successfully.
+23 columns, followed by one line per input row, in input order. The inputs are echoed unclamped in SI units (angles in rad), followed by the five outputs, five 0/1 flag columns and the eight characteristics. The characteristics are `DFY_DSA` and `DFX_DSR` (the instantaneous cornering and longitudinal stiffness, the slopes of the evaluated forces), `FY_OVER_SA` and `FX_OVER_SR` (the secant stiffnesses, evaluated force over the raw slip; at zero slip they equal the slopes), `DY` and `DX` (the pure-slip peak forces) and `SA_AT_PEAK_FY` and `SR_AT_PEAK_FX` (the first slip, from 0 on the side of the row's slip, where the force peaks). `nan` appears only in `SA_AT_PEAK_FY` and `SR_AT_PEAK_FX` (no peak in the search range, or no contact); it is a value, not an error. The echoed inputs, the outputs and the characteristics are in the table system (default: the evaluated model's loaded side; in ISO My is negative when the wheel rolls forward; see "Coordinate systems"); the flags are unchanged. The flag columns are `FZ_CLAMPED`, `SR_CLAMPED`, `SA_CLAMPED` and `IA_CLAMPED` are 1 when that input was clamped to the `.tir` range, and `BELOW_VXLOW` is 1 when Vx is below `VXLOW`. Warnings about the flags are still printed on stderr. Nothing is written to stdout unless every row evaluated successfully.
 
 ### Diagnostics and exit codes
 
@@ -219,6 +219,10 @@ An input outside the model domain is an error that names the column, for example
 | 2 | usage error (message and usage text on stderr) |
 
 See [`docs/architecture.md`](docs/architecture.md) for the architecture (layers, class hierarchy, evaluation pipeline, error model, and how to extend to MF 6.x) and `CLAUDE.md` for the project layout.
+
+## Library API
+
+Besides the four `evaluate` forms, every model has `evaluate_characteristics`, `evaluate_characteristics_batch` and `characteristics_length()`. The characteristics are analytic (exact forward-mode derivatives of the closed-form equations, no finite differences). Derivation and policies: [`docs/research/characteristics.md`](docs/research/characteristics.md).
 
 ## Python bindings
 
@@ -246,6 +250,8 @@ sae_model = tire.convert_coordinate_system("SAE")    # a new TireModel with flip
 sae_points = tire.convert_inputs(points, source="ISO", target="SAE")   # FZ flips
 res = sae_model.evaluate_batch(sae_points)           # raw evaluation; warns on rows on the unloaded side
 ```
+
+The characteristics API: `TireModel.characteristic_channels` (name and unit of the eight channels), `characteristics_batch(inputs, *, check=True)` (an `(N, 8)` array) and `characteristics(*, check=True, **inputs)` (a dict of arrays keyed by the lower-case channel names, for example `res["dfy_dsa"]`). `nan` appears only in `sa_at_peak_fy` and `sr_at_peak_fx`.
 
 The coordinate API: `TireModel.find_coordinate_system()`, `convert_coordinate_system(target)`, `convert_inputs` / `convert_outputs`, and `evaluate_batch(inputs, *, check=True)`, which warns (`MagicFormulaWarning`) about rows on the unloaded side of the model.
 

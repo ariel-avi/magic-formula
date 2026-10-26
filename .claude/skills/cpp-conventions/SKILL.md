@@ -97,6 +97,8 @@ The 100% line + branch gate (`coverage` skill) runs with `--exclude-unreachable-
 ## Eigen
 
 - Kernels are lane-templated and header-defined (`template <typename Lane_T>`), instantiated on `detail::point_lane` (one point, scalar) and `detail::block_lane` (a block of up to `BLOCK_ROWS` points, SIMD). Use `Eigen::Array` for element-wise math and `Eigen::Matrix` only for real linear algebra.
+- Kernels must stay lane-generic: use `select_lanes` with named concrete lanes (never `Lane_T::Constant` expressions as arguments) and only arithmetic plus the member math `dual_lane` provides (atan, sin, cos, exp, sqrt, abs, min). `select_lanes` and `sgn_plus` have generic plain/dual overloads in `detail/lanes.hpp` and `detail/dual_lane.hpp` (piecewise rules). Where a derivative at a point is a limit rather than a chain rule (today only `ellipse_force`), add a plain/dual overload pair in the family kernel header: the plain overload is the exact plain expression, the dual overload changes only the derivative lane.
+- Dual value lanes are bit-identical to plain lanes (tests assert it). Instantiations now include `detail::dual_lane<point_lane>` and `detail::dual_lane<block_lane>`, and branch coverage counts every form branch on those instantiations too.
 - No dynamic-size Eigen objects (heap allocation) in `compute`, `compute_batch` or the kernels: lanes have a fixed maximum size and raw buffers are viewed with `Eigen::Map`.
 - **Never** bind an Eigen expression to `auto`; that keeps dangling temporaries / lazy expressions. Assign to a concrete type (`const Eigen::ArrayXd dfz = (fz - fz0) / fz0;`) or call `.eval()`.
 - Watch aliasing: `a = a.transpose()`-style statements need `.eval()`. Matrix products assigned to an operand need `.noalias()` only when provably safe.

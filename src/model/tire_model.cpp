@@ -30,6 +30,19 @@ namespace mf {
         throw model_failure(result.error().cause, result.error().index);
       }
     }
+
+    /// The error policy shared by every evaluate form: when `checked`, `require(validate())`; always `compute()`; when
+    /// `checked`, `require(check())`.
+    template <typename Validate_T, typename Compute_T, typename Check_T>
+    void run_policy(bool checked, const Validate_T &validate, const Compute_T &compute, const Check_T &check) {
+      if (checked) {
+        require(validate());
+      }
+      compute();
+      if (checked) {
+        require(check());
+      }
+    }
   } // namespace
 
   tire_model::tire_model(int input_len, int output_len, Eigen::VectorXd limits, const model_metadata &metadata,
@@ -53,26 +66,42 @@ namespace mf {
   // temporaries (the Eigen idiom); a const reference to it would not bind the writable hook parameter.
   void tire_model::evaluate_into(const Eigen::Ref<const Eigen::VectorXd> &input,
                                  Eigen::Ref<Eigen::VectorXd> output) const {
-    if (options_.throw_if_model_failure) {
-      require(validate_input(*this, input));
-    }
-    compute(input, output);
-    if (options_.throw_if_model_failure) {
-      require(check_output(*this, output));
-    }
+    const auto validate = [&] { return validate_input(*this, input); };
+    const auto compute_values = [&] { compute(input, output); };
+    const auto check = [&] { return check_output(*this, output); };
+    run_policy(options_.throw_if_model_failure, validate, compute_values, check);
   }
 
   void tire_model::evaluate_batch_into(const Eigen::Ref<const Eigen::MatrixXd> &inputs,
                                        Eigen::Ref<Eigen::MatrixXd> outputs) const {
-    if (options_.throw_if_model_failure) {
-      require(validate_inputs(*this, inputs));
-    }
-    compute_batch(inputs, outputs);
-    if (options_.throw_if_model_failure) {
-      require(check_outputs(*this, outputs));
-    }
+    const auto validate = [&] { return validate_inputs(*this, inputs); };
+    const auto compute_values = [&] { compute_batch(inputs, outputs); };
+    const auto check = [&] { return check_outputs(*this, outputs); };
+    run_policy(options_.throw_if_model_failure, validate, compute_values, check);
   }
   // NOLINTEND(performance-unnecessary-value-param)
+
+  int tire_model::characteristics_length() const noexcept {
+    return static_cast<int>(layout().characteristics.size());
+  }
+
+  Eigen::VectorXd tire_model::evaluate_characteristics(const Eigen::Ref<const Eigen::VectorXd> &input) const {
+    Eigen::VectorXd characteristics(static_cast<Eigen::Index>(characteristics_length()));
+    const auto validate = [&] { return validate_input(*this, input); };
+    const auto compute_values = [&] { compute_characteristics(input, characteristics); };
+    const auto check = [&] { return check_characteristics(*this, characteristics); };
+    run_policy(options_.throw_if_model_failure, validate, compute_values, check);
+    return characteristics;
+  }
+
+  Eigen::MatrixXd tire_model::evaluate_characteristics_batch(const Eigen::Ref<const Eigen::MatrixXd> &inputs) const {
+    Eigen::MatrixXd characteristics(inputs.rows(), static_cast<Eigen::Index>(characteristics_length()));
+    const auto validate = [&] { return validate_inputs(*this, inputs); };
+    const auto compute_values = [&] { compute_characteristics_batch(inputs, characteristics); };
+    const auto check = [&] { return check_characteristics_batch(*this, characteristics); };
+    run_policy(options_.throw_if_model_failure, validate, compute_values, check);
+    return characteristics;
+  }
 
   Eigen::VectorXd tire_model::evaluate(const Eigen::Ref<const Eigen::VectorXd> &input) const {
     Eigen::VectorXd output(static_cast<Eigen::Index>(output_length_));
@@ -118,7 +147,8 @@ namespace mf {
   }
 
   std::unique_ptr<tire_model> tire_model::transformed(const sign_transforms &transforms) const {
-    return rebuild(transforms, transform_limits(limits_, layout().limits, transforms));
+    const Eigen::VectorXd new_limits = transform_limits(limits_, layout().limits, transforms);
+    return rebuild(transforms, new_limits);
   }
 
   model_conversion tire_model::convert_coordinate_system(coordinate_system target) const {

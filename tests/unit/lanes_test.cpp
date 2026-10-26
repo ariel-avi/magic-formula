@@ -34,7 +34,7 @@ namespace {
     constexpr bool single = Lane_T::RowsAtCompileTime == 1;
     const std::size_t step = single ? 1 : values.size();
     for (std::size_t begin = 0; begin < values.size(); begin += step) {
-      const Lane_T lane = lane_of<Lane_T>(std::span<const double>(values).subspan(begin, step));
+      const auto lane = lane_of<Lane_T>(std::span<const double>(values).subspan(begin, step));
       fn(begin, lane);
     }
   }
@@ -84,7 +84,7 @@ namespace {
     const std::vector<double> xs{3.0, 1e300, 0.0, -5.0, INF};
     const std::vector<double> ys{4.0, 1e300, -0.0, 12.0, NAN_VALUE};
     for_each_lane<Lane_T>(xs, [&](std::size_t begin, const Lane_T &x) {
-      const Lane_T y = lane_of<Lane_T>(std::span<const double>(ys).subspan(begin, static_cast<std::size_t>(x.size())));
+      const auto y = lane_of<Lane_T>(std::span<const double>(ys).subspan(begin, static_cast<std::size_t>(x.size())));
       const Lane_T result = mf::detail::elementwise_hypot(x, y);
       ASSERT_EQ(result.size(), x.size());
       for (Eigen::Index i = 0; i < result.size(); ++i) {
@@ -117,7 +117,7 @@ namespace {
     const std::vector<double> truth{1.0, 0.0, 0.0, 1.0, 1.0};
     for_each_lane<Lane_T>(truth, [&](std::size_t begin, const Lane_T &lane) {
       const mask_of<Lane_T> mask = lane > 0.5;
-      const Lane_T flags = mf::detail::to_flag<Lane_T>(mask);
+      const auto flags = mf::detail::to_flag<Lane_T>(mask);
       ASSERT_EQ(flags.size(), lane.size());
       for (Eigen::Index i = 0; i < flags.size(); ++i) {
         expect_same_bits(flags(i), truth[begin + static_cast<std::size_t>(i)]);
@@ -140,6 +140,41 @@ TEST(lanes, SgnPlus_PointLane_PositiveNegativeAndBothZeros) {
 
 TEST(lanes, SgnPlus_BlockLane_PositiveNegativeAndBothZeros) {
   check_sgn_plus<block_lane>();
+}
+
+TEST(lanes, SgnPlus_SpecialValues_BitIdenticalToReference) {
+  const std::vector<double> inputs{-1.0, -0.0, +0.0, 1.0, NAN_VALUE};
+  const std::vector<double> expected{-1.0, 1.0, 1.0, 1.0, -1.0};
+  check_unary<block_lane>(
+      inputs, expected, [](const block_lane &x) { return mf::detail::sgn_plus(x); }, expect_same_bits);
+  check_unary<point_lane>(
+      inputs, expected, [](const point_lane &x) { return mf::detail::sgn_plus(x); }, expect_same_bits);
+}
+
+TEST(lanes, SelectLanes_PointLaneMaskTrue_ReturnsIfTrue) {
+  const point_lane if_true = point_lane::Constant(3.0);
+  const point_lane if_false = point_lane::Constant(-7.0);
+  const point_lane result = mf::detail::select_lanes(if_true > 0.0, if_true, if_false);
+  expect_same_bits(result(0), 3.0);
+}
+
+TEST(lanes, SelectLanes_PointLaneMaskFalse_ReturnsIfFalse) {
+  const point_lane if_true = point_lane::Constant(3.0);
+  const point_lane if_false = point_lane::Constant(-7.0);
+  const point_lane result = mf::detail::select_lanes(if_true < 0.0, if_true, if_false);
+  expect_same_bits(result(0), -7.0);
+}
+
+TEST(lanes, SelectLanes_BlockLaneMixedMask_SelectsPerElement) {
+  const auto if_true = lane_of<block_lane>(std::vector<double>{1.0, 2.0, 3.0, 4.0});
+  const auto if_false = lane_of<block_lane>(std::vector<double>{-1.0, -2.0, -3.0, -4.0});
+  const mask_of<block_lane> mask = lane_of<block_lane>(std::vector<double>{1.0, 0.0, 1.0, 0.0}) > 0.5;
+  const block_lane result = mf::detail::select_lanes(mask, if_true, if_false);
+  ASSERT_EQ(result.size(), 4);
+  expect_same_bits(result(0), 1.0);
+  expect_same_bits(result(1), -2.0);
+  expect_same_bits(result(2), 3.0);
+  expect_same_bits(result(3), -4.0);
 }
 
 TEST(lanes, AddEpsilon_PointAndBlock_MovesAwayFromZeroKeepingSign) {

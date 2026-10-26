@@ -2,6 +2,7 @@
 
 #include <Eigen/Core>
 #include <cmath>
+#include <magic_formula/detail/dual_lane.hpp>
 #include <magic_formula/detail/lanes.hpp>
 #include <magic_formula/evaluation_types.hpp>
 #include <magic_formula/mf5x_coefficients.hpp>
@@ -12,6 +13,11 @@
 /// Pure kernels of the MF 5.x equations shared by PAC2002 and MF 5.2 (internal, not API), written once over a lane
 /// type (`point_lane` for one point, `block_lane` for a batch block). Camber always enters as gamma*LGAx; MF 5.2
 /// forces LGA* = 1, so the same code yields the raw camber there. All functions are total and never throw.
+/// The kernels used for the characteristics (vertical_load, mu_y, fx0, fy0, shaped_argument, sine/cosine_magic_formula,
+/// gxa, gyk, svyk, cosine_combined_forces, friction_ellipse_ratios, combine) are lane-generic: they use only
+/// arithmetic, the member math atan/sin/cos/exp/sqrt/abs/min, `select_lanes` with named concrete lanes, `sgn_plus` and
+/// the `ellipse_force` overload pair (the one place where a dual derivative is a limit rather than a chain rule), so
+/// they also run on `detail::dual_lane`; dual value lanes are bit-identical to plain lanes.
 /// Equations: docs/research/pac2002.md.
 namespace mf::detail {
   /// atan(B*x - E*(B*x - atan(B*x))): the argument shape shared by the sine and cosine Magic Formulas.
@@ -150,6 +156,10 @@ namespace mf::detail {
     Lane_T rx;
     /// Fy/Fy0, 1 when the ratio is 0/0.
     Lane_T ry;
+    /// Fx = Fx0*rx [N].
+    Lane_T fx_n;
+    /// Fy = Fy0*ry [N].
+    Lane_T fy_n;
   };
 
   /// The inputs of the evaluation in SI units, one value per point, in input index order.
@@ -380,9 +390,44 @@ namespace mf::detail {
     return combined_forces<Lane_T>{.fx_n = fx_n, .fy_n = fy_n, .svyk_n = svyk_n};
   }
 
-  /// Friction-ellipse ratios (PAC2002 only) in the Fz-free form with |mu_act| (sign-safe):
+  /// F = F0*r, the reduced force of one friction-ellipse axis, r = |P|/sqrt(P^2 + Q^2) with
+  /// P = own_slip*other_max and Q = own_actual*other_slip; `defined` is false where the ratio
+  /// is the defined 1 (0/0). Plain lanes: f0_n*ratio.
+  template <typename Mask_T, typename Lane_T>
+  [[nodiscard]] Lane_T ellipse_force(const Lane_T &f0_n, const Lane_T &ratio, const Mask_T & /*defined*/,
+                                     const Lane_T & /*own_slip*/, const Lane_T & /*other_max*/,
+                                     const Lane_T & /*own_actual*/, const Lane_T & /*other_slip*/) noexcept {
+    return f0_n * ratio;
+  }
+
+  /// Dual F0*r: value f0.value*ratio.value (the plain product); derivative f0'*r + f0*r' where the
+  /// ratio is defined. At a 0/0 ratio r is replaced by its directional limit
+  /// |P'|/sqrt(P'^2 + Q'^2) along the seed, or by the defined 1 when P' = Q' = 0 (the force is
+  /// differentiable there because F0 = 0 or r is constant along the seed).
+  template <typename Mask_T, typename Lane_T>
+  [[nodiscard]] dual_lane<Lane_T> ellipse_force(const dual_lane<Lane_T> &f0_n, const dual_lane<Lane_T> &ratio,
+                                                const Mask_T &defined, const dual_lane<Lane_T> &own_slip,
+                                                const dual_lane<Lane_T> &other_max, const dual_lane<Lane_T> &own_actual,
+                                                const dual_lane<Lane_T> &other_slip) noexcept {
+    const dual_lane<Lane_T> force = f0_n * ratio;
+    const dual_lane<Lane_T> own_term = own_slip * other_max;
+    const dual_lane<Lane_T> cross_term = own_actual * other_slip;
+    const Lane_T radicand =
+        (own_term.derivative * own_term.derivative) + (cross_term.derivative * cross_term.derivative);
+    const Lane_T limit = own_term.derivative.abs() / radicand.sqrt();
+    const mask_of<Lane_T> has_limit = radicand > 0.0;
+    const Lane_T zero_zero_ratio = has_limit.select(limit, ratio.value);
+    const Lane_T slope_ratio = defined.select(ratio.value, zero_zero_ratio);
+    const Lane_T d = (f0_n.derivative * slope_ratio) + (f0_n.value * ratio.derivative);
+    return dual_lane<Lane_T>{.value = force.value, .derivative = d};
+  }
+
+  /// Friction-ellipse ratios and forces (PAC2002 only) in the Fz-free form with |mu_act| (sign-safe):
   /// rx = |kc|*mym/sqrt(kc^2*mym^2 + mxa^2*a*^2), ry = |a*|*mxm/sqrt(kc^2*mya^2 + a*^2*mxm^2), with
-  /// kc = kappa + SHx + SVx/add_epsilon(Kx) and a* = sin(alpha + SHy + SVy/add_epsilon(Ky)). A 0/0 ratio gives 1.
+  /// kc = kappa + SHx + SVx/add_epsilon(Kx) and a* = sin(alpha + SHy + SVy/add_epsilon(Ky)).
+  /// The Fz-free magnitudes are equivalent to normalising by |Fz|. A 0/0 ratio is 1 in value on
+  /// every lane type; on dual lanes the force derivative there is the directional limit supplied
+  /// by `ellipse_force`.
   template <typename Lane_T>
   [[nodiscard]] ellipse_ratios<Lane_T> friction_ellipse_ratios(const slip_state<Lane_T> &state, const Lane_T &kappa,
                                                                const Lane_T &alpha_rad) noexcept {
@@ -399,10 +444,16 @@ namespace mf::detail {
     const Lane_T den_x = ((kappa_c * kappa_c * mym * mym) + (mxa * mxa * alpha_star * alpha_star)).sqrt();
     const Lane_T num_y = alpha_star.abs() * mxm;
     const Lane_T den_y = ((kappa_c * kappa_c * mya * mya) + (alpha_star * alpha_star * mxm * mxm)).sqrt();
-    // A 0/0 ratio (both slips at the shifted origin) gives 1.
-    const Lane_T ratio_x = (den_x > 0.0).select(num_x / den_x, Lane_T::Constant(n, 1.0));
-    const Lane_T ratio_y = (den_y > 0.0).select(num_y / den_y, Lane_T::Constant(n, 1.0));
-    return ellipse_ratios<Lane_T>{.rx = ratio_x, .ry = ratio_y};
+    const mask_of<Lane_T> defined_x = den_x > 0.0;
+    const mask_of<Lane_T> defined_y = den_y > 0.0;
+    const Lane_T one = Lane_T::Constant(n, 1.0);
+    const Lane_T raw_ratio_x = num_x / den_x;
+    const Lane_T raw_ratio_y = num_y / den_y;
+    const Lane_T ratio_x = select_lanes(defined_x, raw_ratio_x, one);
+    const Lane_T ratio_y = select_lanes(defined_y, raw_ratio_y, one);
+    const Lane_T fx_n = ellipse_force(state.lon.fx0_n, ratio_x, defined_x, kappa_c, mym, mxa, alpha_star);
+    const Lane_T fy_n = ellipse_force(state.lat.fy0_n, ratio_y, defined_y, alpha_star, mxm, mya, kappa_c);
+    return ellipse_ratios<Lane_T>{.rx = ratio_x, .ry = ratio_y, .fx_n = fx_n, .fy_n = fy_n};
   }
 
   /// Moment arm of Fx in Mz: s = R0*(SSZ1 + SSZ2*Fy/FNOMIN + (SSZ3 + SSZ4*dfz)*gamma)*LS, with the FNOMIN normaliser,
@@ -460,11 +511,9 @@ namespace mf::detail {
                                                 const slip_state<Lane_T> &state,
                                                 const input_lanes<Lane_T> &p) noexcept {
     if (method == combined_method::FRICTION_ELLIPSE) {
-      const ellipse_ratios<Lane_T> ratios = friction_ellipse_ratios(state, p.kappa, p.alpha_rad);
-      const Lane_T fx_n = state.lon.fx0_n * ratios.rx;
-      const Lane_T fy_n = state.lat.fy0_n * ratios.ry;
+      const ellipse_ratios<Lane_T> ellipse = friction_ellipse_ratios(state, p.kappa, p.alpha_rad);
       const Lane_T zero_svyk = Lane_T::Zero(p.fz_n.size());
-      return combined_forces<Lane_T>{.fx_n = fx_n, .fy_n = fy_n, .svyk_n = zero_svyk};
+      return combined_forces<Lane_T>{.fx_n = ellipse.fx_n, .fy_n = ellipse.fy_n, .svyk_n = zero_svyk};
     }
     return cosine_combined_forces(c, state, p);
   }

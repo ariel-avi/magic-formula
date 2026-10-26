@@ -9,7 +9,7 @@
 namespace mf::mf5x {
   // The index enums are unscoped on purpose, an exception to the enum-class rule: an enumerator IS the vector
   // position and is directly usable as an Eigen or buffer index (`y(output_index::FX)`, `data[output_index::FX]`)
-  // without a cast. The family namespace scopes the names. Enumerator names are unique across the three enums.
+  // without a cast. The family namespace scopes the names. Enumerator names are unique across the four enums.
   // The input order is the CSV echo order and the flag order is the warning order. MF 6.2 gets its own `mf::mf6x`
   // namespace and appends P as input 5.
 
@@ -24,11 +24,24 @@ namespace mf::mf5x {
   /// Positions of the limits vector.
   enum limit_index : std::uint8_t { FZMIN, FZMAX, KPUMIN, KPUMAX, ALPMIN, ALPMAX, CAMMIN, CAMMAX, VXLOW };
 
+  /// Positions of the characteristics vector.
+  enum characteristic_index : std::uint8_t {
+    DFY_DSA,
+    DFX_DSR,
+    FY_OVER_SA,
+    FX_OVER_SR,
+    DY,
+    DX,
+    SA_AT_PEAK_FY,
+    SR_AT_PEAK_FX
+  };
+
   // NOLINTEND(cppcoreguidelines-use-enum-class)
 
   inline constexpr int INPUT_LENGTH = 5;
   inline constexpr int OUTPUT_LENGTH = 10;
   inline constexpr int LIMITS_LENGTH = 9;
+  inline constexpr int CHARACTERISTICS_LENGTH = 8;
 
   /// Default of an absent range bound.
   inline constexpr double INF = std::numeric_limits<double>::infinity();
@@ -78,17 +91,61 @@ namespace mf::mf5x {
       {.key = "VXLOW", .role = limit_role::VALUE, .default_value = 1.0},
   }};
 
+  /// Characteristic channels shared by the MF 5.x models.
+  inline constexpr std::array<characteristic_channel, CHARACTERISTICS_LENGTH> CHARACTERISTICS{{
+      {.name = "DFY_DSA", .unit = "N/rad", .negated_by = {.vertical = true, .lateral = true}, .nan_allowed = false},
+      {.name = "DFX_DSR", .unit = "N", .negated_by = {.vertical = false, .lateral = false}, .nan_allowed = false},
+      {.name = "FY_OVER_SA", .unit = "N/rad", .negated_by = {.vertical = true, .lateral = true}, .nan_allowed = false},
+      {.name = "FX_OVER_SR", .unit = "N", .negated_by = {.vertical = false, .lateral = false}, .nan_allowed = false},
+      {.name = "DY", .unit = "N", .negated_by = {.vertical = true, .lateral = false}, .nan_allowed = false},
+      {.name = "DX", .unit = "N", .negated_by = {.vertical = false, .lateral = false}, .nan_allowed = false},
+      {.name = "SA_AT_PEAK_FY", .unit = "rad", .negated_by = {.vertical = false, .lateral = true}, .nan_allowed = true},
+      {.name = "SR_AT_PEAK_FX", .unit = "-", .negated_by = {.vertical = false, .lateral = false}, .nan_allowed = true},
+  }};
+
   /// Index map of PAC2002.
-  inline constexpr model_layout PAC2002_LAYOUT{.inputs = PAC2002_INPUTS, .outputs = OUTPUTS, .limits = LIMITS};
+  inline constexpr model_layout PAC2002_LAYOUT{
+      .inputs = PAC2002_INPUTS, .outputs = OUTPUTS, .limits = LIMITS, .characteristics = CHARACTERISTICS};
 
   /// Index map of MF 5.2.
-  inline constexpr model_layout MF52_LAYOUT{.inputs = MF52_INPUTS, .outputs = OUTPUTS, .limits = LIMITS};
+  inline constexpr model_layout MF52_LAYOUT{
+      .inputs = MF52_INPUTS, .outputs = OUTPUTS, .limits = LIMITS, .characteristics = CHARACTERISTICS};
 
   static_assert(PAC2002_INPUTS.size() == INPUT_LENGTH);
   static_assert(MF52_INPUTS.size() == INPUT_LENGTH);
   static_assert(OUTPUTS.size() == OUTPUT_LENGTH);
   static_assert(LIMITS.size() == LIMITS_LENGTH);
   static_assert(limit_pairs_well_formed(LIMITS));
+  static_assert(CHARACTERISTICS.size() == CHARACTERISTICS_LENGTH);
+
+  static_assert(CHARACTERISTICS[DFY_DSA].name == "DFY_DSA");
+  static_assert(CHARACTERISTICS[DFX_DSR].name == "DFX_DSR");
+  static_assert(CHARACTERISTICS[FY_OVER_SA].name == "FY_OVER_SA");
+  static_assert(CHARACTERISTICS[FX_OVER_SR].name == "FX_OVER_SR");
+  static_assert(CHARACTERISTICS[DY].name == "DY");
+  static_assert(CHARACTERISTICS[DX].name == "DX");
+  static_assert(CHARACTERISTICS[SA_AT_PEAK_FY].name == "SA_AT_PEAK_FY");
+  static_assert(CHARACTERISTICS[SR_AT_PEAK_FX].name == "SR_AT_PEAK_FX");
+
+  static_assert(CHARACTERISTICS[DFY_DSA].negated_by.vertical && CHARACTERISTICS[DFY_DSA].negated_by.lateral);
+  static_assert(!CHARACTERISTICS[DFX_DSR].negated_by.vertical && !CHARACTERISTICS[DFX_DSR].negated_by.lateral);
+  static_assert(CHARACTERISTICS[FY_OVER_SA].negated_by.vertical && CHARACTERISTICS[FY_OVER_SA].negated_by.lateral);
+  static_assert(!CHARACTERISTICS[FX_OVER_SR].negated_by.vertical && !CHARACTERISTICS[FX_OVER_SR].negated_by.lateral);
+  static_assert(CHARACTERISTICS[DY].negated_by.vertical && !CHARACTERISTICS[DY].negated_by.lateral);
+  static_assert(!CHARACTERISTICS[DX].negated_by.vertical && !CHARACTERISTICS[DX].negated_by.lateral);
+  static_assert(!CHARACTERISTICS[SA_AT_PEAK_FY].negated_by.vertical &&
+                CHARACTERISTICS[SA_AT_PEAK_FY].negated_by.lateral);
+  static_assert(!CHARACTERISTICS[SR_AT_PEAK_FX].negated_by.vertical &&
+                !CHARACTERISTICS[SR_AT_PEAK_FX].negated_by.lateral);
+
+  static_assert(!CHARACTERISTICS[DFY_DSA].nan_allowed);
+  static_assert(!CHARACTERISTICS[DFX_DSR].nan_allowed);
+  static_assert(!CHARACTERISTICS[FY_OVER_SA].nan_allowed);
+  static_assert(!CHARACTERISTICS[FX_OVER_SR].nan_allowed);
+  static_assert(!CHARACTERISTICS[DY].nan_allowed);
+  static_assert(!CHARACTERISTICS[DX].nan_allowed);
+  static_assert(CHARACTERISTICS[SA_AT_PEAK_FY].nan_allowed);
+  static_assert(CHARACTERISTICS[SR_AT_PEAK_FX].nan_allowed);
 
   static_assert(PAC2002_INPUTS[FZ].name == "FZ");
   static_assert(PAC2002_INPUTS[SA].name == "SA");

@@ -9,31 +9,35 @@ Dependencies point downwards only. The core model knows nothing about files or t
 | Layer | Headers (`include/magic_formula/`) | Sources (`src/`) | Namespace | Role |
 |-------|------|------|-----------|------|
 | core model | `tire_model.hpp`, `sign_transform.hpp`, `coordinate_system.hpp`, `coordinate_identification.hpp`, `model_layout.hpp`, `mf5x_layout.hpp`, `mf5x_signs.hpp`, `model_checks.hpp`, `mf5x_model.hpp`, `pac2002_model.hpp`, `mf52_model.hpp`, `mf5x_forms.hpp`, `mf5x_coefficients.hpp`, `evaluation_types.hpp`, `error.hpp` | `model/`, `error.cpp` | `mf`, `mf::mf5x` | Abstract formulation, the index maps, the two concrete models, the free check functions, the sign transforms, the data conversion between ISO and SAE, the coordinate-system identification and the model conversion. No I/O, no printing. |
-| detail | `detail/lanes.hpp`, `detail/mf5x_kernels.hpp`, `detail/identification_probes.hpp`, `detail/text.hpp` | `detail/` | `mf::detail` | Internal, lane-templated equation kernels, the identification probe planning and reading (`plan_probes`, `read_probes`) and helpers. Under `include/` so tests can include them; production code includes `detail/mf5x_kernels.hpp` only from `src/model/mf5x_model.cpp`. |
+| detail | `detail/lanes.hpp`, `detail/dual_lane.hpp`, `detail/mf5x_kernels.hpp`, `detail/mf5x_characteristics.hpp`, `detail/stationary_point.hpp`, `detail/identification_probes.hpp`, `detail/text.hpp` | `detail/` | `mf::detail` | Internal, lane-templated equation kernels, the forward-mode `dual_lane`, the characteristics kernel and the stationary-point finder, the identification probe planning and reading (`plan_probes`, `read_probes`) and helpers. Under `include/` so tests can include them; production code includes `detail/mf5x_kernels.hpp` only from `src/model/mf5x_model.cpp`. |
 | io | `io/*.hpp` | `io/` | `mf::io` | `.tir` lexing (`tir_document`, `tir_reader`), unit check, model routing, key-to-coefficient bindings, the model loader (factory), the `.tir` text editor (`tir_editor`: `replace_value` changes only the bytes of one value, using each entry's `value_offset`/`value_length` span, and re-parses to check the result), the `.tir` text conversion between ISO and SAE (`tir_conversion`: `convert_tir`), the input-table parser (header, mandatory unit line, rows) and its mapping onto a model's input channels, the CSV result writer. |
 | cli | `cli/cli.hpp` | `cli/cli.cpp` | `mf::cli` | Command-line parsing and the `run` driver. Compiled into `mflib` so module tests can run it in-process. |
 | wasm adapter | none | `wasm/mf_wasm.cpp` (outside `src/`) | `mf::wasm` | embind adapter that only converts types and calls `io::tir_document::parse`, `io::load_tire_model`, `io::replace_value`, `io::convert_tir`, `tire_model::find_coordinate_system`, `checked_evaluate_batch` and `load_side_warning`; `inspect` returns the full identification, `convertModel(text, fileName, target)` returns the converted `.tir` text with the changed entries, `evaluate(text, inputs, uncombined)` takes raw inputs and returns the load-side warnings. Not part of `mflib`, not coverage-gated, built only by the `wasm` preset. |
 | app | none | `app/main.cpp` | none | One call into `mf::cli::run`. Builds the executable `mf`. |
 | python adapter | none | `python/bindings/mf_python.cpp` | `mf::python` | pybind11 module, target `mf_python` -> `magic_formula._core`. Statically embeds `mflib`; not part of `mflib` and outside the gcovr gate by layout. |
-| python layer | none | `python/src/magic_formula/` | none | `load_tir`, `parse_tir`, `TireModel` (with `find_coordinate_system`, `convert_coordinate_system`, `convert_inputs`, `convert_outputs`), `CoordinateIdentification`, `AxisDecision`, `IndicatorReading`, `Channel`, `MagicFormulaError`, `MagicFormulaWarning`. Own 100% pytest-cov gate. |
+| python layer | none | `python/src/magic_formula/` | none | `load_tir`, `parse_tir`, `TireModel` (with `find_coordinate_system`, `convert_coordinate_system`, `convert_inputs`, `convert_outputs`, `characteristic_channels`, `characteristics_batch`, `characteristics`), `CoordinateIdentification`, `AxisDecision`, `IndicatorReading`, `Channel`, `MagicFormulaError`, `MagicFormulaWarning`. Own 100% pytest-cov gate. |
 
 The library target is `mflib` (alias `mf::mflib`), built from the sources listed explicitly in `src/CMakeLists.txt`. The public headers are the INTERFACE target `mf_headers` (alias `mf::headers`) in `include/CMakeLists.txt`; it carries the include directory and Eigen, and `mflib` links it PUBLIC. The CLI executable `mf` is defined in `src/app/CMakeLists.txt`. The test helpers are the INTERFACE target `mf::test_support` (`tests/support/CMakeLists.txt`), which provides `MF_TEST_DATA_DIR`. Eigen 5.0.1 is a PUBLIC dependency: it appears in the public signatures, so every consumer receives it through `mf::headers` and `mflib`. The web app (`web/`, React + Vite) is a consumer of the wasm adapter, not a layer of the library: it holds the `.tir` text, re-parses it on each evaluate call, and contains no tire equations. See the README, "Web frontend (WebAssembly)". The web app shows the identified axis system in a coordinate panel (`web/src/components/coordinates/`: `CoordinateSystemPanel` with the identified label, the indicator table, the warnings and the ISO / SAE toggle that converts the model's coefficients, and the lazy-loaded three.js `TireScene` that draws the convention). Errors are values (see "Options and error model"); only `mf::cli::run` catches exceptions.
 
 ## Class hierarchy
 
 ```
-tire_model                  abstract; non-virtual interface (NVI) with 4 evaluate forms;
-                            pure virtual reference_input(); private pure virtual rebuild();
+tire_model                  abstract; non-virtual interface (NVI) with 4 evaluate forms and
+                            evaluate_characteristics[_batch]; characteristics_length();
+                            pure virtual reference_input(); private pure virtual rebuild(),
+                            compute_characteristics[_batch]();
                             non-virtual find_coordinate_system() (two overloads), loaded_side(),
                             transformed(), convert_coordinate_system()
-  `-- mf5x_model            abstract; owns coefficients and forms; compute / compute_batch are final;
+  `-- mf5x_model            abstract; owns coefficients and forms; compute / compute_batch and
+        |                   compute_characteristics[_batch] are final;
         |                   rebuild is final and calls the private pure virtual with_parameters()
         |-- pac2002_model   final; PAC2002; with_parameters final
         `-- mf52_model      final; MF 5.2 (FITTYP 6); with_parameters final
 ```
 
 - **`tire_model`** is abstract. Its four public `evaluate` forms are non-virtual and own the error policy. Pure virtual: `name`, `input_length`, `output_length`, `layout`, `reference_input` (the input vector of the reference operating point: nominal load, zero slips and inclination, reference speed, and the nominal pressure for formulations with a pressure input), the private hooks `compute` (one point) and `compute_batch` (a block of points), and the private `rebuild(sign_transforms, limits)` (a new model of the same formulation with transformed coefficients). Non-virtual, written once on the base (Template Method): `find_coordinate_system()` (default indicator table) and `find_coordinate_system(span<indicator_definition>)`, `loaded_side()`, `transformed(sign_transforms)` and `convert_coordinate_system(target)`, which returns a `model_conversion{model, applied, identification}`. It stores the limits vector, the `model_metadata`, the `model_options` and the per-point input and output lengths given to its protected constructor (they size the evaluate views without a virtual call), exposes `limits`, `metadata` and `options`, and is immutable after construction, so concurrent `evaluate` calls are safe. Models are built through static `create` functions that return `std::expected`, not through public constructors.
-- **`mf5x_model`** is abstract. It owns an `mf5x_coefficients` (117 doubles named like the `.tir` keys) and an `mf5x_forms`. `input_length`, `output_length`, `reference_input` (FNOMIN*LFZO, zero slips and inclination, LONGVL), `compute` and `compute_batch` are final: the evaluation order is fixed and runs `detail::mf5x_pipeline` on lanes. `rebuild` is final: it applies `mf5x::transform_coefficients` and calls the private pure virtual `with_parameters(mf5x_parameters)`, which the two concrete models implement by constructing a model of their own type (forms, options and metadata are copied, not recomputed; the flips preserve every validated invariant, so `create` is not re-run). It aliases `input_index`, `output_index` and `limit_index` from `mf::mf5x`.
+- **`tire_model` characteristics.** `characteristics_length()` (= `layout().characteristics.size()`), `evaluate_characteristics` (one point) and `evaluate_characteristics_batch` are non-virtual and own the error policy exactly like the evaluate forms: unchecked unless `throw_if_model_failure`, then `validate_input(s)`, the compute hook and `check_characteristics[_batch]`. The private pure virtual hooks are `compute_characteristics` and `compute_characteristics_batch` (no checks, no allocation). Interface Segregation: the characteristics vector is a second, separate result vector, so the output vector and every existing consumer are unchanged.
+- **`mf5x_model`** is abstract. It owns an `mf5x_coefficients` (117 doubles named like the `.tir` keys) and an `mf5x_forms`. `input_length`, `output_length`, `reference_input` (FNOMIN*LFZO, zero slips and inclination, LONGVL), `compute` and `compute_batch` are final: the evaluation order is fixed and runs `detail::mf5x_pipeline` on lanes. `compute_characteristics` and `compute_characteristics_batch` are final too and run `detail::mf5x_characteristics` on the same lanes; `pac2002_model` and `mf52_model` are unchanged by the feature. `rebuild` is final: it applies `mf5x::transform_coefficients` and calls the private pure virtual `with_parameters(mf5x_parameters)`, which the two concrete models implement by constructing a model of their own type (forms, options and metadata are copied, not recomputed; the flips preserve every validated invariant, so `create` is not re-run). It aliases `input_index`, `output_index` and `limit_index` from `mf::mf5x`.
 - **`pac2002_model`** and **`mf52_model`** are final. They differ only in `name`, `layout` (the Vx domain), `create`, `with_parameters` and the `mf5x_forms` they pass up (see "MF 5.x pipeline").
 - **`mf5x_parameters`** = coefficients + limits vector + `model_metadata`. `mf5x_model::validate_parameters` runs `validate_coefficients` and then `validate_limits(limits, mf5x::LIMITS)` and returns the first error unchanged.
 
@@ -45,8 +49,16 @@ Free functions (all in `mf`):
 | `check_output`, `check_outputs` | `model_checks.hpp` | size, finite results (one point, a matrix) |
 | `check_buffers`, `check_batch_buffers` | `model_checks.hpp` | null pointers and lengths of the raw forms |
 | `checked_evaluate_batch` | `model_checks.hpp` | `validate_inputs`, `evaluate_batch`, `check_outputs`; used by the CLI |
-| `contains`, `sign_transform_name` | `sign_transform.hpp` | the `sign_transform` enum (`NONE`, `VERTICAL`, `LATERAL`) and the `sign_transforms` set |
-| `apply_sign_transforms`, `transform_limits`, `limit_signs_well_formed` | `model_layout.hpp` | exact sign flips of the channels (and negate-and-swap of the limit pairs) that declare `negated_by` in the set; self-inverse |
+| `check_characteristics`, `check_characteristics_batch` | `model_checks.hpp` | size, then finite values; NaN passes only in a channel with `nan_allowed` |
+| `checked_evaluate_characteristics_batch` | `model_checks.hpp` | `validate_inputs`, `evaluate_characteristics_batch`, `check_characteristics_batch`; used by `checked_evaluate_batch_with_characteristics` and the Python adapter |
+| `checked_evaluate_batch_with_characteristics` | `model_checks.hpp` | `checked_evaluate_batch`, then `checked_evaluate_characteristics_batch`; first failure wins; returns `checked_batch` (outputs and characteristics); used by the CLI |
+| `contains`, `negates`, `sign_transform_name` | `sign_transform.hpp` | the `sign_transform` enum (`NONE`, `VERTICAL`, `LATERAL`), the `sign_transforms` set and the test whether a plan negates a channel |
+| `apply_sign_transforms`, `transform_limits`, `limit_signs_well_formed` | `model_layout.hpp` | exact sign flips of the channels (and negate-and-swap of the limit pairs) that declare `negated_by` in the set; self-inverse. An overload takes `characteristic_channel`s and a matrix (NaN stays NaN) |
+| `convert_characteristics` | `coordinate_system.hpp` | data conversion of a characteristics matrix between two systems (never used inside evaluation) |
+| `select_lanes`, `sgn_plus` | `detail/lanes.hpp`, `detail/dual_lane.hpp` | element-wise select and the sign that is +1 at +-0; each has a plain and a `dual_lane` overload |
+| `ellipse_force` | `detail/mf5x_kernels.hpp` | the friction-ellipse force F0*r; plain and dual overloads (the dual one carries the 0/0 limit rule) |
+| `first_stationary_point` | `detail/stationary_point.hpp` | the first root of an analytic slope on a segment (scan plus bisection) |
+| `mf5x_planar_forces`, `seed_alpha`, `seed_kappa`, `peak_search_end`, `mf5x_characteristics` | `detail/mf5x_characteristics.hpp` | the forces of one point with their pure-slip terms, the dual-seeded inputs, the clipped search segment, and the eight characteristics |
 | `transform_coefficients`, `COEFFICIENT_SIGNS` | `mf5x_signs.hpp` | the MF 5.x coefficient table (15 VERTICAL + 15 LATERAL) and the flip of an `mf5x_coefficients` |
 | `coordinate_system_name`, `parse_coordinate_system`, `data_transforms` | `coordinate_system.hpp` | `coordinate_system` is `ISO` or `SAE`; the data transforms between two systems |
 | `convert_inputs`, `convert_outputs` | `coordinate_system.hpp` | data conversion utility (never used inside evaluation): FZ on the inputs, FY, MZ and MY on the outputs |
@@ -97,11 +109,43 @@ The descriptor tables of `model_layout.hpp` give the same positions as data, so 
 - `output_channel`: `name`, `unit` (flags use "-") and `negated_by` (flags `NONE`).
 - `limit_channel`: the `.tir` `key`, a `limit_role` (`LOWER`, `UPPER` or `VALUE`; a LOWER is always directly followed by its UPPER) the `default_value` (-inf for LOWER, +inf for UPPER, 1 m/s for VXLOW) and `negated_by` (the transform under which a LOWER/UPPER pair becomes (-upper, -lower); `NONE` for VALUE rows).
 
-The CSV result header has 15 columns, the input channels then the output channels:
+A fourth table, `characteristic_channel` (`name`, `unit`, `negated_by`, `nan_allowed`), describes the characteristics vector; see "Characteristics". The enum `characteristic_index` (DFY_DSA, DFX_DSR, FY_OVER_SA, FX_OVER_SR, DY, DX, SA_AT_PEAK_FY, SR_AT_PEAK_FX) names its positions; `layout.characteristics` is empty for a formulation without them.
+
+The CSV result header has 23 columns, the input channels, the output channels, then the characteristic channels:
 
 ```
-FZ[N],SA[rad],SR[-],IA[rad],VX[m/s],FX[N],FY[N],MZ[N*m],MX[N*m],MY[N*m],FZ_CLAMPED[-],SR_CLAMPED[-],SA_CLAMPED[-],IA_CLAMPED[-],BELOW_VXLOW[-]
+FZ[N],SA[rad],SR[-],IA[rad],VX[m/s],FX[N],FY[N],MZ[N*m],MX[N*m],MY[N*m],FZ_CLAMPED[-],SR_CLAMPED[-],SA_CLAMPED[-],IA_CLAMPED[-],BELOW_VXLOW[-],DFY_DSA[N/rad],DFX_DSR[N],FY_OVER_SA[N/rad],FX_OVER_SR[N],DY[N],DX[N],SA_AT_PEAK_FY[rad],SR_AT_PEAK_FX[-]
 ```
+
+## Characteristics
+
+Eight derived quantities of the evaluated force curves, returned by `evaluate_characteristics[_batch]` in the order of `characteristic_index`. All are analytic: derivatives come from forward-mode automatic differentiation of the unchanged closed-form kernels (exact chain rule, no step size, no finite difference). The derivation, the policies and the test values are in [`research/characteristics.md`](research/characteristics.md).
+
+| Channel | Unit | Meaning | Sign parity |
+|---------|------|---------|-------------|
+| `DFY_DSA` | N/rad | dFy/dSA of the evaluated force at the row | VERTICAL and LATERAL |
+| `DFX_DSR` | N | dFx/dSR of the evaluated force at the row | none |
+| `FY_OVER_SA` | N/rad | secant: evaluated Fy over the raw SA | VERTICAL and LATERAL |
+| `FX_OVER_SR` | N | secant: evaluated Fx over the raw SR | none |
+| `DY` | N | pure-slip peak factor Dy | VERTICAL |
+| `DX` | N | pure-slip peak factor Dx | none |
+| `SA_AT_PEAK_FY` | rad | first stationary point of Fy(SA) | LATERAL |
+| `SR_AT_PEAK_FX` | - | first stationary point of Fx(SR) | none |
+
+Rules:
+
+- **Combined and pure slip.** The slopes are those of the force the model evaluates (combined or uncombined, per `slip_mode`) at the row's other inputs; `DY` and `DX` are the pure-slip D parameters.
+- **Unloaded and clamped rows.** A row without contact gives 0 in the six non-peak channels and NaN in the two peak channels. A slip clamped to the `.tir` range has slope 0 for that channel (the chain rule through the clamp).
+- **Secant.** Evaluated force over the raw slip. At raw slip +-0 the secant is the row's tangent slope (the analytic derivative at slip 0), not NaN; without contact it is 0.
+- **NaN policy.** NaN appears only in `SA_AT_PEAK_FY` and `SR_AT_PEAK_FX` (the channels with `nan_allowed`): no stationary point in the search segment, or no contact. Any other non-finite value is a NUMERICAL error, like the outputs.
+- **Derivative rules.** Chain rule through the clamps and the contact masks; at a genuine kink (where the function is not differentiable) the right derivative; at the friction-ellipse 0/0 points the true limit (see below). Force values stay bit-identical to the evaluate path.
+- **Peak slips.** The exact stationarity equation dF/ds = 0 with the analytic slope: side = `sgn_plus` of the row's slip, the segment is [0, end] with end = +-pi/2 rad for SA and +-1 for SR, clipped to the `.tir` slip range; a scan of 32 cells for the first sign change of the slope, then 52 bisections; NaN if none. The trip counts are fixed, so the code is branch-free on data.
+
+**Dual lanes.** `detail::dual_lane<Lane_T>` holds a value lane and a derivative lane. Invariant: the value lane of every operation equals the plain-lane expression bit for bit, so the dual kernels reproduce the forces exactly (tests assert it). Instantiations: `dual_lane<point_lane>` and `dual_lane<block_lane>`. The kernels stay lane-generic: arithmetic plus the member math `dual_lane` provides (atan, sin, cos, exp, sqrt, abs, min) and `select_lanes` with named concrete lanes.
+
+**Plain/dual overload pattern.** `select_lanes` (in `detail/lanes.hpp`) and `sgn_plus` (in `detail/dual_lane.hpp`) have generic plain and `dual_lane` overloads: piecewise rules whose dual overload selects value and derivative (`select_lanes`) or has derivative 0 (`sgn_plus`). Where a derivative at a point is a limit rather than a chain rule (today only `ellipse_force`), the family kernel header has a plain/dual overload pair. The plain overload is the exact plain expression and is all the hot path (`compute`, `compute_batch`) ever instantiates; the dual overload changes only the derivative lane.
+
+**Friction-ellipse 0/0.** The ellipse ratio r = |P|/sqrt(P^2 + Q^2) is 0/0 wherever P = Q = 0 (P = own shifted slip times the other maximum, Q = own actual magnitude times the other slip). With zero shifts this is every row whose own slip is 0, i.e. every pure-slip row of the other axis, not only the origin. The evaluated value there is defined as 1 (force = pure force). The force slope is the pure slope times the directional limit of the ratio along the seeded slip, |P'|/sqrt(P'^2 + Q'^2), or 1 when both P' and Q' are 0.
 
 ## The four evaluate forms
 
@@ -202,10 +246,10 @@ The constexpr `UNITS` table in the parser is the single source of the accepted u
 4. identifies the evaluated model and takes its `loaded_side()`;
 5. `io::read_model_inputs`: reads the table (header, mandatory unit line, rows; units converted to SI once) and arranges its columns in the model's `input_index` order; a table column that the model has no input for (P for MF 5.x) goes to `ignored_columns`;
 6. the table system is `--table-system` or the evaluated model's loaded side; when it differs, `convert_inputs` flips a copy of the table to the loaded side (the data conversion);
-7. `checked_evaluate_batch` evaluates the raw values; an error is relocated to the table file and line;
-8. `convert_outputs` brings the results back to the table system;
+7. `checked_evaluate_batch_with_characteristics` evaluates the raw values with `checked_evaluate_batch`; when that holds a value (an explicit `has_value()` check, not a monadic chain) the same inputs go through the characteristics batch, and the result is a `checked_batch` struct carrying both; an error is relocated to the table file and line;
+8. `convert_outputs` brings the results back to the table system, and `convert_characteristics` does the same for the characteristics;
 9. diagnostics on `err`, in this order: load warnings, the identification warnings of the evaluated model (always), `--verbose` information (the source identification with every reading, the conversion applied, the table system), one warning per ignored column, the load-side warning of the table (`load_side_warning`), then one warning per flag output that is set;
-10. `io::write_results`: the 15-column CSV on `out`, the inputs echoed as read and the outputs in the table system.
+10. `io::write_results`: the 23-column CSV on `out`, the inputs echoed as read, the outputs and the eight characteristics in the table system; NaN prints as `nan`.
 
 Output is all-or-nothing: nothing reaches stdout unless every row evaluated successfully. Exit codes 0 / 1 / 2.
 
@@ -220,6 +264,8 @@ Output is all-or-nothing: nothing reaches stdout unless every row evaluated succ
 2. `evaluate` broadcasts the five channels with NumPy rules and packs one Fortran-ordered `(N, 5)` float64 matrix, then calls `evaluate_batch`. `evaluate_batch` takes such a matrix without a copy (any other layout or dtype is converted once).
 3. The adapter runs `checked_evaluate_batch` (or the shape check and `evaluate_batch` with `check=False`) and `load_side_warning` with the GIL released, then moves the resulting matrix into a capsule-owned `(N, 10)` array. There is no output copy; the flag outputs stay floats (0.0 or 1.0).
 
+**Characteristics.** `Model.evaluate_characteristics_batch` (adapter) runs `checked_evaluate_characteristics_batch` (or the shape check and the unchecked form with `check=False`) with the GIL released and returns a capsule-owned `(N, 8)` array. `TireModel.characteristic_channels` lists the `Channel`s, `characteristics_batch(inputs, *, check=True)` takes the packed matrix, and `characteristics(*, check=True, **inputs)` broadcasts named channels and returns a dict keyed by the lower-case channel names. NaN appears only in `sa_at_peak_fy` and `sr_at_peak_fx`.
+
 **Coordinate systems.** `TireModel.find_coordinate_system()` returns a `CoordinateIdentification` (classification, per-axis `AxisDecision`, every `IndicatorReading`, warnings); `convert_coordinate_system(target)` returns a new `TireModel` with flipped coefficients; `convert_inputs` / `convert_outputs` expose the data conversion. `evaluate_batch(inputs, *, check=True)` and `evaluate(*, check=True, **inputs)` evaluate raw values and re-emit the load-side warnings as `MagicFormulaWarning`.
 
 **Error model.** The adapter returns errors as values (`Model | Error`) and never throws or catches; pybind11's dispatcher is its boundary. The Python layer raises `MagicFormulaError` with `code`, `message`, `file`, `line`, `key` and `row`. A wrong input shape is always `INVALID_ARGUMENT`, whatever `check` is; `check=False` skips input and output validation. Load warnings are emitted as `MagicFormulaWarning` and kept on `TireModel.warnings`.
@@ -231,6 +277,11 @@ Output is all-or-nothing: nothing reaches stdout unless every row evaluated succ
 | Pattern | Where | Why |
 |---------|-------|-----|
 | Template Method (with the NVI) | `find_coordinate_system`, `transformed`, `convert_coordinate_system` on `tire_model`; `mf5x_model::rebuild` with the second-level hook `with_parameters` | The algorithms are written once on the base; the formulation supplies only what it alone knows: its nominal point, its coefficient storage and its constructor. |
+| Template Method (NVI hooks) | `evaluate_characteristics[_batch]` and the private `compute_characteristics[_batch]` | Error policy written once on the base; the formulation supplies only the unchecked computation. |
+| Interface Segregation | the characteristics vector next to the output vector | Consumers that need only forces never see the characteristics. |
+| Table-driven channels | `characteristic_channel` rows in `mf5x::CHARACTERISTICS` | Name, unit, sign parity and NaN permission are data; checks, conversion and the writer follow the table. |
+| Type adapter (dual lane) | `detail::dual_lane` | The unchanged closed-form kernels yield exact derivatives when instantiated on it. |
+| Compile-time Strategy | the slope callable of `first_stationary_point` | The root finder holds no tire equations; the caller passes the analytic slope. |
 | Prototype-style rebuild | `rebuild` / `with_parameters` | A new immutable model with modified parameters, keeping forms, options and metadata, with no setters (immutability and thread safety stay). |
 | Table-driven design (open/closed) | `negated_by` on channels and limit pairs, `mf5x::COEFFICIENT_SIGNS`, `IDENTIFICATION_INDICATORS` | The sign behaviour of a quantity is data, like its unit. A new family adds rows, not code, and each row is unit-testable. |
 | Pure functions and lookup tables | the identification functions, `load_side_warning`, `plan_probes`, `read_probes`, `negate_number_text` | Every branch is reachable with literal inputs, so the model-dependent members have no branches. |
@@ -261,5 +312,6 @@ MF 6.0 / 6.1 / 6.2 (FITTYP 60 / 61 / 62) are currently rejected with `UNSUPPORTE
     4. Select the coefficient table by model kind in `io::convert_tir`.
     5. Make `reference_input()` return the nominal operating point, including the nominal pressure when the layout has a P input.
     6. Append indicator rows to the table, or add a virtual `identification_indicators()` hook if a row must be family-specific (`find_coordinate_system(span)` already takes a table).
+    Characteristics: add a characteristics table to the layout (`characteristic_channel` rows), implement the two hooks `compute_characteristics` and `compute_characteristics_batch`, and reuse `dual_lane` and `first_stationary_point`. Keep the kernels lane-generic (`select_lanes` with named concrete lanes, member math only). Where a derivative at a point is a limit rather than a chain rule, add a plain/dual overload pair in the family kernel header: the plain overload is the exact plain expression, the dual overload changes only the derivative lane.
 12. **Python bindings.** They are layout-driven (channels, limits and output names come from the model layout), so they need no change; `evaluate(p=...)` becomes valid once the layout has a P input.
 13. **Docs.** Update this file, `CLAUDE.md` and the README "Models" section in the same PR.

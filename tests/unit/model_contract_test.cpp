@@ -75,6 +75,49 @@ namespace {
   double scale_of(Eigen::Index j) {
     return j <= out_idx::FY ? FORCE_SCALE_N : MOMENT_SCALE_NM;
   }
+
+  // True for the two peak-slip characteristics, the only channels where NaN is a documented value.
+  bool is_peak_characteristic(Eigen::Index j) {
+    return j == mf::mf5x::SA_AT_PEAK_FY || j == mf::mf5x::SR_AT_PEAK_FX;
+  }
+
+  // The scale of a characteristic for near_scaled: N (and N/rad) for the slopes and peaks, 1 for the peak slips.
+  double characteristic_scale_of(Eigen::Index j) {
+    return is_peak_characteristic(j) ? 1.0 : FORCE_SCALE_N;
+  }
+
+  // Agreement of two characteristic values: NaN equals NaN, otherwise near_scaled at the batch tolerance.
+  ::testing::AssertionResult characteristic_agree(double actual, double expected, Eigen::Index j) {
+    if (std::isnan(actual) || std::isnan(expected)) {
+      if (std::isnan(actual) && std::isnan(expected)) {
+        return ::testing::AssertionSuccess();
+      }
+      return ::testing::AssertionFailure() << "actual " << actual << ", expected " << expected;
+    }
+    return mf::test::near_scaled(actual, expected, mf::test::BATCH_REL_TOL, characteristic_scale_of(j));
+  }
+
+  // A zero-camber point at 16.6 m/s.
+  mf::test::point grid_point(double fz_n, double kappa, double alpha_rad) {
+    return {.fz_n = fz_n, .kappa = kappa, .alpha_rad = alpha_rad, .gamma_rad = 0.0, .vx_mps = 16.6};
+  }
+
+  // Fixture S points at Fz 4000 with both slip signs, SA = +-0 and SR = +-0, then the no-contact rows Fz 0 and -100.
+  Eigen::MatrixXd characteristics_grid() {
+    constexpr std::array<double, 6> slips{-0.1, -0.0, 0.0, 0.02, 0.1, 0.3};
+    constexpr std::array<double, 2> no_contact_loads{0.0, -100.0};
+    std::vector<mf::test::point> points;
+    for (const double alpha : slips) {
+      for (const double kappa : slips) {
+        points.push_back(grid_point(4000.0, kappa, alpha * 0.5));
+      }
+    }
+    for (const double fz : no_contact_loads) {
+      points.push_back(grid_point(fz, 0.1, 0.1));
+      points.push_back(grid_point(fz, 0.0, 0.0));
+    }
+    return mf::test::inputs_of(points);
+  }
 } // namespace
 
 class model_contract : public ::testing::TestWithParam<contract_case> {
@@ -301,6 +344,73 @@ TEST_P(model_contract, FindCoordinateSystem_ReferenceInputSizeAnd29Readings) {
   EXPECT_EQ(identification.reference_input.size(), model_->input_length());
   for (Eigen::Index i = 0; i < reference.size(); ++i) {
     EXPECT_EQ(bits(identification.reference_input(i)), bits(reference(i))) << "element " << i;
+  }
+}
+
+TEST_P(model_contract, CharacteristicsLength_EqualsLayoutAndEight) {
+  EXPECT_EQ(static_cast<std::size_t>(model_->characteristics_length()), model_->layout().characteristics.size());
+  EXPECT_EQ(model_->characteristics_length(), 8);
+  EXPECT_EQ(model_->characteristics_length(), mf::mf5x::CHARACTERISTICS_LENGTH);
+}
+
+TEST_P(model_contract, CharacteristicsBatchVsPoint_Grid_Agree) {
+  constexpr Eigen::Index block_rows = mf::detail::BLOCK_ROWS;
+  const std::array<Eigen::Index, 4> row_counts{0, 1, block_rows, (2 * block_rows) + 3};
+  std::vector<Eigen::MatrixXd> grids;
+  grids.reserve(row_counts.size() + 1);
+  for (const Eigen::Index rows : row_counts) {
+    grids.push_back(mf::test::regime_grid(rows));
+  }
+  grids.push_back(characteristics_grid());
+  for (const Eigen::MatrixXd &inputs : grids) {
+    SCOPED_TRACE(std::format("rows {}", inputs.rows()));
+    const Eigen::MatrixXd batch = model_->evaluate_characteristics_batch(inputs);
+    ASSERT_EQ(batch.rows(), inputs.rows());
+    ASSERT_EQ(batch.cols(), model_->characteristics_length());
+    for (Eigen::Index r = 0; r < inputs.rows(); ++r) {
+      const Eigen::VectorXd input = inputs.row(r).transpose();
+      const Eigen::VectorXd expected = model_->evaluate_characteristics(input);
+      ASSERT_EQ(expected.size(), model_->characteristics_length());
+      for (Eigen::Index j = 0; j < expected.size(); ++j) {
+        SCOPED_TRACE(std::format("row {} characteristic {}", r, j));
+        EXPECT_TRUE(characteristic_agree(batch(r, j), expected(j), j));
+      }
+    }
+  }
+}
+
+TEST_P(model_contract, CharacteristicsBatch_ZeroRows_EmptyResult) {
+  const Eigen::MatrixXd batch = model_->evaluate_characteristics_batch(Eigen::MatrixXd(0, model_->input_length()));
+  EXPECT_EQ(batch.rows(), 0);
+  EXPECT_EQ(batch.cols(), model_->characteristics_length());
+}
+
+TEST_P(model_contract, CharacteristicsBatch_FiniteExceptAllowedNaN_OnGrid) {
+  const Eigen::MatrixXd regime = model_->evaluate_characteristics_batch(mf::test::regime_grid(POINT_ROWS));
+  const Eigen::MatrixXd inputs = characteristics_grid();
+  const Eigen::MatrixXd grid = model_->evaluate_characteristics_batch(inputs);
+  for (const Eigen::MatrixXd *const values : {&regime, &grid}) {
+    for (Eigen::Index j = 0; j < values->cols(); ++j) {
+      for (Eigen::Index r = 0; r < values->rows(); ++r) {
+        SCOPED_TRACE(std::format("row {} characteristic {}", r, j));
+        // NaN is allowed only in the two peak channels; the secants are finite at zero slip too.
+        EXPECT_TRUE(std::isfinite((*values)(r, j)) || (is_peak_characteristic(j) && std::isnan((*values)(r, j))));
+      }
+    }
+  }
+  for (Eigen::Index r = 0; r < inputs.rows(); ++r) {
+    if (inputs(r, mf::mf5x::FZ) > 0.0) {
+      continue;
+    }
+    // No contact: the six non-peak channels are exactly +0 (including both secants), the peaks are NaN.
+    SCOPED_TRACE(std::format("no-contact row {}", r));
+    for (Eigen::Index j = 0; j < grid.cols(); ++j) {
+      if (is_peak_characteristic(j)) {
+        EXPECT_TRUE(std::isnan(grid(r, j)));
+      } else {
+        EXPECT_EQ(bits(grid(r, j)), bits(0.0)) << "characteristic " << j;
+      }
+    }
   }
 }
 

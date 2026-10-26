@@ -28,6 +28,12 @@ namespace mf {
     return std::span<const bool>{members}[static_cast<std::size_t>(transform)];
   }
 
+  /// True when `plan` negates a value whose negating transforms are `negators`: an odd number of the transforms in
+  /// `negators` is in `plan` (each one negates the value; VERTICAL and LATERAL together cancel).
+  [[nodiscard]] constexpr bool negates(const sign_transforms &negators, const sign_transforms &plan) noexcept {
+    return (negators.vertical && plan.vertical) != (negators.lateral && plan.lateral);
+  }
+
   /// "NONE", "VERTICAL", "LATERAL".
   [[nodiscard]] constexpr std::string_view sign_transform_name(sign_transform transform) noexcept {
     constexpr std::array<std::string_view, 3> names{"NONE", "VERTICAL", "LATERAL"};

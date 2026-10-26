@@ -12,6 +12,7 @@
 #include <functional>
 #include <gtest/gtest.h>
 #include <initializer_list>
+#include <iterator>
 #include <limits>
 #include <magic_formula/detail/mf5x_kernels.hpp>
 #include <magic_formula/error.hpp>
@@ -28,6 +29,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace {
   namespace kernels = mf::detail;
@@ -863,4 +865,444 @@ TEST(pac2002_model, Evaluate_M10_Pac2002MzZero) {
   const double svyk_n = (1.0 - (1.0 * 0.1 * 0.1)) * FZ_NOMINAL * 0.1 * std::sin(std::numbers::pi / 4.0);
   EXPECT_TRUE(rel_near_result(out.fy_n, svyk_n, 1e-9));
   EXPECT_NEAR(out.mz_nm, 0.0, 1e-12);
+}
+
+// ---- characteristics --------------------------------------------------------------------------------------------
+// Closed-form oracles are plain-double functions of this file; they never call the kernels or the model.
+// Reference numbers: docs/research/test-data.md.
+
+namespace {
+  using char_idx = mf::pac2002_model::characteristic_index;
+
+  // Relative tolerance of the stationary slips (root conditioning) and of the printed reference numbers.
+  constexpr double CHAR_PEAK_TOL = 1e-10;
+  constexpr double CHAR_TABLE_TOL = 1e-10;
+  // Relative tolerance of the printed reference numbers that carry 10 significant digits.
+  constexpr double CHAR_SHORT_TABLE_TOL = 1e-9;
+  // Scales of near_scaled for the batch-versus-point comparison: slopes in N and N/rad, peak slips in rad and 1.
+  constexpr double CHAR_SLOPE_SCALE = 1e4;
+  constexpr double CHAR_PEAK_SCALE = 0.1;
+  constexpr double CHAR_FX_STIFFNESS_N = 80000.0;
+  constexpr double CHAR_NAN = std::numeric_limits<double>::quiet_NaN();
+
+  // D*sin(C*atan(B*x - E*(B*x - atan(B*x)))) of fixture S at Fz 4000 and its derivative in x.
+  struct char_curve {
+    double b;
+    double c;
+    double d;
+    double e;
+  };
+
+  double char_force(const char_curve &k, double x) {
+    const double bx = k.b * x;
+    const double phi = bx - (k.e * (bx - std::atan(bx)));
+    return k.d * std::sin(k.c * std::atan(phi));
+  }
+
+  double char_slope(const char_curve &k, double x) {
+    const double bx = k.b * x;
+    const double phi = bx - (k.e * (bx - std::atan(bx)));
+    const double dphi = k.b - (k.e * (k.b - (k.b / (1.0 + (bx * bx)))));
+    return k.d * k.c * std::cos(k.c * std::atan(phi)) * dphi / (1.0 + (phi * phi));
+  }
+
+  // Ky0 = PKY1*Fz0*sin(2*atan(Fz/(PKY2*Fz0))) of fixture S.
+  double char_ky0() {
+    return -15.0 * FZ_NOMINAL * std::sin(2.0 * std::atan(1.0 / 1.5));
+  }
+
+  // Bx = Kx/(Cx*Dx + eps), By = Ky0/(Cy*Dy + eps).
+  char_curve char_curve_x(double cx = 1.5) {
+    const double bx = CHAR_FX_STIFFNESS_N / ((cx * FZ_NOMINAL) + kernels::EPSILON);
+    return char_curve{.b = bx, .c = cx, .d = FZ_NOMINAL, .e = 0.0};
+  }
+
+  char_curve char_curve_y(double cy = 1.3) {
+    return char_curve{.b = char_ky0() / ((cy * FZ_NOMINAL) + kernels::EPSILON), .c = cy, .d = FZ_NOMINAL, .e = 0.0};
+  }
+
+  // Combined-slip weights of fixture S.
+  double char_gxa(double alpha) {
+    return 1.0 / std::sqrt(1.0 + (100.0 * alpha * alpha));
+  }
+
+  double char_gyk(double kappa) {
+    return 1.0 / std::sqrt(1.0 + (100.0 * kappa * kappa));
+  }
+
+  // The first stationary slips of fixture S: x = sqrt(3)/Bx (C = 1.5, E = 0) and x = tan(pi/(2*Cy))/|By|.
+  double char_sr_peak() {
+    return std::numbers::sqrt3 / char_curve_x().b;
+  }
+
+  double char_sa_peak() {
+    return std::tan(std::numbers::pi / 2.6) / std::abs(char_curve_y().b);
+  }
+
+  // Friction-ellipse reference of fixture S_ell (all shifts 0), Fz-free magnitudes.
+  struct char_ellipse {
+    double fx = 0.0;
+    double fy = 0.0;
+    double dfx = 0.0;
+    double dfy = 0.0;
+  };
+
+  char_ellipse char_ellipse_at(double kappa, double alpha) {
+    const char_curve cx = char_curve_x();
+    const char_curve cy = char_curve_y();
+    const double g = char_force(cx, kappa);
+    const double dg = char_slope(cx, kappa);
+    const double h = char_force(cy, alpha);
+    const double dh = char_slope(cy, alpha);
+    const double mxm = FZ_NOMINAL;
+    const double mym = FZ_NOMINAL;
+    const double a_star = std::sin(alpha);
+    const double sgn_kc = kappa >= 0.0 ? 1.0 : -1.0;
+    const double sgn_a = a_star >= 0.0 ? 1.0 : -1.0;
+    const double rx_root = std::sqrt((kappa * kappa * mym * mym) + (g * g * a_star * a_star));
+    const double ry_root = std::sqrt((kappa * kappa * h * h) + (a_star * a_star * mxm * mxm));
+    const double rx = std::abs(kappa) * mym / rx_root;
+    const double ry = std::abs(a_star) * mxm / ry_root;
+    const double drx = mym * a_star * a_star * ((sgn_kc * g * g) - (std::abs(kappa) * g * dg)) / std::pow(rx_root, 3);
+    const double dry =
+        mxm * kappa * kappa * ((sgn_a * std::cos(alpha) * h * h) - (std::abs(a_star) * h * dh)) / std::pow(ry_root, 3);
+    return char_ellipse{.fx = g * rx, .fy = h * ry, .dfx = (dg * rx) + (g * drx), .dfy = (dh * ry) + (h * dry)};
+  }
+
+  // The characteristics of one point of a model made from `parameters`.
+  Eigen::VectorXd characteristics_of(const parameters_t &parameters, const point_t &point,
+                                     slip_mode mode = slip_mode::COMBINED,
+                                     combined_method method = combined_method::COSINE) {
+    const std::optional<mf::pac2002_model> model = make_model(parameters, mode, method);
+    if (!model.has_value()) {
+      return Eigen::VectorXd::Constant(mf::mf5x::CHARACTERISTICS_LENGTH, CHAR_NAN);
+    }
+    return model->evaluate_characteristics(input_of(point));
+  }
+
+  // The batch characteristics of `points` of a model made from `parameters`.
+  Eigen::MatrixXd characteristics_batch_of(const parameters_t &parameters, const std::vector<point_t> &points,
+                                           slip_mode mode = slip_mode::COMBINED,
+                                           combined_method method = combined_method::COSINE) {
+    const std::optional<mf::pac2002_model> model = make_model(parameters, mode, method);
+    if (!model.has_value()) {
+      return Eigen::MatrixXd::Constant(static_cast<Eigen::Index>(points.size()), mf::mf5x::CHARACTERISTICS_LENGTH,
+                                       CHAR_NAN);
+    }
+    return model->evaluate_characteristics_batch(mf::test::inputs_of(points));
+  }
+
+  void expect_char(const Eigen::VectorXd &values, char_idx which, double expected, double tol, const char *label) {
+    EXPECT_TRUE(rel_near_result(values(which), expected, tol)) << label;
+  }
+
+  // Bit-equality (documented exception to "no EXPECT_EQ on doubles"), for exact zeros and tangent identities.
+  void expect_char_bits(const Eigen::VectorXd &values, char_idx which, double expected, const char *label) {
+    EXPECT_EQ(bits(values(which)), bits(expected)) << label;
+  }
+
+  void expect_char_nan(const Eigen::VectorXd &values, char_idx which, const char *label) {
+    EXPECT_TRUE(std::isnan(values(which))) << label;
+  }
+
+  bool is_peak_slip(Eigen::Index j) {
+    return j == mf::mf5x::SA_AT_PEAK_FY || j == mf::mf5x::SR_AT_PEAK_FX;
+  }
+
+  // A batch value of channel `j` matches the point value (NaN matches NaN).
+  ::testing::AssertionResult batch_value_matches(double actual, double expected, Eigen::Index j) {
+    if (std::isnan(expected)) {
+      if (std::isnan(actual)) {
+        return ::testing::AssertionSuccess();
+      }
+      return ::testing::AssertionFailure() << "actual " << actual << ", expected NaN";
+    }
+    const double scale = is_peak_slip(j) ? CHAR_PEAK_SCALE : CHAR_SLOPE_SCALE;
+    return mf::test::near_scaled(actual, expected, mf::test::BATCH_REL_TOL, scale);
+  }
+
+  // The batch result agrees with the point results row by row (NaN equals NaN).
+  void expect_batch_matches_point(const parameters_t &parameters, const std::vector<point_t> &points, slip_mode mode,
+                                  combined_method method) {
+    const Eigen::MatrixXd batch = characteristics_batch_of(parameters, points, mode, method);
+    ASSERT_EQ(batch.rows(), static_cast<Eigen::Index>(points.size()));
+    ASSERT_EQ(batch.cols(), mf::mf5x::CHARACTERISTICS_LENGTH);
+    for (std::size_t r = 0; r < points.size(); ++r) {
+      const Eigen::VectorXd expected = characteristics_of(parameters, points[r], mode, method);
+      const auto row = static_cast<Eigen::Index>(r);
+      for (Eigen::Index j = 0; j < expected.size(); ++j) {
+        SCOPED_TRACE(std::format("row {} characteristic {}", r, j));
+        EXPECT_TRUE(batch_value_matches(batch(row, j), expected(j), j));
+      }
+    }
+  }
+
+  // The operating points of the characteristics vectors C1-C5, C13.
+  std::vector<point_t> characteristic_points() {
+    std::vector<point_t> points;
+    points.push_back(make_point(FZ_NOMINAL, 0.1, 0.0));
+    points.push_back(make_point(FZ_NOMINAL, 0.0, 0.05));
+    points.push_back(make_point(FZ_NOMINAL, 0.1, 0.1));
+    points.push_back(make_point(FZ_NOMINAL, 0.0, 0.0));
+    points.push_back(make_point(FZ_NOMINAL, 0.0, -0.05));
+    points.push_back(make_point(FZ_NOMINAL, -0.1, 0.0));
+    points.push_back(make_point(0.0, 0.1, 0.05));
+    points.push_back(make_point(-100.0, 0.0, 0.0));
+    return points;
+  }
+
+  // The characteristics rows of `points` of fixture S with the friction ellipse, point form and batch form.
+  std::vector<Eigen::VectorXd> ellipse_point_rows(const std::vector<point_t> &points) {
+    std::vector<Eigen::VectorXd> rows;
+    rows.reserve(points.size());
+    for (const point_t &point : points) {
+      rows.push_back(
+          characteristics_of(mf::test::fixture_s(), point, slip_mode::COMBINED, combined_method::FRICTION_ELLIPSE));
+    }
+    return rows;
+  }
+
+  std::vector<Eigen::VectorXd> ellipse_batch_rows(const std::vector<point_t> &points) {
+    const Eigen::MatrixXd batch =
+        characteristics_batch_of(mf::test::fixture_s(), points, slip_mode::COMBINED, combined_method::FRICTION_ELLIPSE);
+    std::vector<Eigen::VectorXd> rows;
+    rows.reserve(points.size());
+    for (Eigen::Index r = 0; r < batch.rows(); ++r) {
+      rows.emplace_back(batch.row(r).transpose());
+    }
+    return rows;
+  }
+} // namespace
+
+TEST(pac2002_model, EvaluateCharacteristics_CVectors_MatchClosedForms) {
+  const parameters_t fixture = mf::test::fixture_s();
+  const char_curve cx = char_curve_x();
+  const char_curve cy = char_curve_y();
+
+  // C1: pure longitudinal slip; the secant at SA = 0 is the tangent.
+  const Eigen::VectorXd c1 = characteristics_of(fixture, make_point(FZ_NOMINAL, 0.1, 0.0));
+  expect_char(c1, mf::mf5x::DFX_DSR, char_slope(cx, 0.1) * char_gxa(0.0), REL_TOL_CLOSED_FORM, "C1 dfx_dsr");
+  expect_char(c1, mf::mf5x::FX_OVER_SR, char_force(cx, 0.1) / 0.1, REL_TOL_CLOSED_FORM, "C1 fx_over_sr");
+  expect_char(c1, mf::mf5x::DFY_DSA, char_slope(cy, 0.0) * char_gyk(0.1), REL_TOL_CLOSED_FORM, "C1 dfy_dsa");
+  expect_char_bits(c1, mf::mf5x::FY_OVER_SA, c1(mf::mf5x::DFY_DSA), "C1 secant at SA 0 is the tangent");
+  expect_char(c1, mf::mf5x::DFY_DSA, 5200.0 * cy.b / std::numbers::sqrt2, REL_TOL_CLOSED_FORM, "C1 5200*By/sqrt(2)");
+  expect_char(c1, mf::mf5x::DFY_DSA, -39162.83710434, CHAR_TABLE_TOL, "C1 table dfy_dsa");
+  expect_char(c1, mf::mf5x::DFX_DSR, 5151.900623800, CHAR_TABLE_TOL, "C1 table dfx_dsr");
+  expect_char(c1, mf::mf5x::FX_OVER_SR, 39354.79640314, CHAR_TABLE_TOL, "C1 table fx_over_sr");
+  expect_char(c1, mf::mf5x::SR_AT_PEAK_FX, char_sr_peak(), CHAR_PEAK_TOL, "C1 sr_peak");
+  expect_char(c1, mf::mf5x::SA_AT_PEAK_FY, char_sa_peak(), CHAR_PEAK_TOL, "C1 sa_peak");
+  expect_char(c1, mf::mf5x::DY, FZ_NOMINAL, REL_TOL_CLOSED_FORM, "C1 dy");
+  expect_char(c1, mf::mf5x::DX, FZ_NOMINAL, REL_TOL_CLOSED_FORM, "C1 dx");
+
+  // C2: pure lateral slip; the secant at SR = 0 is the tangent.
+  const Eigen::VectorXd c2 = characteristics_of(fixture, make_point(FZ_NOMINAL, 0.0, 0.05));
+  expect_char(c2, mf::mf5x::DFY_DSA, char_slope(cy, 0.05) * char_gyk(0.0), REL_TOL_CLOSED_FORM, "C2 dfy_dsa");
+  expect_char(c2, mf::mf5x::FY_OVER_SA, char_force(cy, 0.05) / 0.05, REL_TOL_CLOSED_FORM, "C2 fy_over_sa");
+  expect_char(c2, mf::mf5x::DFX_DSR, char_slope(cx, 0.0) * char_gxa(0.05), REL_TOL_CLOSED_FORM, "C2 dfx_dsr");
+  expect_char_bits(c2, mf::mf5x::FX_OVER_SR, c2(mf::mf5x::DFX_DSR), "C2 secant at SR 0 is the tangent");
+  expect_char(c2, mf::mf5x::DFX_DSR, 6000.0 * cx.b / std::sqrt(1.25), REL_TOL_CLOSED_FORM, "C2 6000*Bx/sqrt(1.25)");
+  expect_char(c2, mf::mf5x::DFX_DSR, 71554.17526807, CHAR_TABLE_TOL, "C2 table dfx_dsr");
+  expect_char(c2, mf::mf5x::DFY_DSA, -34707.69217580, CHAR_TABLE_TOL, "C2 table dfy_dsa");
+  expect_char(c2, mf::mf5x::FY_OVER_SA, -47527.96304983, CHAR_TABLE_TOL, "C2 table fy_over_sa");
+  expect_char(c2, mf::mf5x::SA_AT_PEAK_FY, char_sa_peak(), CHAR_PEAK_TOL, "C2 sa_peak");
+  expect_char(c2, mf::mf5x::SR_AT_PEAK_FX, char_sr_peak(), CHAR_PEAK_TOL, "C2 sr_peak");
+
+  // C3: combined slip, weighted slopes and the same peaks.
+  const Eigen::VectorXd c3 = characteristics_of(fixture, make_point(FZ_NOMINAL, 0.1, 0.1));
+  expect_char(c3, mf::mf5x::DFX_DSR, char_slope(cx, 0.1) / std::numbers::sqrt2, REL_TOL_CLOSED_FORM, "C3 dfx_dsr");
+  expect_char(c3, mf::mf5x::DFY_DSA, char_slope(cy, 0.1) / std::numbers::sqrt2, REL_TOL_CLOSED_FORM, "C3 dfy_dsa");
+  expect_char(c3, mf::mf5x::FX_OVER_SR, char_force(cx, 0.1) / std::numbers::sqrt2 / 0.1, REL_TOL_CLOSED_FORM,
+              "C3 fx_over_sr");
+  expect_char(c3, mf::mf5x::FY_OVER_SA, char_force(cy, 0.1) / std::numbers::sqrt2 / 0.1, REL_TOL_CLOSED_FORM,
+              "C3 fy_over_sa");
+  expect_char(c3, mf::mf5x::DFX_DSR, 3642.943867088, CHAR_TABLE_TOL, "C3 table dfx_dsr");
+  expect_char(c3, mf::mf5x::DFY_DSA, -8938.282121032, CHAR_TABLE_TOL, "C3 table dfy_dsa");
+  expect_char(c3, mf::mf5x::SR_AT_PEAK_FX, char_sr_peak(), CHAR_PEAK_TOL, "C3 sr_peak");
+  expect_char(c3, mf::mf5x::SA_AT_PEAK_FY, char_sa_peak(), CHAR_PEAK_TOL, "C3 sa_peak");
+
+  // C4: zero slips; both secants are the tangents of the row.
+  const Eigen::VectorXd c4 = characteristics_of(fixture, make_point(FZ_NOMINAL, 0.0, 0.0));
+  expect_char(c4, mf::mf5x::DFX_DSR, 6000.0 * cx.b, REL_TOL_CLOSED_FORM, "C4 dfx_dsr");
+  expect_char(c4, mf::mf5x::DFY_DSA, 5200.0 * cy.b, REL_TOL_CLOSED_FORM, "C4 dfy_dsa");
+  expect_char_bits(c4, mf::mf5x::FX_OVER_SR, c4(mf::mf5x::DFX_DSR), "C4 fx_over_sr");
+  expect_char_bits(c4, mf::mf5x::FY_OVER_SA, c4(mf::mf5x::DFY_DSA), "C4 fy_over_sa");
+  expect_char(c4, mf::mf5x::DFX_DSR, 79999.99998667, CHAR_TABLE_TOL, "C4 table dfx_dsr");
+  expect_char(c4, mf::mf5x::DFY_DSA, -55384.61537396, CHAR_TABLE_TOL, "C4 table dfy_dsa");
+  expect_char(c4, mf::mf5x::SA_AT_PEAK_FY, char_sa_peak(), CHAR_PEAK_TOL, "C4 sa_peak");
+  expect_char(c4, mf::mf5x::SR_AT_PEAK_FX, char_sr_peak(), CHAR_PEAK_TOL, "C4 sr_peak");
+
+  // C5 and C13: negative slips mirror the peaks; the slopes and secants are even.
+  const Eigen::VectorXd c5 = characteristics_of(fixture, make_point(FZ_NOMINAL, 0.0, -0.05));
+  expect_char(c5, mf::mf5x::SA_AT_PEAK_FY, -char_sa_peak(), CHAR_PEAK_TOL, "C5 sa_peak");
+  expect_char(c5, mf::mf5x::DFY_DSA, char_slope(cy, 0.05), REL_TOL_CLOSED_FORM, "C5 dfy_dsa");
+  expect_char(c5, mf::mf5x::FY_OVER_SA, char_force(cy, 0.05) / 0.05, REL_TOL_CLOSED_FORM, "C5 fy_over_sa");
+  expect_char(c5, mf::mf5x::SR_AT_PEAK_FX, char_sr_peak(), CHAR_PEAK_TOL, "C5 sr_peak");
+  const Eigen::VectorXd c13 = characteristics_of(fixture, make_point(FZ_NOMINAL, -0.1, 0.0));
+  expect_char(c13, mf::mf5x::SR_AT_PEAK_FX, -char_sr_peak(), CHAR_PEAK_TOL, "C13 sr_peak");
+  expect_char(c13, mf::mf5x::DFX_DSR, char_slope(cx, 0.1), REL_TOL_CLOSED_FORM, "C13 dfx_dsr");
+  expect_char(c13, mf::mf5x::FX_OVER_SR, char_force(cx, 0.1) / 0.1, REL_TOL_CLOSED_FORM, "C13 fx_over_sr");
+  expect_char_bits(c13, mf::mf5x::FY_OVER_SA, c13(mf::mf5x::DFY_DSA), "C13 fy_over_sa");
+
+  // C7: SA = 2 rad is clamped to ALPMAX = 1.5: zero slope, the secant is the clamped force over the raw slip.
+  const parameters_t ranged = mf::test::fixture_s_rng();
+  const Eigen::VectorXd c7 = characteristics_of(ranged, make_point(FZ_NOMINAL, 0.0, 2.0));
+  expect_char_bits(c7, mf::mf5x::DFY_DSA, 0.0, "C7 dfy_dsa");
+  expect_char(c7, mf::mf5x::FY_OVER_SA, char_force(cy, 1.5) / 2.0, REL_TOL_CLOSED_FORM, "C7 fy_over_sa");
+  expect_char(c7, mf::mf5x::FY_OVER_SA, -1849.837475483, CHAR_TABLE_TOL, "C7 table fy_over_sa");
+  expect_char(c7, mf::mf5x::DFX_DSR, 6000.0 * cx.b / std::sqrt(226.0), REL_TOL_CLOSED_FORM, "C7 dfx_dsr");
+  expect_char_bits(c7, mf::mf5x::FX_OVER_SR, c7(mf::mf5x::DFX_DSR), "C7 fx_over_sr");
+  expect_char(c7, mf::mf5x::DFX_DSR, 5321.520841015, CHAR_TABLE_TOL, "C7 table dfx_dsr");
+  expect_char(c7, mf::mf5x::SA_AT_PEAK_FY, char_sa_peak(), CHAR_PEAK_TOL, "C7 sa_peak");
+  expect_char(c7, mf::mf5x::SR_AT_PEAK_FX, char_sr_peak(), CHAR_PEAK_TOL, "C7 sr_peak");
+
+  // C8: no contact (Fz 0 and -100, and a range that clamps Fz to 0): exact zeros in the six channels, NaN peaks.
+  parameters_t unloaded = mf::test::fixture_s_rng();
+  unloaded.limits(mf::mf5x::FZMIN) = -1000.0;
+  unloaded.limits(mf::mf5x::FZMAX) = 0.0;
+  const std::array<Eigen::VectorXd, 6> no_contact{
+      characteristics_of(fixture, make_point(0.0, 0.1, 0.05)),
+      characteristics_of(fixture, make_point(0.0, 0.0, 0.0)),
+      characteristics_of(fixture, make_point(-100.0, 0.1, 0.05)),
+      characteristics_of(fixture, make_point(-100.0, 0.0, 0.0)),
+      characteristics_of(unloaded, make_point(100.0, 0.1, 0.05)),
+      characteristics_of(unloaded, make_point(100.0, 0.0, 0.0)),
+  };
+  for (const Eigen::VectorXd &row : no_contact) {
+    expect_char_bits(row, mf::mf5x::DFY_DSA, 0.0, "C8 dfy_dsa");
+    expect_char_bits(row, mf::mf5x::DFX_DSR, 0.0, "C8 dfx_dsr");
+    expect_char_bits(row, mf::mf5x::FY_OVER_SA, 0.0, "C8 fy_over_sa");
+    expect_char_bits(row, mf::mf5x::FX_OVER_SR, 0.0, "C8 fx_over_sr");
+    expect_char_bits(row, mf::mf5x::DY, 0.0, "C8 dy");
+    expect_char_bits(row, mf::mf5x::DX, 0.0, "C8 dx");
+    expect_char_nan(row, mf::mf5x::SA_AT_PEAK_FY, "C8 sa_peak");
+    expect_char_nan(row, mf::mf5x::SR_AT_PEAK_FX, "C8 sr_peak");
+  }
+
+  // C12: the peak lies beyond ALPMAX = 0.1, so the slip-angle peak is NaN and everything else is unchanged.
+  parameters_t short_range = mf::test::fixture_s_rng();
+  short_range.limits(mf::mf5x::ALPMAX) = 0.1;
+  const Eigen::VectorXd c12 = characteristics_of(short_range, make_point(FZ_NOMINAL, 0.0, 0.05));
+  expect_char_nan(c12, mf::mf5x::SA_AT_PEAK_FY, "C12 sa_peak");
+  expect_char(c12, mf::mf5x::SR_AT_PEAK_FX, char_sr_peak(), CHAR_PEAK_TOL, "C12 sr_peak");
+  expect_char(c12, mf::mf5x::DFY_DSA, char_slope(cy, 0.05), REL_TOL_CLOSED_FORM, "C12 dfy_dsa");
+}
+
+TEST(pac2002_model, EvaluateCharacteristicsBatch_CVectors_EqualPoint) {
+  const std::vector<point_t> points = characteristic_points();
+  expect_batch_matches_point(mf::test::fixture_s(), points, slip_mode::COMBINED, combined_method::COSINE);
+  expect_batch_matches_point(mf::test::fixture_s(), points, slip_mode::UNCOMBINED, combined_method::COSINE);
+  expect_batch_matches_point(mf::test::fixture_s(), points, slip_mode::COMBINED, combined_method::FRICTION_ELLIPSE);
+  const std::vector<point_t> clamped_points{
+      make_point(FZ_NOMINAL, 0.0, 2.0),
+      make_point(FZ_NOMINAL, 5.0, 0.0),
+  };
+  expect_batch_matches_point(mf::test::fixture_s_rng(), clamped_points, slip_mode::COMBINED, combined_method::COSINE);
+}
+
+TEST(pac2002_model, EvaluateCharacteristics_Ellipse_C10ClosedForms) {
+  struct ellipse_row {
+    double kappa;
+    double alpha;
+    double sr_peak;
+    double sa_peak;
+  };
+  const std::array<ellipse_row, 2> rows{
+      ellipse_row{.kappa = 0.1, .alpha = 0.05, .sr_peak = 0.1675533315318, .sa_peak = 0.4281129082399},
+      ellipse_row{.kappa = 0.05, .alpha = 0.1, .sr_peak = 0.2445156130364, .sa_peak = 0.2983217748151},
+  };
+  for (const ellipse_row &row : rows) {
+    const Eigen::VectorXd r = characteristics_of(mf::test::fixture_s(), make_point(FZ_NOMINAL, row.kappa, row.alpha),
+                                                 slip_mode::COMBINED, combined_method::FRICTION_ELLIPSE);
+    const char_ellipse e = char_ellipse_at(row.kappa, row.alpha);
+    expect_char(r, mf::mf5x::DFX_DSR, e.dfx, REL_TOL_CLOSED_FORM, "dfx_dsr");
+    expect_char(r, mf::mf5x::DFY_DSA, e.dfy, REL_TOL_CLOSED_FORM, "dfy_dsa");
+    expect_char(r, mf::mf5x::FX_OVER_SR, e.fx / row.kappa, REL_TOL_CLOSED_FORM, "fx_over_sr");
+    expect_char(r, mf::mf5x::FY_OVER_SA, e.fy / row.alpha, REL_TOL_CLOSED_FORM, "fy_over_sa");
+    expect_char(r, mf::mf5x::SR_AT_PEAK_FX, row.sr_peak, CHAR_PEAK_TOL, "table sr_peak");
+    expect_char(r, mf::mf5x::SA_AT_PEAK_FY, row.sa_peak, CHAR_PEAK_TOL, "table sa_peak");
+    expect_char(r, mf::mf5x::DY, FZ_NOMINAL, REL_TOL_CLOSED_FORM, "dy");
+    expect_char(r, mf::mf5x::DX, FZ_NOMINAL, REL_TOL_CLOSED_FORM, "dx");
+  }
+  const Eigen::VectorXd first = characteristics_of(mf::test::fixture_s(), make_point(FZ_NOMINAL, 0.1, 0.05),
+                                                   slip_mode::COMBINED, combined_method::FRICTION_ELLIPSE);
+  expect_char(first, mf::mf5x::DFX_DSR, 10599.59198473, CHAR_TABLE_TOL, "table dfx_dsr");
+  expect_char(first, mf::mf5x::DFY_DSA, -27161.23002030, CHAR_TABLE_TOL, "table dfy_dsa");
+}
+
+TEST(pac2002_model, EvaluateCharacteristics_Ellipse_ZeroSlipRowsUseDirectionalLimit) {
+  const char_curve cx = char_curve_x();
+  const char_curve cy = char_curve_y();
+  const std::vector<point_t> points{
+      make_point(FZ_NOMINAL, 0.0, 0.05),
+      make_point(FZ_NOMINAL, 0.1, 0.0),
+      make_point(FZ_NOMINAL, 0.0, 0.0),
+  };
+
+  const auto expect_rows = [&](const std::vector<Eigen::VectorXd> &rows, const char *which) {
+    SCOPED_TRACE(which);
+    ASSERT_EQ(rows.size(), 3U);
+    // C14: kappa = 0, alpha = 0.05; the limit of rx along the kappa seed, ry identically 1.
+    const double slope_x0 = char_slope(cx, 0.0);
+    const double sin_alpha = std::sin(0.05);
+    const double slope_sin = slope_x0 * sin_alpha;
+    const double rx_limit = FZ_NOMINAL / std::sqrt((FZ_NOMINAL * FZ_NOMINAL) + (slope_sin * slope_sin));
+    expect_char(rows[0], mf::mf5x::DFX_DSR, slope_x0 * rx_limit, REL_TOL_CLOSED_FORM, "C14 dfx_dsr");
+    expect_char_bits(rows[0], mf::mf5x::FX_OVER_SR, rows[0](mf::mf5x::DFX_DSR), "C14 fx_over_sr is the tangent");
+    expect_char(rows[0], mf::mf5x::DFX_DSR, 56580.32736, CHAR_SHORT_TABLE_TOL, "C14 table dfx_dsr");
+    expect_char(rows[0], mf::mf5x::DFY_DSA, char_slope(cy, 0.05), REL_TOL_CLOSED_FORM, "C14 dfy_dsa");
+    expect_char(rows[0], mf::mf5x::FY_OVER_SA, char_force(cy, 0.05) / 0.05, REL_TOL_CLOSED_FORM, "C14 fy_over_sa");
+    // C15: kappa = 0.1, alpha = 0; the limit of ry along the alpha seed, rx identically 1.
+    const double slope_y0 = char_slope(cy, 0.0);
+    const double ry_limit = FZ_NOMINAL / std::sqrt((FZ_NOMINAL * FZ_NOMINAL) + (0.1 * slope_y0 * 0.1 * slope_y0));
+    expect_char(rows[1], mf::mf5x::DFY_DSA, slope_y0 * ry_limit, REL_TOL_CLOSED_FORM, "C15 dfy_dsa");
+    expect_char_bits(rows[1], mf::mf5x::FY_OVER_SA, rows[1](mf::mf5x::DFY_DSA), "C15 fy_over_sa is the tangent");
+    expect_char(rows[1], mf::mf5x::DFY_DSA, -32427.16913, CHAR_SHORT_TABLE_TOL, "C15 table dfy_dsa");
+    expect_char(rows[1], mf::mf5x::DFX_DSR, char_slope(cx, 0.1), REL_TOL_CLOSED_FORM, "C15 dfx_dsr");
+    expect_char(rows[1], mf::mf5x::FX_OVER_SR, char_force(cx, 0.1) / 0.1, REL_TOL_CLOSED_FORM, "C15 fx_over_sr");
+    // (0, 0): both ratios are 0/0 and the slopes are the pure slopes.
+    expect_char(rows[2], mf::mf5x::DFX_DSR, 6000.0 * cx.b, REL_TOL_CLOSED_FORM, "origin dfx_dsr");
+    expect_char(rows[2], mf::mf5x::DFY_DSA, 5200.0 * cy.b, REL_TOL_CLOSED_FORM, "origin dfy_dsa");
+    expect_char_bits(rows[2], mf::mf5x::FX_OVER_SR, rows[2](mf::mf5x::DFX_DSR), "origin fx_over_sr");
+    expect_char_bits(rows[2], mf::mf5x::FY_OVER_SA, rows[2](mf::mf5x::DFY_DSA), "origin fy_over_sa");
+  };
+
+  expect_rows(ellipse_point_rows(points), "point");
+  expect_rows(ellipse_batch_rows(points), "batch");
+}
+
+TEST(pac2002_model, EvaluateCharacteristics_Uncombined_PureCurves) {
+  const Eigen::VectorXd r = characteristics_of(mf::test::fixture_s(), make_point(FZ_NOMINAL, 0.1, 0.1),
+                                               slip_mode::UNCOMBINED, combined_method::COSINE);
+  const char_curve cx = char_curve_x();
+  const char_curve cy = char_curve_y();
+  expect_char(r, mf::mf5x::DFX_DSR, char_slope(cx, 0.1), REL_TOL_CLOSED_FORM, "dfx_dsr");
+  expect_char(r, mf::mf5x::DFY_DSA, char_slope(cy, 0.1), REL_TOL_CLOSED_FORM, "dfy_dsa");
+  expect_char(r, mf::mf5x::FX_OVER_SR, char_force(cx, 0.1) / 0.1, REL_TOL_CLOSED_FORM, "fx_over_sr");
+  expect_char(r, mf::mf5x::FY_OVER_SA, char_force(cy, 0.1) / 0.1, REL_TOL_CLOSED_FORM, "fy_over_sa");
+  expect_char(r, mf::mf5x::SR_AT_PEAK_FX, char_sr_peak(), CHAR_PEAK_TOL, "sr_peak");
+  expect_char(r, mf::mf5x::SA_AT_PEAK_FY, char_sa_peak(), CHAR_PEAK_TOL, "sa_peak");
+
+  const Eigen::VectorXd origin = characteristics_of(mf::test::fixture_s(), make_point(FZ_NOMINAL, 0.0, 0.0),
+                                                    slip_mode::UNCOMBINED, combined_method::COSINE);
+  expect_char_bits(origin, mf::mf5x::FY_OVER_SA, origin(mf::mf5x::DFY_DSA), "origin fy_over_sa");
+  expect_char_bits(origin, mf::mf5x::FX_OVER_SR, origin(mf::mf5x::DFX_DSR), "origin fx_over_sr");
+}
+
+TEST(pac2002_model, EvaluateCharacteristics_CombinedAtZeroKappa_EqualsUncombined) {
+  const point_t point = make_point(FZ_NOMINAL, 0.0, 0.05);
+  const Eigen::VectorXd combined = characteristics_of(mf::test::fixture_s(), point, slip_mode::COMBINED);
+  const Eigen::VectorXd pure = characteristics_of(mf::test::fixture_s(), point, slip_mode::UNCOMBINED);
+  expect_char(combined, mf::mf5x::DFY_DSA, pure(mf::mf5x::DFY_DSA), REL_TOL_CLOSED_FORM, "dfy_dsa");
+  expect_char(combined, mf::mf5x::SA_AT_PEAK_FY, pure(mf::mf5x::SA_AT_PEAK_FY), CHAR_PEAK_TOL, "sa_peak");
+}
+
+TEST(pac2002_model, EvaluateCharacteristics_PartialBlock70Rows_EqualPoint) {
+  constexpr Eigen::Index rows = (2 * kernels::BLOCK_ROWS) + 6;
+  std::vector<point_t> points;
+  for (Eigen::Index r = 0; r < rows; ++r) {
+    const auto position = static_cast<std::ptrdiff_t>(static_cast<std::size_t>(r) % mf::test::REGIME_POINTS.size());
+    points.push_back(*std::next(mf::test::REGIME_POINTS.begin(), position));
+  }
+  expect_batch_matches_point(mf::test::fixture_s(), points, slip_mode::COMBINED, combined_method::COSINE);
+  expect_batch_matches_point(mf::test::fixture_s(), points, slip_mode::COMBINED, combined_method::FRICTION_ELLIPSE);
 }

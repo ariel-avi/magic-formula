@@ -132,8 +132,8 @@ namespace {
 
   /// A reading of a row of the default table at `load_scale` x 4000 N.
   mf::indicator_reading table_reading(std::size_t table_index, double load_scale, double value) {
-    return mf::make_reading(mf::IDENTIFICATION_INDICATORS[table_index], load_scale, load_scale * 4000.0, value, false,
-                            false);
+    const mf::indicator_definition &definition = mf::IDENTIFICATION_INDICATORS.at(table_index);
+    return mf::make_reading(definition, load_scale, load_scale * 4000.0, value, false, false);
   }
 
   mf::axis_decision decided(axis_sign sign, double positive, double negative, double confidence) {
@@ -375,6 +375,16 @@ namespace {
       for (Eigen::Index r = 0; r < inputs.rows(); ++r) {
         outputs(r, 0) = stiffness_ * inputs(r, sa_column());
       }
+    }
+
+    void compute_characteristics(const Eigen::Ref<const Eigen::VectorXd> & /*input*/,
+                                 Eigen::Ref<Eigen::VectorXd> characteristics) const noexcept override {
+      characteristics.setZero();
+    }
+
+    void compute_characteristics_batch(const Eigen::Ref<const Eigen::MatrixXd> & /*inputs*/,
+                                       Eigen::Ref<Eigen::MatrixXd> characteristics) const noexcept override {
+      characteristics.setZero();
     }
 
     double stiffness_;

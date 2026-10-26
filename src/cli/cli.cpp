@@ -73,11 +73,18 @@ Input table (plain text, one operating point per row):
   - Every data row has exactly as many numbers as the header has columns.
 
 Output (stdout):
-  FZ[N],SA[rad],SR[-],IA[rad],VX[m/s],FX[N],FY[N],MZ[N*m],MX[N*m],MY[N*m],FZ_CLAMPED[-],SR_CLAMPED[-],SA_CLAMPED[-],IA_CLAMPED[-],BELOW_VXLOW[-]
+  FZ[N],SA[rad],SR[-],IA[rad],VX[m/s],FX[N],FY[N],MZ[N*m],MX[N*m],MY[N*m],FZ_CLAMPED[-],SR_CLAMPED[-],SA_CLAMPED[-],IA_CLAMPED[-],BELOW_VXLOW[-],DFY_DSA[N/rad],DFX_DSR[N],FY_OVER_SA[N/rad],FX_OVER_SR[N],DY[N],DX[N],SA_AT_PEAK_FY[rad],SR_AT_PEAK_FX[-]
   followed by one line per input row, in input order. The inputs are echoed unclamped in SI units
   (angles in rad), followed by the five outputs, then five flags (1 = FZ/SR/SA/IA was clamped to the
-  property-file range or VX is below VXLOW, 0 otherwise). The inputs and outputs are printed in the table system
-  (--table-system). Nothing is written to stdout when an error occurs.
+  property-file range or VX is below VXLOW, 0 otherwise), then eight tire characteristics. The inputs, outputs and
+  characteristics are printed in the table system (--table-system). Nothing is written to stdout when an error occurs.
+  The last eight columns are tire characteristics at each row: DFY_DSA = dFY/dSA and DFX_DSR = dFX/dSR, the
+  analytic slopes of the evaluated forces (0 where the slip was clamped to its range or the row has no contact);
+  FY_OVER_SA = FY/SA and FX_OVER_SR = FX/SR, the secant stiffnesses (at SA = 0 or SR = 0 the slope DFY_DSA or
+  DFX_DSR of that row; 0 for a row without contact); DY and DX, the pure-slip peak factors mu_y*Fz and mu_x*Fz;
+  SA_AT_PEAK_FY and SR_AT_PEAK_FX, the first stationary point of FY(SA) and FX(SR) from 0 on the side of the row's
+  slip (nan when there is none in the search range or the row has no contact). nan appears only in these last two
+  columns and is a value, not an error.
   Warnings (load side, coordinate system, clamped inputs, low speed, ignored column) go to stderr.
 
 Exit status:
@@ -365,15 +372,17 @@ Exit status:
       const coordinate_system table = parsed.table_system.value_or(side);
       Eigen::MatrixXd values = inputs->values;
       convert_inputs(evaluated.layout(), table, side, values);
-      std::expected<Eigen::MatrixXd, batch_error> outputs = checked_evaluate_batch(evaluated, values);
-      if (!outputs.has_value()) {
+      std::expected<checked_batch, batch_error> results =
+          checked_evaluate_batch_with_characteristics(evaluated, values);
+      if (!results.has_value()) {
         // The failure is located in the input table: file and 1-based line of the failing row (the key is kept).
-        batch_error &failure = outputs.error();
+        batch_error &failure = results.error();
         failure.cause.where.file = parsed.inputs_path;
         failure.cause.where.line = inputs->lines[failure.index];
         return fail(err, failure.cause);
       }
-      convert_outputs(evaluated.layout(), side, table, *outputs);
+      convert_outputs(evaluated.layout(), side, table, results->outputs);
+      convert_characteristics(evaluated.layout(), side, table, results->characteristics);
       const diagnostics_input state{.loaded = &*loaded,
                                     .evaluated = &evaluated,
                                     .source_id = &source_id,
@@ -381,8 +390,8 @@ Exit status:
                                     .conversion = &conversion,
                                     .table = table,
                                     .side = side};
-      print_diagnostics(err, parsed, state, *inputs, *outputs);
-      io::write_results(out, evaluated.layout(), inputs->values, *outputs);
+      print_diagnostics(err, parsed, state, *inputs, results->outputs);
+      io::write_results(out, evaluated.layout(), inputs->values, results->outputs, results->characteristics);
       out.flush();
       if (out.fail()) {
         err << "mf: error: cannot write results\n";

@@ -37,7 +37,7 @@ namespace {
   using mf::test::random_profile;
 
   /// The map is exact up to libm and SIMD differences between the two evaluations.
-  constexpr double transform_rel_tol = 1e-12;
+  constexpr double TRANSFORM_REL_TOL = 1e-12;
 
   constexpr std::uint64_t FIRST_SEED = 1000;
   constexpr std::uint64_t SET_COUNT = 50;
@@ -198,7 +198,7 @@ namespace {
     double moment_nm = 0.0;
   };
 
-  /// Forces and moments within `transform_rel_tol` of `expected`, clamp and speed flags exactly equal.
+  /// Forces and moments within `TRANSFORM_REL_TOL` of `expected`, clamp and speed flags exactly equal.
   void expect_outputs_match(const Eigen::MatrixXd &actual, const Eigen::MatrixXd &expected, const scales &scale,
                             Eigen::Index first_point = 0) {
     ASSERT_EQ(actual.rows(), expected.rows());
@@ -211,7 +211,7 @@ namespace {
         if (is_flag) {
           ASSERT_TRUE(actual(r, c) == expected(r, c)) << "flag column " << c << " point " << (first_point + r);
         } else {
-          ASSERT_TRUE(mf::test::near_scaled(actual(r, c), expected(r, c), transform_rel_tol, column_scale))
+          ASSERT_TRUE(mf::test::near_scaled(actual(r, c), expected(r, c), TRANSFORM_REL_TOL, column_scale))
               << "column " << c << " point " << (first_point + r);
         }
       }
@@ -426,6 +426,164 @@ TEST(coordinate_conversion, Transformed_EmptyPlan_OutputsBitIdentical) {
           EXPECT_TRUE(mf::test::coefficients_bitwise_equal(copied->coefficients(), original->coefficients()));
           EXPECT_TRUE(mf::test::limits_bitwise_equal(copy->limits(), model->limits()));
         }
+      }
+    }
+  }
+}
+
+namespace {
+  using char_idx = mf::mf5x::characteristic_index;
+
+  /// The relative tolerance of the two peak-slip characteristics (root conditioning of the stationary point).
+  constexpr double PEAK_REL_TOL = 1e-10;
+
+  constexpr std::array<variant, 3> CHARACTERISTIC_VARIANTS{variant::PAC_COSINE, variant::PAC_ELLIPSE, variant::MF52};
+
+  /// Fixture S for the PAC2002 variants (no shifts, Ky != 0, so no ellipse kink and no Ky = 0 degeneracy), S52 for
+  /// MF 5.2.
+  mf::mf5x_parameters characteristic_parameters(variant v) {
+    return v == variant::MF52 ? mf::test::fixture_s52() : mf::test::fixture_s();
+  }
+
+  bool is_peak_channel(Eigen::Index j) {
+    return j == char_idx::SA_AT_PEAK_FY || j == char_idx::SR_AT_PEAK_FX;
+  }
+
+  /// Deterministic rows (the S_ell zero-slip rows (0, +-0.05) and (+-0.1, 0) among them, signed zeros, no contact)
+  /// followed by random operating points.
+  Eigen::MatrixXd characteristic_inputs() {
+    const std::vector<mf::test::point> fixed{
+        {.fz_n = 4000.0, .kappa = 0.0, .alpha_rad = 0.05, .gamma_rad = 0.0, .vx_mps = 16.6},
+        {.fz_n = 4000.0, .kappa = 0.0, .alpha_rad = -0.05, .gamma_rad = 0.0, .vx_mps = 16.6},
+        {.fz_n = 4000.0, .kappa = 0.1, .alpha_rad = 0.0, .gamma_rad = 0.0, .vx_mps = 16.6},
+        {.fz_n = 4000.0, .kappa = -0.1, .alpha_rad = 0.0, .gamma_rad = 0.0, .vx_mps = 16.6},
+        {.fz_n = 4000.0, .kappa = 0.1, .alpha_rad = -0.0, .gamma_rad = 0.0, .vx_mps = 16.6},
+        {.fz_n = 4000.0, .kappa = -0.0, .alpha_rad = 0.05, .gamma_rad = 0.0, .vx_mps = 16.6},
+        {.fz_n = 4000.0, .kappa = 0.0, .alpha_rad = 0.0, .gamma_rad = 0.0, .vx_mps = 16.6},
+        {.fz_n = 4000.0, .kappa = 0.1, .alpha_rad = 0.1, .gamma_rad = 0.03, .vx_mps = 16.6},
+        {.fz_n = 3000.0, .kappa = -0.05, .alpha_rad = 0.08, .gamma_rad = -0.02, .vx_mps = 10.0},
+        {.fz_n = 0.0, .kappa = 0.1, .alpha_rad = 0.05, .gamma_rad = 0.0, .vx_mps = 16.6},
+    };
+    const Eigen::MatrixXd deterministic = mf::test::inputs_of(fixed);
+    const Eigen::MatrixXd random = mf::test::random_operating_points(11, 120, 1.0);
+    Eigen::MatrixXd all(deterministic.rows() + random.rows(), mf::mf5x::INPUT_LENGTH);
+    all.topRows(deterministic.rows()) = deterministic;
+    all.bottomRows(random.rows()) = random;
+    return all;
+  }
+
+  /// NaN equals NaN whatever its sign, otherwise bit-equal.
+  bool same_characteristic(double a, double b) {
+    if (std::isnan(a) || std::isnan(b)) {
+      return std::isnan(a) && std::isnan(b);
+    }
+    return bits(a) == bits(b);
+  }
+
+  /// `actual` against `expected` (the original characteristics mapped by `plan`). The six non-peak channels use
+  /// `TRANSFORM_REL_TOL`, the two peak slips PEAK_REL_TOL; NaN equals NaN whatever its sign. Under a plan with LATERAL
+  /// the slip-angle peak is not compared on SA = +-0 rows: the search side is the sign of the row's slip, which the
+  /// transform does not mirror for a zero.
+  ::testing::AssertionResult characteristic_matches(double a, double e, bool peak, double force_scale_n) {
+    if (!peak) {
+      return mf::test::near_scaled(a, e, TRANSFORM_REL_TOL, force_scale_n);
+    }
+    if (std::isnan(a) || std::isnan(e)) {
+      if (std::isnan(a) && std::isnan(e)) {
+        return ::testing::AssertionSuccess();
+      }
+      return ::testing::AssertionFailure() << "actual " << a << ", expected " << e;
+    }
+    return mf::test::rel_near_result(a, e, PEAK_REL_TOL);
+  }
+
+  /// True when the comparison of channel `j` on a row with slip angle `slip_angle_rad` is skipped under `plan`.
+  bool characteristic_skipped(Eigen::Index j, const sign_transforms &plan, double slip_angle_rad) {
+    return plan.lateral && j == char_idx::SA_AT_PEAK_FY && slip_angle_rad == 0.0;
+  }
+
+  void expect_characteristics_match(const Eigen::MatrixXd &actual, const Eigen::MatrixXd &expected,
+                                    const Eigen::MatrixXd &original_inputs, const sign_transforms &plan,
+                                    double force_scale_n) {
+    ASSERT_EQ(actual.rows(), expected.rows());
+    ASSERT_EQ(actual.cols(), expected.cols());
+    for (Eigen::Index r = 0; r < actual.rows(); ++r) {
+      for (Eigen::Index j = 0; j < actual.cols(); ++j) {
+        SCOPED_TRACE(std::format("row {} characteristic {}", r, j));
+        if (characteristic_skipped(j, plan, original_inputs(r, mf::mf5x::SA))) {
+          continue;
+        }
+        EXPECT_TRUE(characteristic_matches(actual(r, j), expected(r, j), is_peak_channel(j), force_scale_n));
+      }
+    }
+  }
+
+  /// Checks `model` under `plan`: the transformed model on the transformed inputs against the mapped characteristics,
+  /// for the batch form and for the point form of every row.
+  void check_characteristics_plan(const mf::tire_model &model, const sign_transforms &plan, const Eigen::MatrixXd &x,
+                                  double force_scale_n) {
+    const Eigen::MatrixXd y = model.evaluate_characteristics_batch(x);
+    const std::unique_ptr<mf::tire_model> transformed = model.transformed(plan);
+    ASSERT_TRUE(transformed != nullptr);
+    Eigen::MatrixXd x_transformed = x;
+    mf::apply_sign_transforms(model.layout().inputs, plan, x_transformed);
+    Eigen::MatrixXd y_expected = y;
+    mf::apply_sign_transforms(model.layout().characteristics, plan, y_expected);
+    const Eigen::MatrixXd y_transformed = transformed->evaluate_characteristics_batch(x_transformed);
+    ASSERT_NO_FATAL_FAILURE(expect_characteristics_match(y_transformed, y_expected, x, plan, force_scale_n));
+    // The per-point path obeys the same map.
+    for (Eigen::Index r = 0; r < x.rows(); ++r) {
+      const Eigen::VectorXd input_transformed = x_transformed.row(r).transpose();
+      const Eigen::MatrixXd point = transformed->evaluate_characteristics(input_transformed).transpose();
+      ASSERT_NO_FATAL_FAILURE(expect_characteristics_match(point, y_expected.row(r), x.row(r), plan, force_scale_n));
+    }
+  }
+
+  /// Both characteristics evaluations of `model` and of its twice-transformed copy are bit-equal (NaN equals NaN).
+  void check_characteristics_round_trip(const mf::tire_model &model, const sign_transforms &plan,
+                                        const Eigen::MatrixXd &x) {
+    const Eigen::MatrixXd y = model.evaluate_characteristics_batch(x);
+    const std::unique_ptr<mf::tire_model> twice = model.transformed(plan)->transformed(plan);
+    const Eigen::MatrixXd y_twice = twice->evaluate_characteristics_batch(x);
+    ASSERT_EQ(y_twice.rows(), y.rows());
+    ASSERT_EQ(y_twice.cols(), y.cols());
+    for (Eigen::Index r = 0; r < y.rows(); ++r) {
+      for (Eigen::Index j = 0; j < y.cols(); ++j) {
+        ASSERT_TRUE(same_characteristic(y_twice(r, j), y(r, j))) << "row " << r << " characteristic " << j;
+      }
+    }
+  }
+} // namespace
+
+TEST(coordinate_conversion, Characteristics_EachPlan_TransformedModelMatchesSignedCharacteristics) {
+  const Eigen::MatrixXd x = characteristic_inputs();
+  for (const variant v : CHARACTERISTIC_VARIANTS) {
+    for (const mf::slip_mode mode : ALL_MODES) {
+      const mf::mf5x_parameters parameters = characteristic_parameters(v);
+      const std::unique_ptr<mf::tire_model> model = make_model(v, parameters, mode);
+      ASSERT_TRUE(model != nullptr);
+      const double force_scale_n = std::abs(parameters.coefficients.FNOMIN * parameters.coefficients.LFZO);
+      for (std::size_t p = 0; p < ALL_PLANS.size(); ++p) {
+        const std::string_view variant_name =
+            std::span<const std::string_view>{VARIANT_NAMES}[static_cast<std::size_t>(v)];
+        const std::string_view plan_name = std::span<const std::string_view>{PLAN_NAMES}[p];
+        SCOPED_TRACE(std::format("variant {} plan {}", variant_name, plan_name));
+        check_characteristics_plan(*model, std::span<const sign_transforms>{ALL_PLANS}[p], x, force_scale_n);
+      }
+    }
+  }
+}
+
+TEST(coordinate_conversion, Characteristics_RoundTrip_RestoresBits) {
+  const Eigen::MatrixXd x = characteristic_inputs();
+  for (const variant v : CHARACTERISTIC_VARIANTS) {
+    for (const mf::slip_mode mode : ALL_MODES) {
+      const std::unique_ptr<mf::tire_model> model = make_model(v, characteristic_parameters(v), mode);
+      ASSERT_TRUE(model != nullptr);
+      for (const sign_transforms &plan : ALL_PLANS) {
+        SCOPED_TRACE(
+            std::format("variant {} vertical {} lateral {}", static_cast<int>(v), plan.vertical, plan.lateral));
+        check_characteristics_round_trip(*model, plan, x);
       }
     }
   }

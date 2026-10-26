@@ -3,6 +3,7 @@
 #include <array>
 #include <expected>
 #include <magic_formula/detail/lanes.hpp>
+#include <magic_formula/detail/mf5x_characteristics.hpp>
 #include <magic_formula/detail/mf5x_kernels.hpp>
 #include <magic_formula/error.hpp>
 #include <magic_formula/evaluation_types.hpp>
@@ -70,6 +71,33 @@ namespace mf {
       outputs.col(mf5x::IA_CLAMPED).segment(first, count) = lanes.gamma_clamped.matrix();
       outputs.col(mf5x::BELOW_VXLOW).segment(first, count) = lanes.below_vxlow.matrix();
     }
+
+    /// Writes the one-point characteristic lanes into the characteristics vector.
+    void store_point_characteristics(const detail::characteristic_lanes<point_lane> &lanes,
+                                     Eigen::Ref<Eigen::VectorXd> characteristics) noexcept {
+      characteristics(mf5x::DFY_DSA) = lanes.dfy_dsa_n_per_rad(0);
+      characteristics(mf5x::DFX_DSR) = lanes.dfx_dsr_n(0);
+      characteristics(mf5x::FY_OVER_SA) = lanes.fy_over_sa_n_per_rad(0);
+      characteristics(mf5x::FX_OVER_SR) = lanes.fx_over_sr_n(0);
+      characteristics(mf5x::DY) = lanes.dy_n(0);
+      characteristics(mf5x::DX) = lanes.dx_n(0);
+      characteristics(mf5x::SA_AT_PEAK_FY) = lanes.sa_at_peak_fy_rad(0);
+      characteristics(mf5x::SR_AT_PEAK_FX) = lanes.sr_at_peak_fx(0);
+    }
+
+    /// Writes the characteristic lanes of the `count` rows starting at `first` into the characteristics matrix.
+    void store_block_characteristics(const detail::characteristic_lanes<block_lane> &lanes,
+                                     Eigen::Ref<Eigen::MatrixXd> characteristics, Eigen::Index first,
+                                     Eigen::Index count) noexcept {
+      characteristics.col(mf5x::DFY_DSA).segment(first, count) = lanes.dfy_dsa_n_per_rad.matrix();
+      characteristics.col(mf5x::DFX_DSR).segment(first, count) = lanes.dfx_dsr_n.matrix();
+      characteristics.col(mf5x::FY_OVER_SA).segment(first, count) = lanes.fy_over_sa_n_per_rad.matrix();
+      characteristics.col(mf5x::FX_OVER_SR).segment(first, count) = lanes.fx_over_sr_n.matrix();
+      characteristics.col(mf5x::DY).segment(first, count) = lanes.dy_n.matrix();
+      characteristics.col(mf5x::DX).segment(first, count) = lanes.dx_n.matrix();
+      characteristics.col(mf5x::SA_AT_PEAK_FY).segment(first, count) = lanes.sa_at_peak_fy_rad.matrix();
+      characteristics.col(mf5x::SR_AT_PEAK_FX).segment(first, count) = lanes.sr_at_peak_fx.matrix();
+    }
   } // namespace
 
   mf5x_model::mf5x_model(const mf5x_parameters &parameters, const mf5x_forms &forms, const model_options &options)
@@ -129,6 +157,24 @@ namespace mf {
       const detail::output_lanes<block_lane> result =
           detail::mf5x_pipeline(coefficients_, forms_, options().mode, limits(), raw);
       store_block(result, outputs, first, count);
+    }
+  }
+
+  void mf5x_model::compute_characteristics(const Eigen::Ref<const Eigen::VectorXd> &input,
+                                           Eigen::Ref<Eigen::VectorXd> characteristics) const noexcept {
+    store_point_characteristics(
+        detail::mf5x_characteristics(coefficients_, forms_, options().mode, limits(), load_point(input)),
+        characteristics);
+  }
+
+  void mf5x_model::compute_characteristics_batch(const Eigen::Ref<const Eigen::MatrixXd> &inputs,
+                                                 Eigen::Ref<Eigen::MatrixXd> characteristics) const noexcept {
+    for (Eigen::Index first = 0; first < inputs.rows(); first += detail::BLOCK_ROWS) {
+      const Eigen::Index count = std::min(detail::BLOCK_ROWS, inputs.rows() - first);
+      const detail::input_lanes<block_lane> raw = load_block(inputs, first, count);
+      const detail::characteristic_lanes<block_lane> result =
+          detail::mf5x_characteristics(coefficients_, forms_, options().mode, limits(), raw);
+      store_block_characteristics(result, characteristics, first, count);
     }
   }
 } // namespace mf

@@ -33,6 +33,8 @@ namespace mf {
     using output_index = mf5x::output_index;
     /// Positions of the limits vector (aliases of `mf5x::limit_index`).
     using limit_index = mf5x::limit_index;
+    /// Positions of the characteristics vector (aliases of `mf5x::characteristic_index`).
+    using characteristic_index = mf5x::characteristic_index;
 
     /// `mf5x::INPUT_LENGTH`.
     [[nodiscard]] int input_length() const noexcept final;
@@ -75,6 +77,14 @@ namespace mf {
     /// Runs `detail::mf5x_pipeline` on blocks of `detail::BLOCK_ROWS` points.
     void compute_batch(const Eigen::Ref<const Eigen::MatrixXd> &inputs,
                        Eigen::Ref<Eigen::MatrixXd> outputs) const noexcept final;
+
+    /// Runs `detail::mf5x_characteristics` on one-point lanes.
+    void compute_characteristics(const Eigen::Ref<const Eigen::VectorXd> &input,
+                                 Eigen::Ref<Eigen::VectorXd> characteristics) const noexcept final;
+
+    /// Runs `detail::mf5x_characteristics` on blocks of `detail::BLOCK_ROWS` points.
+    void compute_characteristics_batch(const Eigen::Ref<const Eigen::MatrixXd> &inputs,
+                                       Eigen::Ref<Eigen::MatrixXd> characteristics) const noexcept final;
 
     mf5x_coefficients coefficients_;
     mf5x_forms forms_;

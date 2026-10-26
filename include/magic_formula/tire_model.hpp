@@ -17,11 +17,11 @@ namespace mf {
   ///
   /// A model maps an input vector (one value per `layout().inputs` channel) to an output vector (one value per
   /// `layout().outputs` channel); each concrete model names its positions with index enums (for example
-  /// `pac2002_model::input_index`). The four public `evaluate` forms are the only entry points (a non-virtual
-  /// interface) and own the error policy: the hot path performs no checks unless the model was constructed with
-  /// `model_options::throw_if_model_failure`, in which case every form runs the public free checks of
-  /// `model_checks.hpp` and throws `mf::model_failure`. The derived classes only supply the unchecked, allocation-free
-  /// computation. After construction a model is immutable, so concurrent `evaluate` calls are safe.
+  /// `pac2002_model::input_index`). The four public `evaluate` forms and the two `evaluate_characteristics` forms are
+  /// the only entry points (a non-virtual interface) and own the error policy: the hot path performs no checks unless
+  /// the model was constructed with `model_options::throw_if_model_failure`, in which case every form runs the public
+  /// free checks of `model_checks.hpp` and throws `mf::model_failure`. The derived classes only supply the unchecked,
+  /// allocation-free computation. After construction a model is immutable, so concurrent `evaluate` calls are safe.
   ///
   /// Writable `Eigen::Ref<...>` parameters of the private hooks are taken by value (the Eigen idiom, so that they bind
   /// `Eigen::Map` temporaries). This is the documented exception to the rule of never passing Eigen objects by value.
@@ -66,6 +66,18 @@ namespace mf {
     /// `options().throw_if_model_failure` is set, otherwise they are a precondition. Never allocates. The buffers
     /// must not overlap.
     void evaluate_batch(const double *inputs, int rows, double *data, int len) const;
+
+    /// Number of characteristic values per point: `layout().characteristics.size()`.
+    [[nodiscard]] int characteristics_length() const noexcept;
+
+    /// The characteristics of one point (`layout().characteristics` order) for `input` (input_index order).
+    /// Unchecked unless `options().throw_if_model_failure`: validate_input, compute, check_characteristics, throwing
+    /// `model_failure` on the first failure. A NaN in a channel with `nan_allowed` is a value, not a failure.
+    [[nodiscard]] Eigen::VectorXd evaluate_characteristics(const Eigen::Ref<const Eigen::VectorXd> &input) const;
+
+    /// rows x `input_length()` points into a new rows x `characteristics_length()` matrix (blocks, vectorised math);
+    /// same error policy with `validate_inputs` / `check_characteristics_batch`.
+    [[nodiscard]] Eigen::MatrixXd evaluate_characteristics_batch(const Eigen::Ref<const Eigen::MatrixXd> &inputs) const;
 
     /// The input vector (`input_length()` values, input order) of the model's reference operating point: nominal
     /// load, zero slip ratio, slip angle and inclination, reference speed (and the nominal pressure for formulations
@@ -127,6 +139,14 @@ namespace mf {
     /// `inputs.rows()` (>= 0) points, no checks, no allocation.
     virtual void compute_batch(const Eigen::Ref<const Eigen::MatrixXd> &inputs,
                                Eigen::Ref<Eigen::MatrixXd> outputs) const noexcept = 0;
+
+    /// One point of characteristics, no checks, no allocation. The sizes are guaranteed by the caller.
+    virtual void compute_characteristics(const Eigen::Ref<const Eigen::VectorXd> &input,
+                                         Eigen::Ref<Eigen::VectorXd> characteristics) const noexcept = 0;
+
+    /// `inputs.rows()` (>= 0) points of characteristics, no checks, no allocation.
+    virtual void compute_characteristics_batch(const Eigen::Ref<const Eigen::MatrixXd> &inputs,
+                                               Eigen::Ref<Eigen::MatrixXd> characteristics) const noexcept = 0;
 
     /// The one-point error policy around `compute`.
     void evaluate_into(const Eigen::Ref<const Eigen::VectorXd> &input, Eigen::Ref<Eigen::VectorXd> output) const;

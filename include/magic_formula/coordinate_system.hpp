@@ -36,6 +36,13 @@ namespace mf {
   void convert_outputs(const model_layout &layout, coordinate_system from, coordinate_system to,
                        Eigen::Ref<Eigen::MatrixXd> outputs) noexcept;
 
+  /// Data conversion of a characteristics matrix (never used inside evaluation):
+  /// apply_sign_transforms(layout.characteristics, data_transforms(from, to), characteristics).
+  /// MF 5.x: DFY_DSA, FY_OVER_SA and DY flip; the others are unchanged. Precondition: characteristics.cols() ==
+  /// layout.characteristics.size().
+  void convert_characteristics(const model_layout &layout, coordinate_system from, coordinate_system to,
+                               Eigen::Ref<Eigen::MatrixXd> characteristics) noexcept;
+
   /// FZ sign counts of a table; rows with FZ = +-0 or NaN count as neither sign.
   struct fz_sign_census {
     std::size_t positive = 0;       ///< rows with FZ > 0
