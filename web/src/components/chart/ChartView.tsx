@@ -3,10 +3,10 @@ import { useTheme } from '@/components/ThemeProvider';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { axisOptions } from '@/domain/axes';
-import { sweepDisplayName, validateAxes } from '@/domain/chart';
+import { needsCharacteristics, sweepDisplayName, validateAxes } from '@/domain/chart';
 import type { ChartSpec } from '@/domain/chart-spec';
 import type { ModelInfo } from '@/domain/model';
-import { buildChartData, flatXGroups } from '@/domain/series';
+import { buildChartData, flatXGroups, undefinedAxisNotes } from '@/domain/series';
 import { solvedSweeps } from '@/domain/solve';
 import type { MfWasmModule } from '@/wasm/mf_wasm.js';
 import { AxisSelect } from './AxisSelect';
@@ -25,7 +25,7 @@ interface ChartViewProps {
 
 export function ChartView({ mf, text, model, spec, onChange }: ChartViewProps) {
   const { theme } = useTheme();
-  const outcomes = useSweepSolutions(mf, text, model, spec.sweeps);
+  const outcomes = useSweepSolutions(mf, text, model, spec.sweeps, needsCharacteristics(spec));
   const options = useMemo(() => axisOptions(model), [model]);
   const axisProblems = useMemo(() => validateAxes(spec, model), [spec, model]);
   const data = useMemo(() => {
@@ -34,6 +34,7 @@ export function ChartView({ mf, text, model, spec, onChange }: ChartViewProps) {
     return solved.length === 0 ? null : buildChartData(spec, solved, model, theme);
   }, [spec, outcomes, model, theme, axisProblems]);
   const flat = useMemo(() => (data === null ? [] : flatXGroups(data.groups)), [data]);
+  const undefinedNotes = useMemo(() => (data === null ? [] : undefinedAxisNotes(data)), [data]);
   const grouped = spec.sweeps.length > 1;
 
   return (
@@ -129,6 +130,11 @@ export function ChartView({ mf, text, model, spec, onChange }: ChartViewProps) {
           {flat.length > 0 && (
             <p data-testid="flat-sweeps" className="px-3 pt-2 text-xs text-muted-foreground">
               {flat.map((g) => `${g.name} does not vary along ${data.xLabel}; choose X = ${g.sweptLabel} to see it.`).join(' ')}
+            </p>
+          )}
+          {undefinedNotes.length > 0 && (
+            <p data-testid="undefined-axes" className="px-3 pt-2 text-xs text-muted-foreground">
+              {undefinedNotes.join(' ')}
             </p>
           )}
           <TabsContent value="plot" className="h-[26rem] min-h-0 p-3 xl:h-auto xl:flex-1">

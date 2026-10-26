@@ -58,6 +58,21 @@ export async function curvePoints(page: Page, index: number): Promise<Array<{ x:
   }));
 }
 
+/** Trimmed cell texts of the first series-table column whose header reads exactly `header`. */
+export async function columnTexts(page: Page, header: string): Promise<string[]> {
+  const table = page.getByTestId('series-table').first();
+  const heads = (await table.locator('thead tr').last().locator('th').allTextContents()).map((t) => t.trim());
+  const index = heads.indexOf(header);
+  if (index < 0) {
+    throw new Error(`No column '${header}' in [${heads.join(', ')}]`);
+  }
+  const cells = await table.locator('tbody tr').evaluateAll(
+    (rows, i) => rows.map((r) => r.querySelectorAll('td')[i]?.textContent ?? ''),
+    index,
+  );
+  return cells.map((t) => t.trim());
+}
+
 /** Elements whose content is wider than their box, described for a readable failure message. */
 export const overflowing = (locator: Locator): Promise<string[]> =>
   locator.evaluateAll((els) =>

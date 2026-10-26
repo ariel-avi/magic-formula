@@ -3,7 +3,7 @@ import { buildBatch } from './batch';
 import type { AxisRef, ChartSpec, SweepSpec } from './chart-spec';
 import { SERIES_PALETTES, SWEEP_DASHES, colourFor, toCss } from './colours';
 import type { InputChannel, ModelInfo } from './model';
-import { buildChartData, comboLabel, flatXGroups, tableColumns, type SweepSeries } from './series';
+import { buildChartData, comboLabel, flatXGroups, tableColumns, undefinedAxisNotes, type ChartData, type SweepSeries } from './series';
 import { solvedSweeps, type SweepOutcome } from './solve';
 import { niceExtent, niceTicks } from './ticks';
 
@@ -21,6 +21,12 @@ const model: ModelInfo = {
     { name: 'MZ', unit: 'N*m', negatedBy: 'VERTICAL' },
     { name: 'FLAG', unit: '-', negatedBy: 'NONE' },
     { name: 'ANG', unit: 'rad', negatedBy: 'NONE' },
+  ],
+  characteristics: [
+    { name: 'DFY_DSA', unit: 'N/rad' },
+    { name: 'SA_AT_PEAK_FY', unit: 'rad' },
+    { name: 'SR_AT_PEAK_FX', unit: '-' },
+    { name: 'DY', unit: 'N' },
   ],
   limits: [],
 };
@@ -61,13 +67,26 @@ function outputsFor(rows: number): Float64Array {
   return data;
 }
 
+function characteristicsFor(rows: number): Float64Array {
+  const data = new Float64Array(rows * model.characteristics.length);
+  data.forEach((_, i) => {
+    data[i] = i + 1;
+  });
+  return data;
+}
+
 function solve(chart: ChartSpec, only?: number[]) {
   const outcomes: SweepOutcome[] = chart.sweeps.map((s, i) => {
     if (only !== undefined && !only.includes(i)) {
       return { problems: [], error: 'x', solution: null, warnings: [] };
     }
     const batch = buildBatch(s, inputs);
-    return { problems: [], error: null, solution: { batch, outputs: outputsFor(batch.rows) }, warnings: [] };
+    return {
+      problems: [],
+      error: null,
+      solution: { batch, outputs: outputsFor(batch.rows), characteristics: characteristicsFor(batch.rows) },
+      warnings: [],
+    };
   });
   return solvedSweeps(chart.sweeps, outcomes);
 }
@@ -225,6 +244,63 @@ describe('buildChartData', () => {
     const data = buildChartData(chartOf([sweep('sweep-1')]), [], model, 'light');
     expect(data.groups).toEqual([]);
     expect(data.xDomain).toEqual([0, 1]);
+  });
+});
+
+describe('characteristic axes', () => {
+  const chart = chartOf([sweep('sweep-1')], undefined, { kind: 'characteristic', name: 'SA_AT_PEAK_FY' });
+
+  it('keeps an undefined peak slip as NaN and computes the domain from the finite values', () => {
+    const solved = solve(chart);
+    const matrix = solved[0].solution.characteristics!;
+    matrix[3 + 1] = Number.NaN; // SA_AT_PEAK_FY is channel 1, rows = 3; row 1
+    const data = buildChartData(chart, solved, model, 'light');
+    expect(data.yLabel).toBe('SA_AT_PEAK_FY [deg]');
+    const ys = data.groups[0].series[0].points.map((p) => p.y);
+    expect(Number.isNaN(ys[1])).toBe(true);
+    expect(Number.isFinite(ys[0]) && Number.isFinite(ys[2])).toBe(true);
+    expect(data.yDomain).toEqual(niceExtent(Math.min(ys[0], ys[2]), Math.max(ys[0], ys[2]), 8));
+    const columns = tableColumns(data.groups[0], data.xLabel, data.yLabel);
+    expect(Number.isNaN(columns[1].values[1])).toBe(true);
+  });
+});
+
+describe('undefinedAxisNotes', () => {
+  const dataOf = (points: { x: number; y: number }[]): ChartData => ({
+    groups: [
+      {
+        sweepId: 's',
+        name: 'n',
+        dash: '',
+        sweptLabel: 'SA [deg]',
+        grid: points.map((p) => p.x),
+        xIsSwept: true,
+        series: [{ key: 'k', label: 'l', fullLabel: 'l', colour: '', dash: '', points }],
+      },
+    ],
+    xLabel: 'XL',
+    yLabel: 'YL',
+    xDomain: [0, 1],
+    yDomain: [0, 1],
+    xTicks: [],
+    yTicks: [],
+  });
+  const reason =
+    'has no value at any plotted point (a peak slip has none where the curve has no peak in the search range or the tire has no contact).';
+
+  it('names an X axis without any finite value', () => {
+    const notes = undefinedAxisNotes(dataOf([{ x: Number.NaN, y: 1 }]));
+    expect(notes).toEqual([`XL ${reason}`]);
+  });
+
+  it('names a Y axis without any finite value', () => {
+    expect(undefinedAxisNotes(dataOf([{ x: 1, y: Number.NaN }, { x: 2, y: Number.NaN }]))).toEqual([`YL ${reason}`]);
+  });
+
+  it('has no note for partial NaN, all finite values or no points', () => {
+    expect(undefinedAxisNotes(dataOf([{ x: 1, y: Number.NaN }, { x: 2, y: 3 }]))).toEqual([]);
+    expect(undefinedAxisNotes(dataOf([{ x: 1, y: 2 }]))).toEqual([]);
+    expect(undefinedAxisNotes(dataOf([]))).toEqual([]);
   });
 });
 

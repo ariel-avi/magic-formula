@@ -9,6 +9,7 @@ import type { Theme } from './theme';
 import { niceExtent, niceTicks } from './ticks';
 import { displayUnit, hasUnit } from './units';
 
+/** A NaN x or y is a gap in the curve (and '—' in the table). */
 export interface SeriesPoint {
   x: number;
   y: number;
@@ -79,10 +80,10 @@ export function buildChartData(
   const allY: number[] = [];
 
   const groups = solved.map(({ index, sweep, solution }): SweepSeries => {
-    const { batch, outputs } = solution;
+    const { batch } = solution;
     const points = batch.grid.length;
-    const xs = channelColumn(sweep, batch, outputs, model, chart.x);
-    const ys = channelColumn(sweep, batch, outputs, model, chart.y);
+    const xs = channelColumn(sweep, solution, model, chart.x);
+    const ys = channelColumn(sweep, solution, model, chart.y);
     allX.push(...xs);
     allY.push(...ys);
     const sweptChannel = axisChannel(model, { kind: 'input', name: sweep.swept.variable });
@@ -159,4 +160,19 @@ export function flatXGroups(groups: readonly SweepSeries[]): SweepSeries[] {
     const finite = group.series.map((s) => s.points.map((p) => p.x).filter(Number.isFinite)).filter((xs) => xs.length > 0);
     return finite.length > 0 && finite.every((xs) => xs.every((x) => x === xs[0]));
   });
+}
+
+const UNDEFINED_AXIS_REASON =
+  'has no value at any plotted point (a peak slip has none where the curve has no peak in the search range or the tire has no contact).';
+
+/** One note per axis whose plotted values are all non-finite. */
+export function undefinedAxisNotes(data: ChartData): string[] {
+  const points = data.groups.flatMap((group) => group.series.flatMap((s) => s.points));
+  const axes: [string, (point: SeriesPoint) => number][] = [
+    [data.xLabel, (point) => point.x],
+    [data.yLabel, (point) => point.y],
+  ];
+  return axes
+    .filter(([, value]) => points.length > 0 && !points.some((point) => Number.isFinite(value(point))))
+    .map(([label]) => `${label} ${UNDEFINED_AXIS_REASON}`);
 }

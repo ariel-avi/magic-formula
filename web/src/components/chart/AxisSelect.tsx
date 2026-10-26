@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { axisKey, type AxisOption } from '@/domain/axes';
+import { AXIS_GROUPS, axisKey, type AxisOption } from '@/domain/axes';
 import type { AxisRef } from '@/domain/chart-spec';
 
 interface AxisSelectProps {
@@ -21,10 +21,6 @@ interface AxisSelectProps {
 
 export function AxisSelect({ axis, options, value, onChange }: AxisSelectProps) {
   const id = useId();
-  const groups = [
-    { title: 'Inputs', kind: 'input' },
-    { title: 'Outputs', kind: 'output' },
-  ] as const;
   return (
     <div className="flex items-center gap-1.5">
       <Label htmlFor={id} className="text-xs text-muted-foreground">
@@ -47,18 +43,19 @@ export function AxisSelect({ axis, options, value, onChange }: AxisSelectProps) 
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {groups.map((group) => (
-            <SelectGroup key={group.kind}>
-              <SelectLabel>{group.title}</SelectLabel>
-              {options
-                .filter((o) => o.ref.kind === group.kind)
-                .map((o) => (
+          {AXIS_GROUPS.map((group) => {
+            const members = options.filter((o) => o.ref.kind === group.kind);
+            return members.length === 0 ? null : (
+              <SelectGroup key={group.kind}>
+                <SelectLabel>{group.title}</SelectLabel>
+                {members.map((o) => (
                   <SelectItem key={o.key} value={o.key} description={o.description} className="font-mono text-xs">
                     {o.label}
                   </SelectItem>
                 ))}
-            </SelectGroup>
-          ))}
+              </SelectGroup>
+            );
+          })}
         </SelectContent>
       </Select>
     </div>

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { needsCharacteristics } from './chart';
 import { defaultChartSpec, defaultFixedValue, defaultSweepSpec, defaultSweptRange } from './defaults';
 import type { InputChannel, ModelInfo, TirEntry } from './model';
 
@@ -73,6 +74,7 @@ const pac: ModelInfo = {
     { name: 'FX', unit: 'N', negatedBy: 'NONE' },
     { name: 'FY', unit: 'N', negatedBy: 'VERTICAL' },
   ],
+  characteristics: [],
   limits: [],
 };
 
@@ -118,6 +120,10 @@ describe('defaultChartSpec', () => {
     expect(chart.sweeps[0].swept.variable).toBe('SA');
     expect(chart.x).toEqual({ kind: 'input', name: 'SA' });
     expect(chart.y).toEqual({ kind: 'output', name: 'FY' });
+  });
+
+  it('does not need characteristics', () => {
+    expect(needsCharacteristics(defaultChartSpec(pac, [entry('FNOMIN', '4000')], 'c1'))).toBe(false);
   });
 
   it('keeps the SA sweep with FZ steps and plots the first output when FY is missing', () => {

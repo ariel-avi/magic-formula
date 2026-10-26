@@ -14,6 +14,7 @@
 #include <magic_formula/io/tir_document.hpp>
 #include <magic_formula/io/tir_editor.hpp>
 #include <magic_formula/model_checks.hpp>
+#include <magic_formula/model_layout.hpp>
 #include <magic_formula/sign_transform.hpp>
 #include <magic_formula/version.hpp>
 #include <string>
@@ -93,6 +94,15 @@ namespace mf::wasm {
         outputs.call<void>("push", item);
       }
       result.set("outputs", outputs);
+
+      val characteristics = val::array();
+      for (const characteristic_channel &channel : model.layout().characteristics) {
+        val item = val::object();
+        item.set("name", std::string{channel.name});
+        item.set("unit", std::string{channel.unit});
+        characteristics.call<void>("push", item);
+      }
+      result.set("characteristics", characteristics);
 
       val limits = val::array();
       const auto channels = model.layout().limits;
@@ -192,6 +202,60 @@ namespace mf::wasm {
       val view{emscripten::typed_memory_view(size, data)};
       return val::global("Float64Array").call<val>("from", view);
     }
+
+    /// The loaded model and the raw inputs of one evaluate call (column-major, rows x input_length()).
+    struct batch_job {
+      io::loaded_model loaded;
+      std::vector<double> inputs;
+      Eigen::Index rows = 0;
+    };
+
+    /// Parses `text`, loads the model in the slip mode of `uncombined` and checks that the inputs hold whole rows.
+    /// Returns the job, or the {ok:false,error,row:null} object to return (parse, load, or INVALID_ARGUMENT shape
+    /// error).
+    [[nodiscard]] std::expected<batch_job, val> prepare_batch(const std::string &text, const val &inputs,
+                                                              bool uncombined) {
+      const auto document = io::tir_document::parse(text);
+      if (!document) {
+        return std::unexpected(evaluation_failure(document.error(), val::null()));
+      }
+      model_options options;
+      options.mode = uncombined ? slip_mode::UNCOMBINED : slip_mode::COMBINED;
+      auto loaded = io::load_tire_model(*document, options);
+      if (!loaded) {
+        return std::unexpected(evaluation_failure(loaded.error(), val::null()));
+      }
+      std::vector<double> data = emscripten::convertJSArrayToNumberVector<double>(inputs);
+      const auto width = static_cast<std::size_t>(loaded->model->input_length());
+      if (width == 0 || data.size() % width != 0) {
+        const std::string message = "input length " + std::to_string(data.size()) + " is not a multiple of " +
+                                    std::to_string(width) + " inputs";
+        return std::unexpected(evaluation_failure(error{error_code::INVALID_ARGUMENT, message, {}}, val::null()));
+      }
+      const auto rows = static_cast<Eigen::Index>(data.size() / width);
+      return batch_job{.loaded = std::move(*loaded), .inputs = std::move(data), .rows = rows};
+    }
+
+    /// {ok:true,rows,outputs,warnings}: outputs as a Float64Array (column-major, rows x output_length()),
+    /// warnings = at most the load-side warning (census_fz + load_side_warning).
+    [[nodiscard]] val solved_batch(const tire_model &model, const Eigen::Ref<const Eigen::MatrixXd> &inputs,
+                                   const Eigen::MatrixXd &outputs) {
+      val warnings = val::array();
+      const auto side_warning = load_side_warning(census_fz(model.layout(), inputs), model.loaded_side());
+      if (side_warning) {
+        val entry = val::object();
+        entry.set("message", side_warning->cause.message);
+        entry.set("key", side_warning->cause.where.key);
+        entry.set("row", static_cast<double>(side_warning->index));
+        warnings.call<void>("push", entry);
+      }
+      val result = val::object();
+      result.set("ok", true);
+      result.set("rows", static_cast<double>(inputs.rows()));
+      result.set("outputs", to_float64_array(outputs.data(), static_cast<std::size_t>(outputs.size())));
+      result.set("warnings", warnings);
+      return result;
+    }
   } // namespace
 
   /// `mf::version()` ("MAJOR.MINOR.PATCH").
@@ -262,47 +326,36 @@ namespace mf::wasm {
   /// warnings: `[{message,key,row}]`, at most the load-side warning for FZ on the unloaded side) or
   /// `{ok:false,error,row}`.
   [[nodiscard]] val evaluate(const std::string &text, const val &inputs, bool uncombined) {
-    const auto document = io::tir_document::parse(text);
-    if (!document) {
-      return evaluation_failure(document.error(), val::null());
+    const auto job = prepare_batch(text, inputs, uncombined);
+    if (!job) {
+      return job.error();
     }
-    model_options options;
-    options.mode = uncombined ? slip_mode::UNCOMBINED : slip_mode::COMBINED;
-    const auto loaded = io::load_tire_model(*document, options);
-    if (!loaded) {
-      return evaluation_failure(loaded.error(), val::null());
-    }
-    const tire_model &model = *loaded->model;
-
-    const std::vector<double> data = emscripten::convertJSArrayToNumberVector<double>(inputs);
-    const auto width = static_cast<std::size_t>(model.input_length());
-    if (width == 0 || data.size() % width != 0) {
-      return evaluation_failure(error{error_code::INVALID_ARGUMENT,
-                                      "input length " + std::to_string(data.size()) + " is not a multiple of " +
-                                          std::to_string(width) + " inputs",
-                                      {}},
-                                val::null());
-    }
-    const auto rows = static_cast<Eigen::Index>(data.size() / width);
-    const Eigen::Map<const Eigen::MatrixXd> matrix{data.data(), rows, static_cast<Eigen::Index>(width)};
+    const tire_model &model = *job->loaded.model;
+    const Eigen::Map<const Eigen::MatrixXd> matrix{job->inputs.data(), job->rows, model.input_length()};
     const auto solved = checked_evaluate_batch(model, matrix);
     if (!solved) {
       return evaluation_failure(solved.error().cause, val(static_cast<double>(solved.error().index)));
     }
-    val warnings = val::array();
-    const auto side_warning = load_side_warning(census_fz(model.layout(), matrix), model.loaded_side());
-    if (side_warning) {
-      val entry = val::object();
-      entry.set("message", side_warning->cause.message);
-      entry.set("key", side_warning->cause.where.key);
-      entry.set("row", static_cast<double>(side_warning->index));
-      warnings.call<void>("push", entry);
+    return solved_batch(model, matrix, *solved);
+  }
+
+  /// evaluate plus the characteristics of every row (checked_evaluate_batch_with_characteristics: outputs checked
+  /// first). `{ok:true,rows,outputs,characteristics,warnings}`: characteristics is a Float64Array, column-major
+  /// rows x characteristics_length(), with NaN only in SA_AT_PEAK_FY and SR_AT_PEAK_FX; or `{ok:false,error,row}`.
+  [[nodiscard]] val evaluate_with_characteristics(const std::string &text, const val &inputs, bool uncombined) {
+    const auto job = prepare_batch(text, inputs, uncombined);
+    if (!job) {
+      return job.error();
     }
-    val result = val::object();
-    result.set("ok", true);
-    result.set("rows", static_cast<double>(rows));
-    result.set("outputs", to_float64_array(solved->data(), static_cast<std::size_t>(solved->size())));
-    result.set("warnings", warnings);
+    const tire_model &model = *job->loaded.model;
+    const Eigen::Map<const Eigen::MatrixXd> matrix{job->inputs.data(), job->rows, model.input_length()};
+    const auto solved = checked_evaluate_batch_with_characteristics(model, matrix);
+    if (!solved) {
+      return evaluation_failure(solved.error().cause, val(static_cast<double>(solved.error().index)));
+    }
+    val result = solved_batch(model, matrix, solved->outputs);
+    result.set("characteristics", to_float64_array(solved->characteristics.data(),
+                                                   static_cast<std::size_t>(solved->characteristics.size())));
     return result;
   }
 
@@ -336,5 +389,6 @@ EMSCRIPTEN_BINDINGS(mf_wasm) {
   emscripten::function("inspect", &mf::wasm::inspect);
   emscripten::function("replaceValue", &mf::wasm::replace_value);
   emscripten::function("evaluate", &mf::wasm::evaluate);
+  emscripten::function("evaluateWithCharacteristics", &mf::wasm::evaluate_with_characteristics);
   emscripten::function("convertModel", &mf::wasm::convert_model);
 }

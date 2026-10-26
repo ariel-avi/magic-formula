@@ -28,9 +28,9 @@ export interface SweepSpec {
   uncombined: boolean;
 }
 
-export type ChannelKind = 'input' | 'output';
+export type ChannelKind = 'input' | 'output' | 'characteristic';
 
-/** A model channel used as a chart axis. Input and output names may coincide, hence the kind. */
+/** A model channel used as a chart axis. Names may coincide across kinds, hence the kind. */
 export interface AxisRef {
   kind: ChannelKind;
   name: string;

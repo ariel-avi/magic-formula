@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AXIS_GROUPS,
   axisChannel,
   axisDomain,
   axisKey,
@@ -10,8 +11,9 @@ import {
   finiteExtent,
 } from './axes';
 import { buildBatch } from './batch';
-import type { SweepSpec } from './chart-spec';
+import type { AxisRef, SweepSpec } from './chart-spec';
 import type { InputChannel, ModelInfo } from './model';
+import type { SweepSolution } from './solve';
 import { niceExtent } from './ticks';
 
 const channel = (name: string, unit: string): InputChannel => ({ name, unit, minimum: 0, minimumInclusive: true, negatedBy: name === 'FZ' ? 'VERTICAL' : name === 'SA' ? 'LATERAL' : 'NONE' });
@@ -28,6 +30,12 @@ const model: ModelInfo = {
     { name: 'ANG', unit: 'rad', negatedBy: 'NONE' },
     { name: 'MZ', unit: 'N*m', negatedBy: 'VERTICAL' },
     { name: 'FLAG', unit: '-', negatedBy: 'NONE' },
+  ],
+  characteristics: [
+    { name: 'DFY_DSA', unit: 'N/rad' },
+    { name: 'SA_AT_PEAK_FY', unit: 'rad' },
+    { name: 'SR_AT_PEAK_FX', unit: '-' },
+    { name: 'DY', unit: 'N' },
   ],
   limits: [],
 };
@@ -64,6 +72,17 @@ describe('channelsOfKind', () => {
   it('returns the model channel lists', () => {
     expect(channelsOfKind(model, 'input')).toBe(model.inputs);
     expect(channelsOfKind(model, 'output')).toBe(model.outputs);
+    expect(channelsOfKind(model, 'characteristic')).toBe(model.characteristics);
+  });
+});
+
+describe('AXIS_GROUPS', () => {
+  it('lists the groups in display order', () => {
+    expect(AXIS_GROUPS).toEqual([
+      { kind: 'input', title: 'Inputs' },
+      { kind: 'output', title: 'Outputs' },
+      { kind: 'characteristic', title: 'Characteristics' },
+    ]);
   });
 });
 
@@ -79,6 +98,10 @@ describe('axisOptions', () => {
       'output:ANG',
       'output:MZ',
       'output:FLAG',
+      'characteristic:DFY_DSA',
+      'characteristic:SA_AT_PEAK_FY',
+      'characteristic:SR_AT_PEAK_FX',
+      'characteristic:DY',
     ]);
     expect(options[1]).toEqual({
       key: 'input:SA',
@@ -88,6 +111,8 @@ describe('axisOptions', () => {
     });
     expect(options[7].label).toBe('FLAG');
     expect(options[7].description).toBe('');
+    expect(options.slice(8).map((o) => o.label)).toEqual(['DFY_DSA [N/deg]', 'SA_AT_PEAK_FY [deg]', 'SR_AT_PEAK_FX', 'DY [N]']);
+    expect(options[8].description).toBe('Instantaneous cornering stiffness');
   });
 });
 
@@ -95,11 +120,15 @@ describe('axisChannel', () => {
   it('finds an input and an output', () => {
     expect(axisChannel(model, { kind: 'input', name: 'SA' })).toBe(model.inputs[1]);
     expect(axisChannel(model, { kind: 'output', name: 'FY' })).toBe(model.outputs[1]);
+    expect(axisChannel(model, { kind: 'characteristic', name: 'DY' })).toBe(model.characteristics[3]);
   });
 
   it('throws RangeError for an unknown channel', () => {
     expect(() => axisChannel(model, { kind: 'input', name: 'QQ' })).toThrow(new RangeError("Unknown input 'QQ'"));
     expect(() => axisChannel(model, { kind: 'output', name: 'QQ' })).toThrow(new RangeError("Unknown output 'QQ'"));
+    expect(() => axisChannel(model, { kind: 'characteristic', name: 'QQ' })).toThrow(
+      new RangeError("Unknown characteristic 'QQ'"),
+    );
   });
 });
 
@@ -110,8 +139,15 @@ describe('channelColumn', () => {
     outputs[i] = i + 1;
   });
   outputs[2 * batch.rows] = Math.PI;
-  const column = (kind: 'input' | 'output', name: string) =>
-    channelColumn(sweep, batch, outputs, model, { kind, name });
+  const characteristics = new Float64Array(model.characteristics.length * batch.rows);
+  characteristics.forEach((_, i) => {
+    characteristics[i] = i + 1;
+  });
+  characteristics[0] = 180 / Math.PI;
+  characteristics[batch.rows] = Math.PI;
+  characteristics[batch.rows + 1] = Number.NaN;
+  const solution: SweepSolution = { batch, outputs, characteristics };
+  const column = (kind: AxisRef['kind'], name: string) => channelColumn(sweep, solution, model, { kind, name });
 
   it('returns the swept values exactly, without an SI round trip', () => {
     expect(column('input', 'SA')).toEqual([-15, 0, 15, -15, 0, 15]);
@@ -131,9 +167,30 @@ describe('channelColumn', () => {
     expect(column('output', 'ANG')[0]).toBeCloseTo(180, 9);
   });
 
+  it('converts a characteristic column to display units', () => {
+    expect(column('characteristic', 'DFY_DSA')[0]).toBeCloseTo(1, 12);
+    expect(column('characteristic', 'DFY_DSA')[1]).toBeCloseTo((2 * Math.PI) / 180, 12);
+    expect(column('characteristic', 'SA_AT_PEAK_FY')[0]).toBeCloseTo(180, 9);
+    expect(column('characteristic', 'DY')).toEqual(Array.from({ length: 6 }, (_, r) => 18 + r + 1));
+  });
+
+  it('keeps an undefined peak slip as NaN, not 0', () => {
+    const peak = column('characteristic', 'SA_AT_PEAK_FY');
+    expect(Number.isNaN(peak[1])).toBe(true);
+    expect(peak[2]).not.toBe(0);
+  });
+
+  it('throws RangeError for a characteristic of a sweep solved without them', () => {
+    const plain: SweepSolution = { ...solution, characteristics: null };
+    expect(() => channelColumn(sweep, plain, model, { kind: 'characteristic', name: 'DY' })).toThrow(
+      new RangeError('The characteristics of sweep-1 were not solved'),
+    );
+  });
+
   it('throws RangeError for unknown channels', () => {
     expect(() => column('input', 'QQ')).toThrow(RangeError);
     expect(() => column('output', 'QQ')).toThrow(RangeError);
+    expect(() => column('characteristic', 'QQ')).toThrow(RangeError);
   });
 });
 
@@ -163,5 +220,9 @@ describe('axisDomain', () => {
 
   it('rounds an output extent', () => {
     expect(axisDomain('output', [-4321, 5678])).toEqual(niceExtent(-4321, 5678, 8));
+  });
+
+  it('rounds a characteristic extent', () => {
+    expect(axisDomain('characteristic', [1.3, 7.9])).toEqual(niceExtent(1.3, 7.9, 8));
   });
 });

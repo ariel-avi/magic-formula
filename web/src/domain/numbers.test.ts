@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatLimit, formatNumber, formatSignificant, parseNumber } from './numbers';
+import { formatLimit, formatNumber, formatSignificant, formatValue, parseNumber } from './numbers';
 
 describe('parseNumber', () => {
   it.each([
@@ -73,5 +73,19 @@ describe('formatLimit', () => {
     expect(formatLimit(Number.POSITIVE_INFINITY)).toBe('+∞');
     expect(formatLimit(Number.NEGATIVE_INFINITY)).toBe('−∞');
     expect(formatLimit(Number.NaN)).toBe('—');
+  });
+});
+
+describe('formatValue', () => {
+  it('prints a dash for values without a value', () => {
+    expect(formatValue(Number.NaN, 6)).toBe('—');
+    expect(formatValue(Infinity, 6)).toBe('—');
+    expect(formatValue(-Infinity, 6)).toBe('—');
+  });
+
+  it('rounds finite values, zero included', () => {
+    expect(formatValue(0, 6)).toBe('0');
+    expect(formatValue(1.23456789, 6)).toBe('1.23457');
+    expect(formatValue(-4000, 6)).toBe('-4000');
   });
 });

@@ -25,6 +25,14 @@ describe('displayUnit', () => {
     expect(unit.fromSi(unit.toSi(37.5))).toBeCloseTo(37.5, 10);
   });
 
+  it('shows N/rad as N/deg and converts both ways', () => {
+    const unit = displayUnit('N/rad');
+    expect(unit.label).toBe('N/deg');
+    expect(unit.fromSi(180 / Math.PI)).toBeCloseTo(1, 12);
+    const x = -55384.61537396;
+    expect(unit.toSi(unit.fromSi(x))).toBeCloseTo(x, 8);
+  });
+
   it('prints N*m with a middle dot and keeps the value', () => {
     const unit = displayUnit('N*m');
     expect(unit.label).toBe('N·m');

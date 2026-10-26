@@ -15,6 +15,11 @@ const UNITS: Record<string, DisplayUnit> = {
     toSi: (value) => (value * Math.PI) / 180,
     fromSi: (value) => (value * 180) / Math.PI,
   },
+  'N/rad': {
+    label: 'N/deg',
+    toSi: (value) => (value * 180) / Math.PI,
+    fromSi: (value) => (value * Math.PI) / 180,
+  },
   'N*m': identity('N·m'),
 };
 

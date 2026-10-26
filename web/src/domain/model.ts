@@ -58,6 +58,13 @@ export interface OutputChannel {
   negatedBy: SignTransform;
 }
 
+/** A derived quantity of the evaluated Fx/Fy curves (layout order DFY_DSA ... SR_AT_PEAK_FX). */
+export interface CharacteristicChannel {
+  name: string;
+  /** SI: 'N/rad' | 'N' | 'rad' | '-' */
+  unit: string;
+}
+
 export interface LimitValue {
   key: string;
   role: 'LOWER' | 'UPPER' | 'VALUE';
@@ -71,6 +78,8 @@ export interface ModelInfo {
   tyreSide: 'LEFT' | 'RIGHT';
   inputs: InputChannel[];
   outputs: OutputChannel[];
+  /** Empty for a formulation without them. */
+  characteristics: CharacteristicChannel[];
   limits: LimitValue[];
 }
 
@@ -139,6 +148,13 @@ export interface BatchWarning {
   message: string;
   key: string;
   row: number;
+}
+
+export interface SolvedBatch {
+  outputs: Float64Array;
+  /** rows x characteristics, column-major, SI; null when solved without them; NaN only in the two peak slips. */
+  characteristics: Float64Array | null;
+  warnings: BatchWarning[];
 }
 
 export interface TirInspection {

@@ -3,6 +3,7 @@ import { MAX_SWEEPS, type ChartSpec, type SweepSpec } from './chart-spec';
 import {
   addSweep,
   channelsChanged,
+  needsCharacteristics,
   duplicateSweep,
   freezeBlankName,
   referencesMissing,
@@ -16,13 +17,14 @@ import {
 import { defaultSweepSpec } from './defaults';
 import type { ModelInfo } from './model';
 
-const model = (inNames: string[], outNames: string[]): ModelInfo => ({
+const model = (inNames: string[], outNames: string[], characteristicNames: string[] = ['DFY_DSA', 'DY']): ModelInfo => ({
   name: 'm',
   fittyp: null,
   useMode: null,
   tyreSide: 'LEFT',
   inputs: inNames.map((name) => ({ name, unit: '-', minimum: 0, minimumInclusive: true, negatedBy: name === 'FZ' ? 'VERTICAL' : name === 'SA' ? 'LATERAL' : 'NONE' })),
   outputs: outNames.map((name) => ({ name, unit: 'N', negatedBy: ['FY', 'MZ', 'MY'].includes(name) ? 'VERTICAL' : 'NONE' })),
+  characteristics: characteristicNames.map((name) => ({ name, unit: 'N' })),
   limits: [],
 });
 const base = model(['FZ', 'SA', 'SR', 'IA'], ['FY', 'FX']);
@@ -217,6 +219,28 @@ describe('validateAxes', () => {
   });
 });
 
+describe('needsCharacteristics', () => {
+  const chart = chartOf([sweepOf('a', 'A')]);
+
+  it('is true when X or Y shows a characteristic', () => {
+    expect(needsCharacteristics({ ...chart, x: { kind: 'characteristic', name: 'DY' } })).toBe(true);
+    expect(needsCharacteristics({ ...chart, y: { kind: 'characteristic', name: 'DY' } })).toBe(true);
+  });
+
+  it('is false for inputs and outputs', () => {
+    expect(needsCharacteristics(chart)).toBe(false);
+  });
+});
+
+describe('validateAxes characteristics', () => {
+  it('accepts a known characteristic and reports an unknown one', () => {
+    const known: ChartSpec = { ...chartOf([]), y: { kind: 'characteristic', name: 'DY' } };
+    expect(validateAxes(known, base)).toEqual([]);
+    const unknown: ChartSpec = { ...chartOf([]), y: { kind: 'characteristic', name: 'QQ' } };
+    expect(validateAxes(unknown, base)).toEqual(["Unknown Y axis characteristic 'QQ'."]);
+  });
+});
+
 describe('channelsChanged', () => {
   it('treats a missing previous model as changed', () => {
     expect(channelsChanged(null, base)).toBe(true);
@@ -231,6 +255,11 @@ describe('channelsChanged', () => {
     expect(channelsChanged(base, model(['FZ', 'SA', 'SR', 'VX'], ['FY', 'FX']))).toBe(true);
     expect(channelsChanged(base, model(['FZ', 'SA', 'SR', 'IA'], ['FY']))).toBe(true);
     expect(channelsChanged(base, model(['FZ', 'SA', 'SR', 'IA'], ['FY', 'MZ']))).toBe(true);
+  });
+
+  it('detects characteristic differences alone', () => {
+    expect(channelsChanged(base, model(['FZ', 'SA', 'SR', 'IA'], ['FY', 'FX'], ['DFY_DSA']))).toBe(true);
+    expect(channelsChanged(base, model(['FZ', 'SA', 'SR', 'IA'], ['FY', 'FX'], ['DFY_DSA', 'DX']))).toBe(true);
   });
 });
 
@@ -274,6 +303,11 @@ describe('referencesMissing', () => {
 
   it('detects a missing X input', () => {
     expect(referencesMissing({ ...chart, x: { kind: 'input', name: 'VX' } }, base)).toBe(true);
+  });
+
+  it('detects a missing characteristic axis', () => {
+    expect(referencesMissing({ ...chart, y: { kind: 'characteristic', name: 'DX' } }, base)).toBe(true);
+    expect(referencesMissing({ ...chart, y: { kind: 'characteristic', name: 'DY' } }, base)).toBe(false);
   });
 
   it('detects a missing Y output', () => {

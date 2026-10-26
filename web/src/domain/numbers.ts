@@ -33,6 +33,11 @@ export function formatSignificant(value: number, digits: number): string {
   return Number.isFinite(value) ? String(Number(value.toPrecision(digits))) : '';
 }
 
+/** `value` rounded to `digits` significant digits; '—' when it has no value (NaN or infinite). */
+export function formatValue(value: number, digits: number): string {
+  return Number.isFinite(value) ? formatSignificant(value, digits) : '—';
+}
+
 /** A model limit as text: '−∞' / '+∞' for an absent bound, '—' for NaN, otherwise the shortest exact text. */
 export function formatLimit(value: number): string {
   if (Number.isNaN(value)) {

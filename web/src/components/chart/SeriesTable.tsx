@@ -1,7 +1,7 @@
 import { cn } from '@/lib/utils';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { formatSignificant } from '@/domain/numbers';
+import { formatValue } from '@/domain/numbers';
 import { tableColumns, type ChartData } from '@/domain/series';
 
 export function SeriesTable({ data, grouped }: { data: ChartData; grouped: boolean }) {
@@ -38,7 +38,7 @@ export function SeriesTable({ data, grouped }: { data: ChartData; grouped: boole
                     <TableRow key={i}>
                       {columns.map((c) => (
                         <TableCell key={c.key} className="text-right">
-                          {formatSignificant(c.values[i] ?? NaN, 6)}
+                          {formatValue(c.values[i] ?? NaN, 6)}
                         </TableCell>
                       ))}
                     </TableRow>
