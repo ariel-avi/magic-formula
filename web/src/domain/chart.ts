@@ -94,6 +94,11 @@ export function replaceSweep(chart: ChartSpec, index: number, next: SweepSpec): 
   return { ...chart, sweeps, x: follow ? { kind: 'input', name: next.swept.variable } : chart.x };
 }
 
+/** True when X or Y shows a characteristic: only then are sweeps solved with them. */
+export function needsCharacteristics(chart: ChartSpec): boolean {
+  return chart.x.kind === 'characteristic' || chart.y.kind === 'characteristic';
+}
+
 /** One message per axis that names a channel the model lacks. */
 export function validateAxes(chart: ChartSpec, model: ModelInfo): string[] {
   const axes = [
@@ -109,12 +114,13 @@ const names = (channels: readonly { name: string }[]) => channels.map((channel) 
 const sameNames = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((name, index) => name === b[index]);
 
-/** True when the input or output channel names differ (a missing previous model counts as changed). */
+/** True when the input, output or characteristic channel names differ (a missing previous model counts as changed). */
 export function channelsChanged(previous: ModelInfo | null, next: ModelInfo): boolean {
   return (
     previous === null ||
     !sameNames(names(previous.inputs), names(next.inputs)) ||
-    !sameNames(names(previous.outputs), names(next.outputs))
+    !sameNames(names(previous.outputs), names(next.outputs)) ||
+    !sameNames(names(previous.characteristics), names(next.characteristics))
   );
 }
 

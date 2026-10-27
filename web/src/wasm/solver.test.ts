@@ -12,6 +12,7 @@ const model: RawModel = {
   tyreSide: 'LEFT',
   inputs: [],
   outputs: [],
+  characteristics: [],
   limits: [],
 };
 
@@ -139,18 +140,51 @@ describe('solveBatch', () => {
       outputs: new Float64Array([3]),
       warnings: [{ message: 'FZ < 0', key: 'FZ', row: 0 }],
     }));
-    const result = solveBatch({ evaluate } as unknown as MfWasmModule, 'text', batch, true);
+    const result = solveBatch({ evaluate } as unknown as MfWasmModule, 'text', batch, true, false);
     expect(evaluate).toHaveBeenCalledWith('text', batch.inputs, true);
     expect(result).toEqual({
       ok: true,
-      value: { outputs: new Float64Array([3]), warnings: [{ message: 'FZ < 0', key: 'FZ', row: 0 }] },
+      value: {
+        outputs: new Float64Array([3]),
+        characteristics: null,
+        warnings: [{ message: 'FZ < 0', key: 'FZ', row: 0 }],
+      },
     });
   });
 
   it('keeps the failing row on an error', () => {
     const error = { code: 'NUMERICAL' as const, message: 'bad', line: 0, key: '' };
     const mf = { evaluate: () => ({ ok: false, error, row: 4 }) } as unknown as MfWasmModule;
-    expect(solveBatch(mf, 'text', batch, false)).toEqual({ ok: false, error: { ...error, row: 4 } });
+    expect(solveBatch(mf, 'text', batch, false, false)).toEqual({ ok: false, error: { ...error, row: 4 } });
+  });
+
+  it('calls evaluateWithCharacteristics when asked and maps every field', () => {
+    const evaluate = vi.fn();
+    const evaluateWithCharacteristics = vi.fn(() => ({
+      ok: true,
+      rows: 1,
+      outputs: new Float64Array([3]),
+      characteristics: new Float64Array([4, Number.NaN]),
+      warnings: [{ message: 'w', key: 'FZ', row: 0 }],
+    }));
+    const mf = { evaluate, evaluateWithCharacteristics } as unknown as MfWasmModule;
+    const result = solveBatch(mf, 'text', batch, true, true);
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(evaluateWithCharacteristics).toHaveBeenCalledWith('text', batch.inputs, true);
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        outputs: new Float64Array([3]),
+        characteristics: new Float64Array([4, Number.NaN]),
+        warnings: [{ message: 'w', key: 'FZ', row: 0 }],
+      },
+    });
+  });
+
+  it.each([4, null])('keeps the row %s of a characteristics failure', (row) => {
+    const error = { code: 'NUMERICAL' as const, message: 'bad', line: 0, key: 'DFY_DSA' };
+    const mf = { evaluateWithCharacteristics: () => ({ ok: false, error, row }) } as unknown as MfWasmModule;
+    expect(solveBatch(mf, 'text', batch, false, true)).toEqual({ ok: false, error: { ...error, row } });
   });
 });
 

@@ -112,6 +112,123 @@ describe('wasm solver smoke', () => {
     expect(Math.sign(after)).toBe(Math.sign(before));
   });
 
+  describe('characteristics', () => {
+    // Expected values: test-data.md. Order: DFY_DSA, DFX_DSR, FY_OVER_SA, FX_OVER_SR, DY, DX, SA_AT_PEAK_FY, SR_AT_PEAK_FX.
+    const NAMES = ['DFY_DSA', 'DFX_DSR', 'FY_OVER_SA', 'FX_OVER_SR', 'DY', 'DX', 'SA_AT_PEAK_FY', 'SR_AT_PEAK_FX'];
+    const UNITS = ['N/rad', 'N', 'N/rad', 'N', 'N', 'N', 'rad', '-'];
+    const PEAKS = new Set(['SA_AT_PEAK_FY', 'SR_AT_PEAK_FX']);
+    const near = (actual: number, expected: number, name: string, what: string): void => {
+      const rel = PEAKS.has(name) ? 1e-10 : 1e-12;
+      expect(Math.abs(actual - expected), `${what} ${name}`).toBeLessThanOrEqual(rel * Math.abs(expected));
+    };
+    const batchOf = (model: RawModel, rows: Record<string, number>[]): Float64Array => {
+      const data = new Float64Array(rows.length * model.inputs.length);
+      model.inputs.forEach((channel, k) => {
+        rows.forEach((row, r) => {
+          data[k * rows.length + r] = row[channel.name] ?? 0;
+        });
+      });
+      return data;
+    };
+    const characteristicsOf = (mf: MfWasmModule, text: string, model: RawModel, rows: Record<string, number>[]) => {
+      const result = mf.evaluateWithCharacteristics(text, batchOf(model, rows), false);
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error(result.error.message);
+      return result;
+    };
+    const row = (index: number, rows: number, values: Float64Array): number[] =>
+      NAMES.map((_, c) => values[c * rows + index]!);
+    const at = (FZ: number, SA: number, SR: number) => ({ FZ, SA, SR, IA: 0, VX: 10 });
+
+    it('lists the eight characteristic channels in order', async () => {
+      const mf = await createMfModule();
+      const model = loadModel(mf, readData('pac2002_S.tir'), 'pac2002_S.tir');
+      expect(model.characteristics.map((c) => c.name)).toEqual(NAMES);
+      expect(model.characteristics.map((c) => c.unit)).toEqual(UNITS);
+    });
+
+    it('matches the reference characteristics and the plain outputs', async () => {
+      const mf = await createMfModule();
+      const text = readData('pac2002_S.tir');
+      const model = loadModel(mf, text, 'pac2002_S.tir');
+      const rows = [at(4000, 0, 0.1), at(4000, 0.05, 0), at(4000, 0, 0), at(4000, -0.05, 0), at(4000, 0, -0.1)];
+      const expected = [
+        [-39162.83710434, 5151.9006238, -39162.83710434, 39354.79640314, 4000, 4000, 0.2475646539106, 0.1299038105893],
+        [-34707.6921758, 71554.17526807, -47527.96304983, 71554.17526807, 4000, 4000, 0.2475646539106, 0.1299038105893],
+        [-55384.61537396, 79999.99998667, -55384.61537396, 79999.99998667, 4000, 4000, 0.2475646539106, 0.1299038105893],
+        [-34707.6921758, 71554.17526807, -47527.96304983, 71554.17526807, 4000, 4000, -0.2475646539106, 0.1299038105893],
+        [-39162.83710434, 5151.9006238, -39162.83710434, 39354.79640314, 4000, 4000, 0.2475646539106, -0.1299038105893],
+      ];
+      const result = characteristicsOf(mf, text, model, rows);
+      const plain = mf.evaluate(text, batchOf(model, rows), false);
+      expect(plain.ok).toBe(true);
+      if (!plain.ok) return;
+      expect(Array.from(result.outputs)).toEqual(Array.from(plain.outputs));
+      expect(result.characteristics).toHaveLength(rows.length * NAMES.length);
+      expected.forEach((values, r) => {
+        const actual = row(r, rows.length, result.characteristics);
+        values.forEach((value, c) => near(actual[c]!, value, NAMES[c]!, `row ${r}`));
+      });
+    });
+
+    it('returns zero slopes and undefined peaks without contact', async () => {
+      const mf = await createMfModule();
+      const text = readData('pac2002_S.tir');
+      const model = loadModel(mf, text, 'pac2002_S.tir');
+      const rows = [at(0, 0.05, 0.1), at(0, 0, 0)];
+      const result = characteristicsOf(mf, text, model, rows);
+      rows.forEach((_, r) => {
+        const values = row(r, rows.length, result.characteristics);
+        [0, 1, 2, 3, 4, 5].forEach((c) => expect(Object.is(values[c], 0), `${NAMES[c]} row ${r}`).toBe(true));
+        expect(Number.isNaN(values[6])).toBe(true);
+        expect(Number.isNaN(values[7])).toBe(true);
+      });
+    });
+
+    it('mirrors the lateral-conversion characteristics', async () => {
+      const mf = await createMfModule();
+      const text = readData('pac2002_S.tir');
+      const model = loadModel(mf, text, 'pac2002_S.tir');
+      const converted = mf.convertModel(text, 'pac2002_S.tir', 'ISO');
+      expect(converted.ok).toBe(true);
+      if (!converted.ok) return;
+      expect(converted.applied).toEqual({ vertical: false, lateral: true });
+      const negated = new Set(['DFY_DSA', 'FY_OVER_SA', 'SA_AT_PEAK_FY']);
+      for (const alpha of [0.05, -0.05]) {
+        const iso = characteristicsOf(mf, converted.text, model, [at(4000, alpha, 0.1)]);
+        const mixed = characteristicsOf(mf, text, model, [at(4000, -alpha, 0.1)]);
+        const a = row(0, 1, iso.characteristics);
+        const b = row(0, 1, mixed.characteristics);
+        NAMES.forEach((name, c) => near(a[c]!, (negated.has(name) ? -1 : 1) * b[c]!, name, `lateral alpha ${alpha}`));
+      }
+    });
+
+    it('negates the load-dependent characteristics for the vertical conversion', async () => {
+      const mf = await createMfModule();
+      const isoText = readData('pac2002_S_iso.tir');
+      const model = loadModel(mf, isoText, 'pac2002_S_iso.tir');
+      const converted = mf.convertModel(isoText, 'pac2002_S_iso.tir', 'SAE');
+      expect(converted.ok).toBe(true);
+      if (!converted.ok) return;
+      expect(converted.applied).toEqual({ vertical: true, lateral: false });
+      const negated = new Set(['DFY_DSA', 'FY_OVER_SA', 'DY']);
+      const sae = characteristicsOf(mf, converted.text, model, [at(-4000, 0.05, 0.1)]);
+      const iso = characteristicsOf(mf, isoText, model, [at(4000, 0.05, 0.1)]);
+      const a = row(0, 1, sae.characteristics);
+      const b = row(0, 1, iso.characteristics);
+      NAMES.forEach((name, c) => near(a[c]!, (negated.has(name) ? -1 : 1) * b[c]!, name, 'vertical'));
+    });
+
+    it('rejects an input of the wrong shape', async () => {
+      const mf = await createMfModule();
+      const result = mf.evaluateWithCharacteristics(readData('pac2002_S.tir'), new Float64Array(7), false);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe('INVALID_ARGUMENT');
+      expect(result.row).toBeNull();
+    });
+  });
+
   describe('coordinate systems', () => {
     const batchFor = (model: RawModel, rows: Record<string, number>[]): Float64Array => {
       const data = new Float64Array(rows.length * model.inputs.length);

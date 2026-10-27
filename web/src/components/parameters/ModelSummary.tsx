@@ -82,6 +82,18 @@ export function ModelSummary({ model, warnings }: ModelSummaryProps): React.JSX.
           <dd>
             <ChannelBadges testId="model-outputs" itemPrefix="model-output" channels={model.outputs} />
           </dd>
+          {model.characteristics.length > 0 && (
+            <>
+              <dt className="text-muted-foreground">Characteristics</dt>
+              <dd>
+                <ChannelBadges
+                  testId="model-characteristics"
+                  itemPrefix="model-characteristic"
+                  channels={model.characteristics}
+                />
+              </dd>
+            </>
+          )}
           <dt className="text-muted-foreground">Limits</dt>
           <dd>
             {model.limits.length === 0 ? (

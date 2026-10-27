@@ -189,6 +189,20 @@ describe('convertSpec', () => {
     expect(out.uncombined).toBe(true);
   });
 
+  it.each([
+    { vertical: true, lateral: false },
+    { vertical: false, lateral: true },
+  ])('leaves characteristic axes untouched under %o', (applied) => {
+    const spec: ChartSpec = {
+      ...chart([sweep()]),
+      x: { kind: 'characteristic', name: 'SA_AT_PEAK_FY' },
+      y: { kind: 'characteristic', name: 'DFY_DSA' },
+    };
+    const out = convertSpec(spec, inputs, applied);
+    expect(out.x).toEqual({ kind: 'characteristic', name: 'SA_AT_PEAK_FY' });
+    expect(out.y).toEqual({ kind: 'characteristic', name: 'DFY_DSA' });
+  });
+
   it('maps a swept FZ range to an ascending negative range and leaves other steps alone', () => {
     const spec = chart([
       sweep({

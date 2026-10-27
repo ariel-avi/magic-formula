@@ -1,10 +1,10 @@
 import type { SweepBatch } from '@/domain/batch';
 import type {
-  BatchWarning,
   Conversion,
   CoordinateSystem,
   EvaluationError,
   MfError,
+  SolvedBatch,
   TirInspection,
 } from '@/domain/model';
 import { err, ok, type Result } from '@/domain/result';
@@ -56,15 +56,27 @@ export function setEntry(
   return raw.ok ? ok(raw.text) : err(raw.error);
 }
 
-/** Solves the batch; the outputs are column-major, rows x model outputs. */
+/**
+ * Solves the batch. The outputs and the characteristics (when requested) are column-major, rows x model channels;
+ * without them `characteristics` is null.
+ */
 export function solveBatch(
   mf: MfWasmModule,
   text: string,
   batch: SweepBatch,
   uncombined: boolean,
-): Result<{ outputs: Float64Array; warnings: BatchWarning[] }, EvaluationError> {
+  characteristics: boolean,
+): Result<SolvedBatch, EvaluationError> {
+  if (characteristics) {
+    const raw = mf.evaluateWithCharacteristics(text, batch.inputs, uncombined);
+    return raw.ok
+      ? ok({ outputs: raw.outputs, characteristics: raw.characteristics, warnings: raw.warnings })
+      : err({ ...raw.error, row: raw.row });
+  }
   const raw = mf.evaluate(text, batch.inputs, uncombined);
-  return raw.ok ? ok({ outputs: raw.outputs, warnings: raw.warnings }) : err({ ...raw.error, row: raw.row });
+  return raw.ok
+    ? ok({ outputs: raw.outputs, characteristics: null, warnings: raw.warnings })
+    : err({ ...raw.error, row: raw.row });
 }
 
 /** Converts the model to the target system by coefficient sign flips; returns the converted .tir text. */

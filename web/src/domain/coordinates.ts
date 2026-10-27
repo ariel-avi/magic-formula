@@ -83,7 +83,7 @@ export function readingRows(id: CoordinateIdentification | null): ReadingRow[] {
 
 const negate = (value: number): number => 0 - value;
 
-/** The sweeps after a VERTICAL conversion: every input negated by VERTICAL changes sign (a swept range stays ascending). LATERAL never touches a spec. */
+/** The sweeps after a VERTICAL conversion (results are never converted: the converted model is re-evaluated): every input negated by VERTICAL changes sign (a swept range stays ascending). LATERAL never touches a spec. */
 export function convertSpec(spec: ChartSpec, inputs: readonly InputChannel[], applied: Transforms): ChartSpec {
   if (!applied.vertical) {
     return spec;

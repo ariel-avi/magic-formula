@@ -1,7 +1,7 @@
-import type { SweepBatch } from './batch';
 import type { AxisRef, ChannelKind, SweepSpec } from './chart-spec';
 import { channelLabel } from './channels';
-import type { InputChannel, ModelInfo, OutputChannel } from './model';
+import type { CharacteristicChannel, InputChannel, ModelInfo, OutputChannel } from './model';
+import type { SweepSolution } from './solve';
 import { niceExtent } from './ticks';
 import { displayUnit, hasUnit } from './units';
 
@@ -24,14 +24,28 @@ export function axisLabel(name: string, siUnit: string): string {
   return hasUnit(label) ? `${name} [${label}]` : name;
 }
 
-export function channelsOfKind(model: ModelInfo, kind: ChannelKind): readonly (InputChannel | OutputChannel)[] {
-  return kind === 'input' ? model.inputs : model.outputs;
+export type Channel = InputChannel | OutputChannel | CharacteristicChannel;
+
+/** Axis-selector groups in display order. */
+export const AXIS_GROUPS: readonly { kind: ChannelKind; title: string }[] = [
+  { kind: 'input', title: 'Inputs' },
+  { kind: 'output', title: 'Outputs' },
+  { kind: 'characteristic', title: 'Characteristics' },
+];
+
+const CHANNELS: Readonly<Record<ChannelKind, (model: ModelInfo) => readonly Channel[]>> = {
+  input: (model) => model.inputs,
+  output: (model) => model.outputs,
+  characteristic: (model) => model.characteristics,
+};
+
+export function channelsOfKind(model: ModelInfo, kind: ChannelKind): readonly Channel[] {
+  return CHANNELS[kind](model);
 }
 
-/** Inputs first (model order), then outputs (model order). */
+/** Inputs first, then outputs, then characteristics (each in model order). */
 export function axisOptions(model: ModelInfo): AxisOption[] {
-  const kinds: ChannelKind[] = ['input', 'output'];
-  return kinds.flatMap((kind) =>
+  return AXIS_GROUPS.flatMap(({ kind }) =>
     channelsOfKind(model, kind).map((channel) => {
       const ref: AxisRef = { kind, name: channel.name };
       return {
@@ -44,7 +58,7 @@ export function axisOptions(model: ModelInfo): AxisOption[] {
   );
 }
 
-export function axisChannel(model: ModelInfo, ref: AxisRef): InputChannel | OutputChannel {
+export function axisChannel(model: ModelInfo, ref: AxisRef): Channel {
   const channel = channelsOfKind(model, ref.kind).find((candidate) => candidate.name === ref.name);
   if (channel === undefined) {
     throw new RangeError(`Unknown ${ref.kind} '${ref.name}'`);
@@ -52,23 +66,25 @@ export function axisChannel(model: ModelInfo, ref: AxisRef): InputChannel | Outp
   return channel;
 }
 
-/** One value per batch row (row r = combination * points + point) of the channel, in display units. */
-export function channelColumn(
-  sweep: SweepSpec,
-  batch: SweepBatch,
-  outputs: Float64Array,
-  model: ModelInfo,
-  ref: AxisRef,
-): number[] {
+/**
+ * One value per batch row (row r = combination * points + point) of the channel, in display units.
+ * A NaN (an undefined peak slip) stays NaN.
+ */
+export function channelColumn(sweep: SweepSpec, solution: SweepSolution, model: ModelInfo, ref: AxisRef): number[] {
   const channel = axisChannel(model, ref);
+  const { batch } = solution;
   const { rows } = batch;
   const points = batch.grid.length;
   const column: number[] = [];
-  if (ref.kind === 'output') {
-    const o = model.outputs.findIndex((candidate) => candidate.name === ref.name);
+  if (ref.kind !== 'input') {
+    const matrix = ref.kind === 'output' ? solution.outputs : solution.characteristics;
+    if (matrix === null) {
+      throw new RangeError(`The characteristics of ${sweep.id} were not solved`);
+    }
+    const index = channelsOfKind(model, ref.kind).findIndex((candidate) => candidate.name === ref.name);
     const unit = displayUnit(channel.unit);
     for (let r = 0; r < rows; r += 1) {
-      column.push(unit.fromSi(outputs[o * rows + r]));
+      column.push(unit.fromSi(matrix[index * rows + r]));
     }
     return column;
   }
@@ -98,7 +114,7 @@ export function finiteExtent(values: readonly number[]): [number, number] {
   return min > max ? [0, 1] : [min, max];
 }
 
-/** An input axis spans its data exactly; an output axis (and a constant input) gets round ends. */
+/** An input axis spans its data exactly; an output or characteristic axis (and a constant input) gets round ends. */
 export function axisDomain(kind: ChannelKind, extent: readonly [number, number]): [number, number] {
   return kind === 'input' && extent[0] !== extent[1] ? [extent[0], extent[1]] : niceExtent(extent[0], extent[1], 8);
 }

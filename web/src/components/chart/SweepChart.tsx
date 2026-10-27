@@ -1,6 +1,6 @@
 import { CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from 'recharts';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
-import { formatSignificant } from '@/domain/numbers';
+import { formatSignificant, formatValue } from '@/domain/numbers';
 import type { ChartData } from '@/domain/series';
 
 export function SweepChart({ data }: { data: ChartData }) {
@@ -29,8 +29,8 @@ export function SweepChart({ data }: { data: ChartData }) {
           cursor={{ strokeWidth: 1 }}
           content={
             <ChartTooltipContent
-              labelFormatter={(x) => `${data.xLabel} = ${formatSignificant(x, 5)}`}
-              valueFormatter={(v) => formatSignificant(v, 5)}
+              labelFormatter={(x) => `${data.xLabel} = ${formatValue(x, 5)}`}
+              valueFormatter={(v) => formatValue(v, 5)}
             />
           }
         />
