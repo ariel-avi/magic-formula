@@ -8,6 +8,13 @@ A C++26 library and command-line tool for **Pacejka Magic Formula tire models**.
 - Python bindings (pybind11, NumPy) with an example Jupyter notebook.
 - Verified by unit and module tests, with a 100% line and branch coverage gate on the core library.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/web/workbench-dark.png">
+  <img alt="The web workbench: Inputs, Plot and Tire model panes with three load-step curves" src="docs/images/web/workbench-light.png">
+</picture>
+
+Examples: [web frontend walkthrough](docs/examples/web.md) · [Python bindings by example](docs/examples/python.md).
+
 ## Requirements
 
 CMake >= 4.0, Ninja, Conan 2 (>= 2.9), and GCC >= 14 or Clang >= 19 (C++26). Windows (MSVC 19.4x, built as C++23) and macOS (Homebrew LLVM 21) are supported too, see "Platform support" below. Conan provides Eigen, GoogleTest and Google Benchmark. Coverage needs gcovr 8.x; GCC needs `gcov-<N>`, Clang needs `llvm-cov` and `libclang-rt-<N>-dev`.
@@ -37,6 +44,17 @@ cmake --preset release && cmake --build --preset release
 
 `web/` is a Vite + React + TypeScript + Tailwind + shadcn/ui + Recharts app that runs the existing C++ library in the browser, compiled to WebAssembly (Emscripten, embind adapter in `wasm/`). It loads, edits and saves `.tir` files, shows the model, and plots sweeps: several sweeps share one chart, each with its own swept input, up to two step variables and hue or saturation per step.
 
+A step-by-step walkthrough with screenshots: [`docs/examples/web.md`](docs/examples/web.md).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/web/characteristics-dark.png">
+  <img alt="A characteristics chart in the web app" src="docs/images/web/characteristics-light.png" width="49%">
+</picture>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/web/coordinate-system-dark.png">
+  <img alt="The coordinate-system panel with the 3D view" src="docs/images/web/coordinate-system-light.png" width="49%">
+</picture>
+
 The app is a full-width three-pane workbench on one page: Inputs | Plot | Tire model. The model summary and the parameter panel (grouped by section, filterable) sit next to the chart.
 
 - **Inputs:** sweep tabs at the top of the Inputs pane with New, Duplicate, Remove and a name field (up to 6 sweeps per chart, default names "Sweep n"). Each sweep has its own swept input and range, up to 2 stepped inputs, held values and a pure-slip (uncombined) switch. Below the tabs, one row per model input (FZ, SA, SR, IA, VX, and P when the model has it), each with a Sweep / Step / Value switch; the roles apply per sweep. Exactly one input is swept; choosing Sweep on another input turns the old one into a held value.
@@ -59,7 +77,7 @@ npm run dev                       # http://localhost:5173
 
 Tests (from `web/`): `npm test` (unit tests plus a Node smoke test that loads the built wasm and solves a sweep), `npm run test:unit`, `npm run test:smoke`, `npm run typecheck`, `npm run build`. The wasm module must be built first (`npm run dev` checks this).
 
-UI tests: `npm run test:e2e` runs the Playwright tests in `web/e2e/` against the Vite dev server, using the locally installed Google Chrome (channel `chrome`). If Chrome is not installed: `npx playwright install chromium`, then `PLAYWRIGHT_CHANNEL=chromium npm run test:e2e`. Light and dark screenshots are written to `web/test-results/screenshots/` and the HTML report to `web/playwright-report/` (both gitignored).
+UI tests: `npm run test:e2e` runs the Playwright tests in `web/e2e/` against the Vite dev server, using the locally installed Google Chrome (channel `chrome`). If Chrome is not installed: `npx playwright install chromium`, then `PLAYWRIGHT_CHANNEL=chromium npm run test:e2e`. The walkthrough spec `web/e2e/screenshots.spec.ts` drives and asserts the steps of the walkthrough page in light and dark and writes its captures to `web/test-results/screenshots/` (gitignored); the HTML report goes to `web/playwright-report/` (gitignored). `npm run docs:screenshots` regenerates the committed renderings in `docs/images/web/`.
 
 The wasm module is outside the native build and the coverage gate. CI has no web or wasm job yet (follow-up).
 
@@ -228,6 +246,10 @@ Besides the four `evaluate` forms, every model has `evaluate_characteristics`, `
 ## Python bindings
 
 `python/` holds a pybind11 extension that statically embeds the library, plus a thin Python layer, so the tire models can be evaluated on NumPy arrays. The package is `magic-formula` (import `magic_formula`), Python >= 3.10.
+
+A walkthrough with rendered plots is in [`docs/examples/python.md`](docs/examples/python.md); every snippet runs in the test suite and its outputs are checked. Regenerate the figures with `.venv/bin/python python/examples/run_examples_page.py`.
+
+![Combined slip: lateral force against slip angle for several slip ratios](docs/images/python/combined-slip.png)
 
 ```bash
 conan install . --build=missing -s build_type=Release -s compiler.cppstd=26 -o with_benchmark=False

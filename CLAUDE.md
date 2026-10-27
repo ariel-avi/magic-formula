@@ -47,8 +47,14 @@ python/                  Python bindings, outside the gcovr gate by layout (like
                          always configured, built only with MF_BUILD_PYTHON),
                          bindings/mf_python.cpp (namespace mf::python adapter, one TU, no header),
                          src/magic_formula/ (Python layer), tests/ (pytest, 100% line+branch pytest-cov gate on
-                         magic_formula), examples/magic_formula_demo.ipynb (committed without outputs, run by the tests)
+                         magic_formula), examples/magic_formula_demo.ipynb (committed without outputs, run by the tests),
+                         examples/run_examples_page.py (runs docs/examples/python.md, renders docs/images/python/)
 docs/architecture.md     architecture: layers, class hierarchy, pipeline, error model, "Extending to MF 6.x"
+docs/examples/           example pages linked from README.md: python.md (every python block runs, and its figures are
+                         rendered, through python/examples/run_examples_page.py, which pytest runs), web.md (walkthrough
+                         of the web app; its steps are the ones web/e2e/screenshots.spec.ts drives and asserts)
+docs/images/             committed renderings, regenerated on demand only (never by a test run): web/ (Playwright,
+                         `npm run docs:screenshots`, light and dark), python/ (matplotlib, run_examples_page.py)
 docs/research/           researcher findings: the cited source of truth for equations and the only place that carries
                          citations, page and equation numbers; policies.md = project rules where the sources are silent
 cmake/                   ClangFormat, ClangTidy, Coverage (verbatim from ariel-avi/lab/cpp/cmake; change the lab first);
@@ -62,7 +68,8 @@ web/                     Vite + React app with its own package.json: src/domain/
                          src/wasm/ (solver.ts adapter; mf_wasm.d.ts committed contract, mf_wasm.js generated and
                          gitignored), src/components/ (inputs/, chart/, coordinates/ (CoordinateSystemPanel and
                          the lazy TireScene), parameters/, shell components), src/components/ui/ (shadcn), e2e/ (Playwright; playwright.config.ts,
-                         tsconfig.e2e.json)
+                         tsconfig.e2e.json); screenshots.spec.ts (walkthrough) writes to web/test-results/screenshots/ by
+                         default and to docs/images/web/ via MF_SCREENSHOT_DIR (`npm run docs:screenshots`)
 conan/profiles/wasm      Emscripten host profile (tests off) used by wasm/build.sh
 .emsdk/                  project-local Emscripten SDK (gitignored; created by wasm/setup-emsdk.sh)
 conanfile.py             dependencies (eigen; test: gtest, benchmark by default for Release only, override with -o with_benchmark=True|False; -o with_tests=False drops both; generators in build/conan/<build_type>, or build/conan/wasm for os=Emscripten)
@@ -93,6 +100,7 @@ conan install . --build=missing -s build_type=Release -s compiler.cppstd=26 -o w
 python3.12 -m venv .venv
 CC=gcc-14 CXX=g++-14 .venv/bin/python -m pip install "./python[test]"
 .venv/bin/python -m pytest python/tests
+.venv/bin/python python/examples/run_examples_page.py   # run docs/examples/python.md, regenerate docs/images/python/
 # WebAssembly module + web frontend (macOS/Linux; bash scripts)
 bash wasm/setup-emsdk.sh          # once: project-local emsdk 5.0.7 in .emsdk/
 bash wasm/build.sh                # conan (wasm profile) + cmake --preset wasm -> web/src/wasm/mf_wasm.js
@@ -100,6 +108,7 @@ cd web && npm ci                  # dependencies from the committed package-lock
 npm run dev                       # http://localhost:5173
 npm run typecheck && npm run test:unit && npm run test:coverage && npm run test:smoke && npm run build
 npm run test:e2e                  # Playwright UI tests (Chrome; PLAYWRIGHT_CHANNEL=chromium fallback)
+npm run docs:screenshots          # regenerate docs/images/web/ (walkthrough renderings)
 ```
 
 macOS Python note: use `python3.12` or `python3.13` and the Homebrew LLVM 21 `CC`/`CXX`/`SDKROOT` environment and Conan flags from the `build-and-test` skill, for both `conan install` and `pip install`.

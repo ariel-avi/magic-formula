@@ -2,7 +2,11 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, type Locator, type Page } from '@playwright/test';
 
-export const DATA_DIR = new URL('../../tests/data/', import.meta.url);
+/** The repository root (web/e2e/../../). */
+export const REPO_DIR = new URL('../../', import.meta.url);
+export const DATA_DIR = new URL('tests/data/', REPO_DIR);
+/** UTF-8 text of a repository file, path relative to the root (for example 'README.md'). */
+export const readRepoFile = (path: string): string => readFileSync(fileURLToPath(new URL(path, REPO_DIR)), 'utf8');
 export const dataPath = (name: string): string => fileURLToPath(new URL(name, DATA_DIR));
 export const readFixture = (name: string): string => readFileSync(dataPath(name), 'utf8');
 
