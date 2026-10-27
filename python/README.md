@@ -207,6 +207,7 @@ in `pyproject.toml`) and runs the example notebook.
 
 `python/examples/magic_formula_demo.ipynb` walks through loading, sweeps, plots, the batch API, MF 5.2, clamp flags and
 error handling. It is committed without outputs.
+The executed examples page with rendered plots, run by the pytest suite, is [`../docs/examples/python.md`](../docs/examples/python.md).
 
 ```bash
 .venv/bin/python -m pip install "./python[notebook]"

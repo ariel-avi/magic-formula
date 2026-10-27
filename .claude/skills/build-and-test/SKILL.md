@@ -139,6 +139,7 @@ bash wasm/build.sh                # conan install (conan/profiles/wasm) + cmake 
 cd web && npm ci
 npm run typecheck && npm run test:unit && npm run test:coverage && npm run test:smoke && npm run build
 npm run test:e2e                  # Playwright UI tests (Chrome; PLAYWRIGHT_CHANNEL=chromium fallback)
+npm run docs:screenshots          # regenerate docs/images/web/ (not a test)
 npm run dev                       # http://localhost:5173
 ```
 
@@ -148,7 +149,8 @@ npm run dev                       # http://localhost:5173
 - Localhost check: start `npm run dev` in the background, then `curl -sf http://localhost:5173/` must return 200; stop the server afterwards.
 - `clang-format` covers `wasm/*.cpp`; `clang-tidy` does not (it needs the Emscripten headers).
 - `npm run test:e2e` runs `web/e2e/*.spec.ts` against the Vite dev server that `playwright.config.ts` starts (`webServer`, localhost:5173, reused locally if already running). The browser is the installed Google Chrome (channel `chrome`). If it cannot launch: `npx playwright install chromium`, then `PLAYWRIGHT_CHANNEL=chromium npm run test:e2e`. The `pretest:e2e` hook checks the wasm module. `forbidOnly` is on and retries are 0.
-- Playwright artifacts (all gitignored): traces in `web/test-results/artifacts/`, screenshots in `web/test-results/screenshots/`, HTML report in `web/playwright-report/`.
+- Playwright artifacts (all gitignored): traces in `web/test-results/artifacts/`, walkthrough captures in `web/test-results/screenshots/`, HTML report in `web/playwright-report/`.
+- `web/e2e/screenshots.spec.ts` is the walkthrough of `docs/examples/web.md` (light and dark, plus a docs consistency test). By default it writes to `web/test-results/screenshots/` (artifacts, gitignored). `npm run docs:screenshots` sets `MF_SCREENSHOT_DIR=../docs/images/web` and rewrites the committed renderings, which are NOT test artifacts. test-runner never runs `docs:screenshots` unless asked, and checks that `git status --porcelain` is unchanged after `npm run test:e2e`.
 - Raw-element check (shadcn components only outside `components/ui/`): `grep -rnE "<(input|select|button|table|textarea)[ >]" web/src --include=*.tsx | grep -v src/components/ui/` must print nothing.
 - Playwright results go into the report as passed/failed counts per spec file under `### Failed tests`, naming failing tests only (same style as the Vitest line below).
 - Vitest results go into the report template below as counts of passed/failed tests per Vitest project (`unit`, `smoke`) under `### Failed tests`, naming failing tests only.
@@ -168,6 +170,7 @@ CC=/opt/homebrew/opt/llvm@21/bin/clang CXX=/opt/homebrew/opt/llvm@21/bin/clang++
 .venv/bin/python -m pytest python/tests       # includes the notebook; the 100% pytest-cov gate comes from pyproject.toml
 ```
 
+- pytest also runs `docs/examples/python.md` through `python/tests/test_examples_page.py` (figures go to a temp dir only). Regenerate the committed figures with `.venv/bin/python python/examples/run_examples_page.py` (writes `docs/images/python/`; on an output mismatch it prints a diff and the actual output).
 - The install is non-editable: reinstall (`pip install "./python[test]"`) after any change under `python/` before running pytest.
 - If a rebuild fails on a stale CMake cache, `rm -rf python/build` and reinstall.
 - `python/` is always configured; `mf_python` is built only with `MF_BUILD_PYTHON`, and the source list is `MF_PYTHON_SOURCES` in `python/CMakeLists.txt`. The sources in `MF_PYTHON_SOURCES` are covered by `clang-format_all`; a dry run is `clang-format --dry-run --Werror python/bindings/*.cpp`.
