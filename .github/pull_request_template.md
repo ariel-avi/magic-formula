@@ -21,3 +21,4 @@
 - [ ] clang-format / clang-tidy clean
 - [ ] CLAUDE.md / skills updated if layout, commands or conventions changed
 - [ ] docs/research updated if equations or conventions changed
+- [ ] Security checks (CodeQL, dependency scan, dependency review) pass, or every finding and ignore is listed with its justification

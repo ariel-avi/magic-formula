@@ -1,0 +1,83 @@
+# CodeQL static security analysis (SAST); results appear in the Security tab.
+#
+# C++ build mode is `manual` (rejected: `none` and `autobuild`):
+#   - manual gives the best extraction accuracy: the real preprocessor state, Conan's
+#     Eigen include paths and the template instantiations of the Eigen-heavy core.
+#   - `none` cannot see Conan include paths, so Eigen types stay unresolved.
+#   - `autobuild` cannot run Conan and would fail.
+# Only `mflib` and `mf` are compiled (the code that parses untrusted .tir files and input
+# tables). Tests, bench, python/bindings and wasm are not compiled: they are not shipped and
+# would only add test-only noise.
+#
+# Ordering matters: pip, conan install and cmake configure run before `init`, so only the
+# project's own compilation is traced (not try_compile probes or pip installs).
+name: CodeQL
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: '31 4 * * 1'   # weekly, Monday 04:31 UTC: newly published queries and CVE-related checks surface without a push
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write   # SARIF upload; actions: read is only needed for private repositories
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            build-mode: none
+          - language: c-cpp
+            build-mode: manual
+          - language: javascript-typescript
+            build-mode: none
+          - language: python
+            build-mode: none
+    steps:
+      - name: Check out
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Set up Python (C++ build tools)
+        if: matrix.build-mode == 'manual'
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+      - name: Install Conan dependencies and configure (library and CLI only)
+        if: matrix.build-mode == 'manual'
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          python -m pip install "cmake>=4.0,<5" "conan>=2,<3" ninja
+          conan profile detect --force
+          conan install . --build=missing -s build_type=Debug -s compiler.cppstd=26 -o with_tests=False
+          cmake --preset debug -DMF_BUILD_TESTS=OFF
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
+      - name: Build (traced by CodeQL)
+        if: matrix.build-mode == 'manual'
+        run: cmake --build --preset debug
+      - name: Analyze
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:${{ matrix.language }}

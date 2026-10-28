@@ -1,0 +1,59 @@
+# Weekly version updates for npm, pip and GitHub Actions.
+# Dependabot updates pinned action SHAs together with their "# vX.Y.Z" comments.
+# Alerts and security updates are repository settings (dependency graph,
+# Dependabot alerts, Dependabot security updates), not configured here.
+# Dependabot has no Conan ecosystem, so conanfile.py is not covered here.
+# Schedule: Monday 05:00 UTC, staggered after OSV (04:17) and CodeQL (04:31).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+    cooldown:
+      default-days: 7 # version updates wait 7 days after a release; security updates are never delayed
+    groups:
+      web-minor-and-patch: # one PR for all minor and patch bumps; majors arrive individually
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"] # types follow the Node 24 runtime (package.json engines)
+    commit-message:
+      prefix: build
+      include: scope # build(deps): / build(deps-dev):
+
+  - package-ecosystem: pip
+    directory: /python
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+    cooldown:
+      default-days: 7
+    groups:
+      python-minor-and-patch: # one PR for all minor and patch bumps; majors arrive individually
+        patterns: ["*"]
+        update-types: [minor, patch]
+    versioning-strategy: increase-if-necessary # >= bounds are compatibility floors; never raise them for a version bump
+    commit-message:
+      prefix: build
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions-minor-and-patch: # one PR for all minor and patch action bumps
+        patterns: ["*"]
+        update-types: [minor, patch]
+    commit-message:
+      prefix: ci
+      include: scope # ci(deps):

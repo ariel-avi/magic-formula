@@ -12,7 +12,7 @@ A C++ library and CLI that implement Pacejka Magic Formula tire models.
 
 ## Tech stack
 
-C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19; CI also builds with MSVC on Windows and Homebrew LLVM 21 on macOS) · CMake >= 4.0 · Conan 2 · Eigen (vectorised batch evaluation) · GoogleTest · Google Benchmark · CTest · gcovr (coverage) · clang-format / clang-tidy · Python bindings: Python >= 3.10, pybind11 3, scikit-build-core, NumPy, pytest / pytest-cov, Jupyter (nbclient) · Emscripten 5.0.7 (project-local emsdk in `.emsdk/`) for the WebAssembly module · web app: Node 24, npm, TypeScript (strict), React, Vite, Tailwind CSS v4, shadcn/ui, Recharts, three.js (lazy-loaded 3D convention view), Vitest, Playwright.
+C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19; CI also builds with MSVC on Windows and Homebrew LLVM 21 on macOS) · CMake >= 4.0 · Conan 2 · Eigen (vectorised batch evaluation) · GoogleTest · Google Benchmark · CTest · gcovr (coverage) · clang-format / clang-tidy · Python bindings: Python >= 3.10, pybind11 3, scikit-build-core, NumPy, pytest / pytest-cov, Jupyter (nbclient) · Emscripten 5.0.7 (project-local emsdk in `.emsdk/`) for the WebAssembly module · web app: Node 24, npm, TypeScript (strict), React, Vite, Tailwind CSS v4, shadcn/ui, Recharts, three.js (lazy-loaded 3D convention view), Vitest, Playwright · CI security: CodeQL, OSV-Scanner (uv resolves the Python closure), dependency-review-action, Dependabot (Conan dependencies are not CVE-scanned).
 
 ## Layout (contract)
 
@@ -77,6 +77,17 @@ CMakePresets.json        configure/build/test presets: debug, release, coverage;
 .github/workflows/ci.yml CI: quality (format/tidy), build-test matrix (linux gcc-14 + clang-19,
                          windows-2025 MSVC, macos-15 Homebrew LLVM 21), coverage (gcc-14, 100/100),
                          python (gcc-14, pytest + notebook); no web/wasm job yet (follow-up)
+.github/workflows/codeql.yml  CodeQL security-extended: actions, c-cpp (manual traced debug build of
+                         mflib + mf, gcc-14), javascript-typescript, python; PR, push, weekly, dispatch;
+                         results in the Security tab
+.github/workflows/dependency-scan.yml  OSV-Scanner on web/package-lock.json + the resolved Python closure;
+                         PR, push, weekly, dispatch (Conan dependencies are not scanned, see README)
+.github/workflows/dependency-review.yml  PRs: dependency-review-action, any severity, all scopes
+.github/scripts/         resolve-python-deps.sh: uv universal resolution of python/pyproject.toml from its
+                         requires-python floor into build/osv/; shared by CI and local runs
+.github/dependabot.yml   weekly npm /web, pip /python, github-actions; 7-day cooldown
+                         every uses: is pinned to a full commit SHA with a # vX.Y.Z comment; Dependabot
+                         keeps the pins current
 .claude/                 agents, skills, workflows, hooks, settings
 ```
 
@@ -109,6 +120,15 @@ npm run dev                       # http://localhost:5173
 npm run typecheck && npm run test:unit && npm run test:coverage && npm run test:smoke && npm run build
 npm run test:e2e                  # Playwright UI tests (Chrome; PLAYWRIGHT_CHANNEL=chromium fallback)
 npm run docs:screenshots          # regenerate docs/images/web/ (walkthrough renderings)
+# security checks, run from the repository root (local reproduction; CodeQL and dependency review run only on GitHub)
+cd ..
+actionlint                                                    # all .github/workflows/*.yml (+ shellcheck on run: blocks)
+bash .github/scripts/resolve-python-deps.sh build/osv/python-requirements.txt
+osv-scanner scan source --lockfile=web/package-lock.json --lockfile=requirements.txt:build/osv/python-requirements.txt
+# without a local osv-scanner: the same image the action uses (tar instead of a bind mount)
+tar -cf - web/package-lock.json build/osv/python-requirements.txt | docker run -i --rm --entrypoint bash \
+  ghcr.io/google/osv-scanner-action:v2.7.0 -c 'mkdir /src && tar -xf - -C /src && cd /src && osv-scanner scan source \
+  --lockfile=web/package-lock.json --lockfile=requirements.txt:build/osv/python-requirements.txt'
 ```
 
 macOS Python note: use `python3.12` or `python3.13` and the Homebrew LLVM 21 `CC`/`CXX`/`SDKROOT` environment and Conan flags from the `build-and-test` skill, for both `conan install` and `pip install`.

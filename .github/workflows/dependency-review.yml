@@ -1,0 +1,30 @@
+# Blocks a pull request that adds a dependency with a known vulnerability.
+# Requires the repository's dependency graph setting (Settings > Advanced Security);
+# without it the action errors with "not supported".
+name: Dependency review
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      # No checkout: the action reads only the dependency-graph compare API (local files only for config-file).
+      - name: Block new dependencies with known vulnerabilities
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: low # any severity
+          fail-on-scopes: runtime, development, unknown # the default is runtime only
+          license-check: false # licence policy is out of scope here (follow-up)
