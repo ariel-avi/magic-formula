@@ -11,7 +11,7 @@ if (NOT MF_BUILD_PYTHON)
     return()
 endif ()
 
-find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development.Module)
+find_package(Python 3.11 REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(pybind11 CONFIG REQUIRED)
 
 # The extension embeds the static mflib: a shared module needs PIC, and hidden visibility keeps mflib's symbols out of

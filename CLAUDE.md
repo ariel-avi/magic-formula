@@ -12,7 +12,7 @@ A C++ library and CLI that implement Pacejka Magic Formula tire models.
 
 ## Tech stack
 
-C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19; CI also builds with MSVC on Windows and Homebrew LLVM 21 on macOS) · CMake >= 4.0 · Conan 2 · Eigen (vectorised batch evaluation) · GoogleTest · Google Benchmark · CTest · gcovr (coverage) · clang-format / clang-tidy · Python bindings: Python >= 3.10, pybind11 3, scikit-build-core, NumPy, pytest / pytest-cov, Jupyter (nbclient) · Emscripten 5.0.7 (project-local emsdk in `.emsdk/`) for the WebAssembly module · web app: Node 24, npm, TypeScript (strict), React, Vite, Tailwind CSS v4, shadcn/ui, Recharts, three.js (lazy-loaded 3D convention view), Vitest, Playwright.
+C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19; CI also builds with MSVC on Windows and Homebrew LLVM 21 on macOS) · CMake >= 4.0 · Conan 2 · Eigen (vectorised batch evaluation) · GoogleTest · Google Benchmark · CTest · gcovr (coverage) · clang-format / clang-tidy · Python bindings: Python >= 3.11, pybind11 3, scikit-build-core, NumPy, pytest / pytest-cov, Jupyter (nbclient) · Emscripten 5.0.7 (project-local emsdk in `.emsdk/`) for the WebAssembly module · web app: Node 24, npm, TypeScript (strict), React, Vite, Tailwind CSS v4, shadcn/ui, Recharts, three.js (lazy-loaded 3D convention view), Vitest, Playwright.
 
 ## Layout (contract)
 
