@@ -103,19 +103,19 @@ The checks run on pull requests into `master`, on pushes to `master`, weekly (Mo
 - **Dependency scan** (`.github/workflows/dependency-scan.yml`): OSV-Scanner checks `web/package-lock.json` and the Python dependency closure of `python/pyproject.toml` (runtime, all extras, build-system requires). `.github/scripts/resolve-python-deps.sh` resolves that closure with uv, universally from the `requires-python` floor, so every supported Python version is covered. Any known vulnerability fails the check.
 - **Conan dependencies are not CVE-scanned** (Eigen, GoogleTest, Google Benchmark): OSV has no ConanCenter data, Dependabot has no Conan ecosystem, and `conan audit` (which needs a registered token) was declined. They are updated by hand in `conanfile.py`.
 - **Dependency review** (`.github/workflows/dependency-review.yml`): blocks a PR that adds a dependency with a known vulnerability of any severity in runtime, development or unknown scope. It needs the dependency graph enabled.
-- **Dependabot** (`.github/dependabot.yml`): weekly (Monday) version-update PRs for npm (`web/`), pip (`python/`) and GitHub Actions. Minor and patch updates are grouped per ecosystem (npm and pip), and version updates have a 7-day cooldown (security updates are not delayed).
+- **Dependabot** (`.github/dependabot.yml`): weekly (Monday) version-update PRs for npm (`web/`), pip (`python/`) and GitHub Actions. Minor and patch updates are grouped per ecosystem (npm, pip and GitHub Actions), and version updates have a 7-day cooldown (security updates are not delayed).
 - **Pinning:** every `uses:` in `.github/workflows/` is pinned to a full commit SHA with a `# vX.Y.Z` comment. Dependabot keeps the pins current.
 
 ### Repository settings
 
 The maintainer enables these by hand:
 
-- Dependency graph (required by dependency review).
+- Dependency graph (required by dependency review). Until it is enabled (Settings > Code security), Dependency review fails with "Dependency review is not supported on this repository".
 - Dependabot alerts.
 - Dependabot security updates.
 - Keep code scanning default setup off: the advanced CodeQL workflow conflicts with it.
 - Ruleset "Protect master": mark these checks as required: `Analyze (actions)`, `Analyze (c-cpp)`, `Analyze (javascript-typescript)`, `Analyze (python)`, `OSV-Scanner (npm, PyPI)` and `Dependency review`, and enable "Require code scanning results". Every one of them runs on every pull request into `master` (no path filters), so none can hang on "Expected".
-- The `OSV-Scanner (npm, PyPI)` check is red until the pinned Python floor is raised (to 3.11) in a separate change, because Pillow has known vulnerabilities on Python 3.10. No ignore is added for it.
+- The `OSV-Scanner (npm, PyPI)` check needs the Python floor at 3.11 or later (https://github.com/ariel-avi/magic-formula/pull/16): on Python 3.10 the newest installable Pillow has known vulnerabilities. No ignore is added for it.
 
 ### Reproduce locally
 
