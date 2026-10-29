@@ -245,7 +245,7 @@ Besides the four `evaluate` forms, every model has `evaluate_characteristics`, `
 
 ## Python bindings
 
-`python/` holds a pybind11 extension that statically embeds the library, plus a thin Python layer, so the tire models can be evaluated on NumPy arrays. The package is `magic-formula` (import `magic_formula`), Python >= 3.10.
+`python/` holds a pybind11 extension that statically embeds the library, plus a thin Python layer, so the tire models can be evaluated on NumPy arrays. The package is `magic-formula` (import `magic_formula`), Python >= 3.11.
 
 A walkthrough with rendered plots is in [`docs/examples/python.md`](docs/examples/python.md); every snippet runs in the test suite and its outputs are checked. Regenerate the figures with `.venv/bin/python python/examples/run_examples_page.py`.
 
