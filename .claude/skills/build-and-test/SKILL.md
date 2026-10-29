@@ -177,6 +177,31 @@ CC=/opt/homebrew/opt/llvm@21/bin/clang CXX=/opt/homebrew/opt/llvm@21/bin/clang++
 - The report template below applies with Scope `pytest`.
 - The `feature` workflow's Verify phase runs only ctest and gcovr, so the Python run must be requested explicitly.
 
+## Security checks (CI workflows)
+
+Run only on GitHub: CodeQL (`codeql.yml`) and dependency review (`dependency-review.yml`). Conan dependencies are not CVE-scanned.
+
+test-runner reproduces locally:
+
+- `actionlint` (brew, or `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color`)
+- `uvx check-jsonschema --builtin-schema vendor.dependabot .github/dependabot.yml`
+- `shellcheck .github/scripts/resolve-python-deps.sh`
+- the resolve script and osv-scanner, with the docker fallback:
+
+```bash
+actionlint                                                    # all .github/workflows/*.yml (+ shellcheck on run: blocks)
+bash .github/scripts/resolve-python-deps.sh build/osv/python-requirements.txt
+osv-scanner scan source --lockfile=web/package-lock.json --lockfile=requirements.txt:build/osv/python-requirements.txt
+# without a local osv-scanner: the same image the action uses (tar instead of a bind mount)
+tar -cf - web/package-lock.json build/osv/python-requirements.txt | docker run -i --rm --entrypoint bash \
+  ghcr.io/google/osv-scanner-action:v2.7.0 -c 'mkdir /src && tar -xf - -C /src && cd /src && osv-scanner scan source \
+  --lockfile=web/package-lock.json --lockfile=requirements.txt:build/osv/python-requirements.txt'
+```
+
+OSV exit codes: 0 clean, 1 vulnerabilities found, 127 error (e.g. a missing lockfile), 128 no packages (the action maps 128 to 0; the resolve script's non-empty check guards it).
+
+Report one line per tool under `### Static checks` in the report template, e.g. `- osv-scanner: FAIL pillow@12.3.0 (PyPI, python_full_version < '3.11'): 41 vulns, fixed in 13.0.0` or `- actionlint: PASS`.
+
 ## test-runner report template (exact)
 
 Return exactly this markdown. Omit sections that have nothing to report. Never list passing tests, never paste full logs.
@@ -200,6 +225,7 @@ Return exactly this markdown. Omit sections that have nothing to report. Never l
 - clang-format: `<file>` (N lines differ)
 - clang-tidy: `<file>:<line>` [<check-name>] <message>
 - registration: PASS | <diff lines>
+- security (actionlint / dependabot schema / shellcheck / osv-scanner): PASS | <tool>: <finding>
 
 ### Coverage (see coverage skill)
 - Line: <x>% | Branch: <y>% (target 100/100)

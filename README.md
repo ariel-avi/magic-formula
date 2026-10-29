@@ -1,5 +1,7 @@
 # magic-formula
 
+[![CI](https://github.com/ariel-avi/magic-formula/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/ariel-avi/magic-formula/actions/workflows/ci.yml) [![CodeQL](https://github.com/ariel-avi/magic-formula/actions/workflows/codeql.yml/badge.svg?branch=master)](https://github.com/ariel-avi/magic-formula/actions/workflows/codeql.yml) [![Dependency scan](https://github.com/ariel-avi/magic-formula/actions/workflows/dependency-scan.yml/badge.svg?branch=master)](https://github.com/ariel-avi/magic-formula/actions/workflows/dependency-scan.yml)
+
 A C++26 library and command-line tool for **Pacejka Magic Formula tire models**.
 
 - An abstract base tire-model formulation, with concrete models **PAC2002** and **MF 5.2**. It is designed to be extended (e.g. MF 6.x).
@@ -92,6 +94,54 @@ cmake --preset coverage && cmake --build --preset coverage && cmake --build --pr
 The coverage target runs the tests and gcovr with a 100% line and branch gate on `src/` and `include/`; reports are written to `coverage/`.
 
 CI (`.github/workflows/ci.yml`) runs the format/tidy gates, builds and tests on Linux (GCC 14, Clang 19), Windows (MSVC, `windows-2025`) and macOS (`macos-15`, Homebrew LLVM 21), and runs the coverage gate with GCC 14 on Linux.
+
+## Security checks
+
+The checks run on pull requests into `master`, on pushes to `master`, weekly (Monday) and on manual dispatch. Dependency review runs on pull requests only. Security checks are described in detail here; the CI sentence above covers build, format and coverage.
+
+- **CodeQL** (`.github/workflows/codeql.yml`): languages `actions`, `c-cpp`, `javascript-typescript` and `python`, with the `security-extended` suite. C++ is analysed from a traced manual build (Conan installs Eigen, `cmake --preset debug -DMF_BUILD_TESTS=OFF`, GCC 14) of the library `mflib` and the CLI `mf`; tests, bench, `python/bindings` and wasm are not compiled by the C++ leg. The other languages use build mode none. Results appear in the Security tab (Code scanning) and in the PR's CodeQL check.
+- **Dependency scan** (`.github/workflows/dependency-scan.yml`): OSV-Scanner checks `web/package-lock.json` and the Python dependency closure of `python/pyproject.toml` (runtime, all extras, build-system requires). `.github/scripts/resolve-python-deps.sh` resolves that closure with uv, universally from the `requires-python` floor, so every supported Python version is covered. Any known vulnerability fails the check.
+- **Conan dependencies are not CVE-scanned** (Eigen, GoogleTest, Google Benchmark): OSV has no ConanCenter data, Dependabot has no Conan ecosystem, and `conan audit` (which needs a registered token) was declined. They are updated by hand in `conanfile.py`.
+- **Dependency review** (`.github/workflows/dependency-review.yml`): blocks a PR that adds a dependency with a known vulnerability of any severity in runtime, development or unknown scope. It needs the dependency graph enabled.
+- **Dependabot** (`.github/dependabot.yml`): weekly (Monday) version-update PRs for npm (`web/`), pip (`python/`) and GitHub Actions. Minor and patch updates are grouped per ecosystem (npm, pip and GitHub Actions), and version updates have a 7-day cooldown (security updates are not delayed).
+- **Pinning:** every `uses:` in `.github/workflows/` is pinned to a full commit SHA with a `# vX.Y.Z` comment. Dependabot keeps the pins current.
+
+### Repository settings
+
+The maintainer enables these by hand:
+
+- Dependency graph (required by dependency review). Until it is enabled (Settings > Code security), Dependency review fails with "Dependency review is not supported on this repository".
+- Dependabot alerts.
+- Dependabot security updates.
+- Keep code scanning default setup off: the advanced CodeQL workflow conflicts with it.
+- Ruleset "Protect master": mark these checks as required: `Analyze (actions)`, `Analyze (c-cpp)`, `Analyze (javascript-typescript)`, `Analyze (python)`, `OSV-Scanner (npm, PyPI)` and `Dependency review`, and enable "Require code scanning results". Every one of them runs on every pull request into `master` (no path filters), so none can hang on "Expected".
+- The `OSV-Scanner (npm, PyPI)` check relies on the Python floor being 3.11 or later: on Python 3.10 the newest installable Pillow has known vulnerabilities. No ignore is added for it.
+
+### Reproduce locally
+
+```bash
+actionlint                                                    # all .github/workflows/*.yml (+ shellcheck on run: blocks)
+bash .github/scripts/resolve-python-deps.sh build/osv/python-requirements.txt
+osv-scanner scan source --lockfile=web/package-lock.json --lockfile=requirements.txt:build/osv/python-requirements.txt
+# without a local osv-scanner: the same image the action uses (tar instead of a bind mount)
+tar -cf - web/package-lock.json build/osv/python-requirements.txt | docker run -i --rm --entrypoint bash \
+  ghcr.io/google/osv-scanner-action:v2.7.0 -c 'mkdir /src && tar -xf - -C /src && cd /src && osv-scanner scan source \
+  --lockfile=web/package-lock.json --lockfile=requirements.txt:build/osv/python-requirements.txt'
+```
+
+The script needs python3 >= 3.11 and uv (`python3 -m pip install "uv>=0.11,<1"`). CodeQL and dependency review run only on GitHub.
+
+### Ignore policy
+
+There are no blanket ignores: no ecosystem, group, regex or package-without-version overrides, no warn-only mode, no `continue-on-error`, no raised severity threshold and no `paths-ignore`. A permitted exception names one advisory or one `package@version`, gives a concrete reason (why it is not exploitable here, or why no fix exists) and a removal condition or expiry, is accepted in review and is listed in the PR body.
+
+Mechanisms:
+
+- OSV: `osv-scanner.toml` with `[[PackageOverrides]]` (name, version, ecosystem, `vulnerability.ignore`, `effectiveUntil`, `reason`), passed with `--config=osv-scanner.toml`. Add the file and the flag together, only when an entry exists; `--config` on a missing file is an error.
+- Dependency review: `allow-ghsas`, with a comment per ID.
+- CodeQL: dismiss the alert in the Security tab with a reason and a comment.
+
+No ignore entry is currently configured.
 
 ## Platform support
 

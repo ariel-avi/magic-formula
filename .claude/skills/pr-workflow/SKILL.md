@@ -19,7 +19,7 @@ This skill deliberately does **not** pre-approve `git add`, `git commit`, `git p
 - Every change reaches `master` through a branch + PR. Agents never merge PRs; a human merges.
 - No force-push (`--force`, `-f`, `--force-with-lease`) and no `git reset --hard`, `git rebase` of pushed commits, or branch deletion on shared branches.
 - One logical change per PR. Split unrelated changes into separate branches/PRs.
-- CI must be green (build, all tests, coverage gate 100% line + branch on core, format/tidy) before the PR is reported as ready.
+- CI must be green (build, all tests, coverage gate 100% line + branch on core, format/tidy, and the security checks CodeQL, Dependency scan and Dependency review) before the PR is reported as ready. A red security check is reported with its findings and never silenced; ignores follow the ignore policy in README "Security checks" and are listed in the PR body.
 - No skipped or disabled tests, no unapproved coverage exclusions.
 
 ## Branches
@@ -46,9 +46,13 @@ Create from an up-to-date `master` (`git switch master && git pull --ff-only && 
 ```
 
 - Types: `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `build`, `ci`, `chore`.
-- Scopes: `core`, `pac2002`, `mf52`, `io`, `app`, `bench`, `tests`, `cmake`, `conan`, `python`, `agents`, `skills`, `workflows`.
+- Scopes: `core`, `pac2002`, `mf52`, `io`, `app`, `bench`, `tests`, `cmake`, `conan`, `python`, `agents`, `skills`, `workflows`, `deps`, `deps-dev` (Dependabot only).
 - Stage files explicitly (`git add <paths>`). Never `git add -A` blindly; check `git status` first and make sure no build outputs or secrets are included.
 - Add any attribution lines the session requires at the end of the message.
+
+### Dependabot PRs
+
+Dependabot opens weekly PRs with `build(deps)`, `build(deps-dev)` and `ci(deps)` commit messages. The same CI and security checks run on them. A human reviews and merges them, never an agent. Agents do not push to Dependabot branches unless the orchestrator says so.
 
 ## Opening the PR
 
@@ -83,6 +87,7 @@ The body follows `.github/pull_request_template.md`, which is identical to the b
 - [ ] clang-format / clang-tidy clean
 - [ ] CLAUDE.md / skills updated if layout, commands or conventions changed
 - [ ] docs/research updated if equations or conventions changed
+- [ ] Security checks (CodeQL, dependency scan, dependency review) pass, or every finding and ignore is listed with its justification
 ```
 
 ## After opening
