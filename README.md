@@ -115,7 +115,7 @@ The maintainer enables these by hand:
 - Dependabot security updates.
 - Keep code scanning default setup off: the advanced CodeQL workflow conflicts with it.
 - Ruleset "Protect master": mark these checks as required: `Analyze (actions)`, `Analyze (c-cpp)`, `Analyze (javascript-typescript)`, `Analyze (python)`, `OSV-Scanner (npm, PyPI)` and `Dependency review`, and enable "Require code scanning results". Every one of them runs on every pull request into `master` (no path filters), so none can hang on "Expected".
-- The `OSV-Scanner (npm, PyPI)` check needs the Python floor at 3.11 or later (https://github.com/ariel-avi/magic-formula/pull/16): on Python 3.10 the newest installable Pillow has known vulnerabilities. No ignore is added for it.
+- The `OSV-Scanner (npm, PyPI)` check relies on the Python floor being 3.11 or later: on Python 3.10 the newest installable Pillow has known vulnerabilities. No ignore is added for it.
 
 ### Reproduce locally
 
