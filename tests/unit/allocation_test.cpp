@@ -4,9 +4,11 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <expected>
 #include <gtest/gtest.h>
+#include <limits>
 #include <magic_formula/detail/lanes.hpp>
 #include <magic_formula/detail/mf5x_characteristics.hpp>
 #include <magic_formula/error.hpp>
@@ -22,6 +24,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+#if defined(_MSC_VER)
+#include <malloc.h>
+#endif
 
 // Two independent detectors guard the raw (pointer) evaluate forms, which are documented as never allocating:
 //  - the global allocation functions are replaced by counting versions (catches operator new: std::vector,
@@ -39,6 +44,19 @@
 // raw forms, which run through the same Eigen::Ref hooks.
 // In a Release build (NDEBUG) Eigen's check is not compiled in and only the operator new counter runs; every Debug
 // build must have it, otherwise this file fails to compile.
+// Under ThreadSanitizer the global allocator cannot be replaced (the runtime owns it), so the counter is fed by the
+// sanitizer's allocation hook instead.
+#if defined(__SANITIZE_THREAD__)
+#define MF_ALLOCATION_TEST_TSAN 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define MF_ALLOCATION_TEST_TSAN 1
+#endif
+#endif
+#if !defined(MF_ALLOCATION_TEST_TSAN)
+#define MF_ALLOCATION_TEST_TSAN 0
+#endif
+
 #if !defined(EIGEN_RUNTIME_NO_MALLOC) && !defined(NDEBUG)
 #error "allocation_test needs EIGEN_RUNTIME_NO_MALLOC in non-NDEBUG builds (set by mf_configure_target)"
 #endif
@@ -53,21 +71,59 @@ namespace {
   double *volatile pointer_sink = nullptr;
   // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
-  void *call_malloc(std::size_t size) {
+  // A sink that makes a raw block escape, so that the compiler cannot elide a direct call of an allocation function.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables): see above
+  void *volatile block_sink = nullptr;
+} // namespace
+
+#if MF_ALLOCATION_TEST_TSAN
+// The TSan runtime defines the whole allocation family as strong symbols (statically linked, whole archive), so the
+// global allocator cannot be replaced there. The runtime reports every allocation (operator new and malloc forms)
+// to this hook instead, which feeds the same counter.
+extern "C" void __sanitizer_malloc_hook(const volatile void * /*pointer*/, std::size_t /*size*/) {
+  if (tracking.load(std::memory_order_relaxed)) {
+    allocation_count.fetch_add(1, std::memory_order_relaxed);
+  }
+}
+#else
+namespace {
+  // The alignment that the plain forms of operator new guarantee.
+  constexpr std::size_t DEFAULT_ALIGNMENT = __STDCPP_DEFAULT_NEW_ALIGNMENT__;
+
+  // Allocates `size` bytes (at least 1) aligned to `alignment`; nullptr on failure. MSVC pairs every block with
+  // _aligned_free, elsewhere the blocks are released by free.
+  void *call_allocate(std::size_t size, std::size_t alignment) {
+#if defined(_MSC_VER)
+    return _aligned_malloc(size, alignment);
+#else
+    if (alignment <= DEFAULT_ALIGNMENT) {
+      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory): counting allocator
+      return std::malloc(size);
+    }
+    // aligned_alloc requires the size to be a multiple of the alignment
+    if (size > std::numeric_limits<std::size_t>::max() - alignment) {
+      return nullptr;
+    }
     // NOLINTNEXTLINE(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory): counting allocator
-    return std::malloc(size);
+    return std::aligned_alloc(alignment, ((size + alignment - 1) / alignment) * alignment);
+#endif
   }
 
-  // malloc is called through a pointer so that the static analyser does not follow the allocation of the replaced
-  // operator new into GoogleTest's matcher storage, where it reports a false leak.
+  // The allocation function is called through a pointer so that the static analyser does not follow the allocation of
+  // the replaced operator new into GoogleTest's matcher storage, where it reports a false leak.
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables): volatile function pointer, see above
-  void *(*const volatile MALLOC_FUNCTION)(std::size_t) = &call_malloc;
+  void *(*const volatile ALLOCATE_FUNCTION)(std::size_t, std::size_t) = &call_allocate;
 
-  void *counted_allocate(std::size_t size) {
+  // The one counting allocator behind every replaced allocation form; nullptr on failure.
+  void *counted_allocate_or_null(std::size_t size, std::size_t alignment) noexcept {
     if (tracking.load(std::memory_order_relaxed)) {
       allocation_count.fetch_add(1, std::memory_order_relaxed);
     }
-    void *memory = MALLOC_FUNCTION(size == 0 ? 1 : size);
+    return ALLOCATE_FUNCTION(size == 0 ? 1 : size, alignment);
+  }
+
+  void *counted_allocate(std::size_t size, std::size_t alignment = DEFAULT_ALIGNMENT) {
+    void *memory = counted_allocate_or_null(size, alignment);
     if (memory == nullptr) {
       throw std::bad_alloc();
     }
@@ -75,18 +131,49 @@ namespace {
   }
 
   void counted_free(void *memory) noexcept {
+#if defined(_MSC_VER)
+    _aligned_free(memory);
+#else
     std::free(memory); // NOLINT(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory): counting allocator
+#endif
   }
 } // namespace
 
 // NOLINTBEGIN(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory,misc-new-delete-overloads): counting
 // replacement of the global allocator
+// The complete replaceable family is defined, so that no sanitizer or Valgrind runtime allocator (or static runtime
+// archive member defining the family) is used for any form, and a block never reaches a release function of another
+// allocator. Every form goes through the one counting helper.
 void *operator new(std::size_t size) {
   return counted_allocate(size);
 }
 
 void *operator new[](std::size_t size) {
   return counted_allocate(size);
+}
+
+void *operator new(std::size_t size, const std::nothrow_t &) noexcept {
+  return counted_allocate_or_null(size, DEFAULT_ALIGNMENT);
+}
+
+void *operator new[](std::size_t size, const std::nothrow_t &) noexcept {
+  return counted_allocate_or_null(size, DEFAULT_ALIGNMENT);
+}
+
+void *operator new(std::size_t size, std::align_val_t alignment) {
+  return counted_allocate(size, static_cast<std::size_t>(alignment));
+}
+
+void *operator new[](std::size_t size, std::align_val_t alignment) {
+  return counted_allocate(size, static_cast<std::size_t>(alignment));
+}
+
+void *operator new(std::size_t size, std::align_val_t alignment, const std::nothrow_t &) noexcept {
+  return counted_allocate_or_null(size, static_cast<std::size_t>(alignment));
+}
+
+void *operator new[](std::size_t size, std::align_val_t alignment, const std::nothrow_t &) noexcept {
+  return counted_allocate_or_null(size, static_cast<std::size_t>(alignment));
 }
 
 void operator delete(void *memory) noexcept {
@@ -104,7 +191,42 @@ void operator delete(void *memory, [[maybe_unused]] std::size_t size) noexcept {
 void operator delete[](void *memory, [[maybe_unused]] std::size_t size) noexcept {
   counted_free(memory);
 }
+
+void operator delete(void *memory, const std::nothrow_t &) noexcept {
+  counted_free(memory);
+}
+
+void operator delete[](void *memory, const std::nothrow_t &) noexcept {
+  counted_free(memory);
+}
+
+void operator delete(void *memory, [[maybe_unused]] std::align_val_t alignment) noexcept {
+  counted_free(memory);
+}
+
+void operator delete[](void *memory, [[maybe_unused]] std::align_val_t alignment) noexcept {
+  counted_free(memory);
+}
+
+void operator delete(void *memory, [[maybe_unused]] std::size_t size,
+                     [[maybe_unused]] std::align_val_t alignment) noexcept {
+  counted_free(memory);
+}
+
+void operator delete[](void *memory, [[maybe_unused]] std::size_t size,
+                       [[maybe_unused]] std::align_val_t alignment) noexcept {
+  counted_free(memory);
+}
+
+void operator delete(void *memory, [[maybe_unused]] std::align_val_t alignment, const std::nothrow_t &) noexcept {
+  counted_free(memory);
+}
+
+void operator delete[](void *memory, [[maybe_unused]] std::align_val_t alignment, const std::nothrow_t &) noexcept {
+  counted_free(memory);
+}
 // NOLINTEND(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory,misc-new-delete-overloads)
+#endif
 
 namespace {
   using model_ptr = std::unique_ptr<const mf::tire_model>;
@@ -274,6 +396,36 @@ TEST(allocation, Counter_DetectsStdVectorAllocation) {
     pointer_sink = values.data();
   });
   EXPECT_GE(count, 1);
+}
+
+// The nothrow and aligned forms go through the same counter and release; the blocks are released by the matching
+// delete forms (a mismatch would be reported by the sanitizers and Valgrind).
+TEST(allocation, Counter_DetectsNothrowAndAlignedForms) {
+  constexpr std::size_t alignment = 64;
+  const std::align_val_t aligned{alignment};
+  const long count = count_allocations([&] {
+    block_sink = ::operator new(16, std::nothrow);
+    ::operator delete(block_sink, std::nothrow);
+    block_sink = ::operator new[](16, std::nothrow);
+    ::operator delete[](block_sink, std::nothrow);
+    block_sink = ::operator new(16, aligned);
+    ::operator delete(block_sink, aligned);
+    block_sink = ::operator new[](16, aligned);
+    ::operator delete[](block_sink, 16, aligned);
+    block_sink = ::operator new(16, aligned, std::nothrow);
+    ::operator delete(block_sink, 16, aligned);
+    block_sink = ::operator new[](16, aligned, std::nothrow);
+    ::operator delete[](block_sink, aligned, std::nothrow);
+  });
+  EXPECT_EQ(count, 6);
+}
+
+TEST(allocation, AlignedNew_OverAligned_ReturnsAlignedBlock) {
+  constexpr std::size_t alignment = 128;
+  void *block = ::operator new(1, std::align_val_t{alignment});
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): address arithmetic for the alignment check
+  EXPECT_EQ(reinterpret_cast<std::uintptr_t>(block) % alignment, 0U);
+  ::operator delete(block, std::align_val_t{alignment});
 }
 
 // Positive control for the Eigen guard: an Eigen heap allocation under eigen_malloc_guard must abort the process.

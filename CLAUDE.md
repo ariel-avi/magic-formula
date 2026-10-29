@@ -12,7 +12,7 @@ A C++ library and CLI that implement Pacejka Magic Formula tire models.
 
 ## Tech stack
 
-C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19; CI also builds with MSVC on Windows and Homebrew LLVM 21 on macOS) · CMake >= 4.0 · Conan 2 · Eigen (vectorised batch evaluation) · GoogleTest · Google Benchmark · CTest · gcovr (coverage) · clang-format / clang-tidy · Python bindings: Python >= 3.11, pybind11 3, scikit-build-core, NumPy, pytest / pytest-cov, Jupyter (nbclient) · Emscripten 5.0.7 (project-local emsdk in `.emsdk/`) for the WebAssembly module · web app: Node 24, npm, TypeScript (strict), React, Vite, Tailwind CSS v4, shadcn/ui, Recharts, three.js (lazy-loaded 3D convention view), Vitest, Playwright.
+C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19; CI also builds with MSVC on Windows and Homebrew LLVM 21 on macOS) · CMake >= 4.0 · Conan 2 · Eigen (vectorised batch evaluation) · GoogleTest · Google Benchmark · CTest · gcovr (coverage) · AddressSanitizer + LeakSanitizer, UBSan, ThreadSanitizer, Valgrind memcheck (nightly, Ubuntu 24.04 only: clang-19 with libclang-rt-19-dev, llvm-19 and libstdc++-14-dev, Valgrind >= 3.22) · clang-format / clang-tidy · Python bindings: Python >= 3.11, pybind11 3, scikit-build-core, NumPy, pytest / pytest-cov, Jupyter (nbclient) · Emscripten 5.0.7 (project-local emsdk in `.emsdk/`) for the WebAssembly module · web app: Node 24, npm, TypeScript (strict), React, Vite, Tailwind CSS v4, shadcn/ui, Recharts, three.js (lazy-loaded 3D convention view), Vitest, Playwright.
 
 ## Layout (contract)
 
@@ -20,7 +20,7 @@ The architect may refine this layout. If they do, update this file and the affec
 
 ```
 CMakeLists.txt           composition only: project(), standard, options, cmake/ modules, find_package(Eigen3),
-                         add_subdirectory, coverage target; no source lists, no targets
+                         add_subdirectory, coverage target; no source lists, no targets (options include MF_SANITIZER)
 include/magic_formula/   public headers (core, coverage-gated); sub-directories io/ (mf::io), cli/ (mf::cli),
                          detail/ (mf::detail, internal but under include/ so tests can include it; coverage-gated);
                          include/CMakeLists.txt lists every header -> INTERFACE target `mf_headers` (alias
@@ -61,7 +61,8 @@ docs/research/           researcher findings: the cited source of truth for equa
                          citations, page and equation numbers; policies.md = project rules where the sources are silent
 cmake/                   ClangFormat, ClangTidy, Coverage (verbatim from ariel-avi/lab/cpp/cmake; change the lab first);
                          MfCompileOptions, MfTesting (mf_add_test), MfQualityGates (per-directory clang-format/clang-tidy
-                         registration) (project glue)
+                         registration), MfSanitizers (MF_SANITIZER = address|undefined|thread -> mf_enable_sanitizer(),
+                         called from mf_configure_target) (project glue)
 .clang-format, .clang-tidy  verbatim copies of ariel-avi/lab/cpp/*
 wasm/                    mf_wasm.cpp: embind adapter (namespace mf::wasm; not in mflib, not coverage-gated, built only by
                          the wasm preset); setup-emsdk.sh, build.sh, CMakeLists.txt (sources listed in
@@ -77,10 +78,20 @@ conan/profiles/wasm      Emscripten host profile (tests off) used by wasm/build.
 LICENSE, NOTICE          Apache License 2.0: LICENSE is the verbatim canonical text (never edited; its appendix stays a
                          template), NOTICE holds the project name and the copyright line; no per-file license headers
 conanfile.py             dependencies (eigen; test: gtest, benchmark by default for Release only, override with -o with_benchmark=True|False; -o with_tests=False drops both; generators in build/conan/<build_type>, or build/conan/wasm for os=Emscripten)
-CMakePresets.json        configure/build/test presets: debug, release, coverage; configure/build only: wasm
+CMakePresets.json        configure/build/test presets: debug, release, coverage, asan, ubsan, tsan, valgrind; configure/build only: wasm
 .github/workflows/ci.yml CI: quality (format/tidy), build-test matrix (linux gcc-14 + clang-19,
                          windows-2025 MSVC, macos-15 Homebrew LLVM 21), coverage (gcc-14, 100/100),
-                         python (gcc-14, pytest + notebook); no web/wasm job yet (follow-up)
+                         python (gcc-14, pytest + notebook); no web/wasm job yet (follow-up);
+                         nightly sanitizers: see nightly-sanitizers.yml
+.github/workflows/nightly-sanitizers.yml  nightly (03:23 UTC) + workflow_dispatch; job `changes` diffs the relevant paths
+                         against the headSha of the last successful run on the branch (no previous success, a baseline
+                         missing from the history, or a manual run: runs all); matrix job `analysis` runs presets asan,
+                         ubsan, tsan, valgrind on ubuntu-24.04 with clang-19 for the solver only (mflib, mf, every CTest
+                         unit + module test; timeout 300 min, ctest -j4) and uploads every log as artifact nightly-<preset> (if: always()), plus
+                         nightly-decision
+.github/scripts/         nightly-changes.sh (run/skip decision; holds the one relevant-path list), nightly-findings.sh
+                         (active check + findings gate: any build/<preset>/sanitizer.* file or a Valgrind log without
+                         `ERROR SUMMARY: 0 errors` fails)
 .claude/                 agents, skills, workflows, hooks, settings
 ```
 
@@ -95,6 +106,10 @@ cmake --build --preset debug --target clang-format_all   # formats in place; CI 
 cmake --build --preset debug --target clang-tidy_all     # CI: -DCLANG_TIDY_EXE="clang-tidy-19;--warnings-as-errors=*"
 # coverage gate (see coverage skill): runs ctest + gcovr with the 100/100 thresholds; reports in coverage/
 cmake --preset coverage && cmake --build --preset coverage && cmake --build --preset coverage --target coverage
+# dynamic analysis, Ubuntu 24.04 only (machine or ubuntu:24.04 container; same packages as nightly-sanitizers.yml: clang-19, libclang-rt-19-dev, llvm-19, libstdc++-14-dev, jq, valgrind; Debug conan install first)
+cmake --preset asan && cmake --build --preset asan
+bash .github/scripts/nightly-findings.sh --clean asan && ctest --preset asan   # likewise ubsan, tsan, valgrind (slow, ctest -j4)
+bash .github/scripts/nightly-findings.sh asan                             # active check + findings gate (exit 0 = clean)
 # benchmarks (Release conan install; the release preset sets MF_BUILD_BENCH=ON)
 conan install . --build=missing -s build_type=Release -s compiler.cppstd=26
 cmake --preset release && cmake --build --preset release

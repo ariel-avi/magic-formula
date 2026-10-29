@@ -1,7 +1,10 @@
 include_guard(GLOBAL)
+include(MfSanitizers)
 
 # mf_configure_target(<target>): project warning set (-Werror / /WX with MF_WARNINGS_AS_ERRORS) and, with
 # MF_ENABLE_COVERAGE, gcov instrumentation via enable_coverage_for() (Coverage.cmake, included by the root CMakeLists).
+# With MF_SANITIZER set (address, undefined, thread) every target is also instrumented via mf_enable_sanitizer()
+# (MfSanitizers.cmake).
 # cl.exe reads -W<x> as its own /W<level> option, so the MSVC front end (cl, clang-cl) gets its own set; GCC and Clang
 # keep the GNU-style flags unchanged.
 function(mf_configure_target TARGET_NAME)
@@ -27,5 +30,8 @@ function(mf_configure_target TARGET_NAME)
         "$<$<NOT:$<CONFIG:Release,RelWithDebInfo,MinSizeRel>>:EIGEN_RUNTIME_NO_MALLOC>")
     if (MF_ENABLE_COVERAGE)
         enable_coverage_for(${TARGET_NAME})
+    endif ()
+    if (MF_SANITIZER)
+        mf_enable_sanitizer(${TARGET_NAME})
     endif ()
 endfunction()

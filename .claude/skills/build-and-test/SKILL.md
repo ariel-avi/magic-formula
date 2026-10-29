@@ -2,7 +2,7 @@
 name: build-and-test
 description: Canonical commands to install dependencies, configure, build, run tests (all / by label / by regex), run static checks and benchmarks for magic-formula, plus the exact failure-report template test-runner must return.
 when_to_use: Any time code must be built, tested, format/tidy-checked or benchmarked, and whenever a test-runner report is written or read.
-allowed-tools: Bash(conan *), Bash(cmake *), Bash(ctest *), Bash(clang-format *), Bash(clang-tidy *), Bash(git ls-files *), Bash(xargs -r clang-format *), Bash(xargs -r clang-tidy *), Bash(./build/release/bench/mf_bench *), Bash(ninja *), Bash(diff *)
+allowed-tools: Bash(conan *), Bash(cmake *), Bash(ctest *), Bash(clang-format *), Bash(clang-tidy *), Bash(git ls-files *), Bash(xargs -r clang-format *), Bash(xargs -r clang-tidy *), Bash(./build/release/bench/mf_bench *), Bash(ninja *), Bash(diff *), Bash(actionlint *), Bash(shellcheck *), Bash(bash .github/scripts/*), Bash(jq *)
 user-invocable: true
 argument-hint: "[debug|release|coverage] [unit|module|-R <regex>]"
 ---
@@ -114,6 +114,27 @@ ctest --test-dir build/pkt-<packet-id> --output-on-failure --no-tests=error -R '
 - Only the packet's own targets and tests are in scope. Compile errors in files that belong to other packets of the same wave are reported under `### Build errors` with the note `(outside packet scope)`; they do not count as this packet's failures.
 - The full-suite run on `build/debug` (and the coverage gate on `build/coverage`) happens once, in the Verify phase, after all waves have finished.
 
+## Dynamic analysis (sanitizers, Valgrind)
+
+The nightly workflow runs these on the solver only (mflib, mf, every CTest unit and module test); the presets build with bench, python and wasm off.
+
+- Ubuntu 24.04 only (CI runs ubuntu-24.04; locally use an Ubuntu 24.04 machine or an `ubuntu:24.04` container with the workflow's packages; do not run these presets on macOS or Windows). Prerequisites: clang-19, `libstdc++-14-dev` (clang-19 must pick the GCC 14 libstdc++, which provides `std::ranges::to`; it selects the highest installed GCC), `libclang-rt-<N>-dev` (sanitizer runtimes), `llvm-<N>` (`llvm-symbolizer` on PATH for symbolised stacks), Valgrind >= 3.22, jq (Valgrind gate). On high-entropy-ASLR kernels run `sudo sysctl -w vm.mmap_rnd_bits=28`.
+- Commands: `conan install` Debug as usual (reuses `build/conan/debug`), then, for P in `asan`, `ubsan`, `tsan`, `valgrind`:
+
+```bash
+cmake --preset P && cmake --build --preset P
+bash .github/scripts/nightly-findings.sh --clean P   # remove stale sanitizer.* / valgrind.*.log of earlier runs
+ctest --preset P                                     # the presets run ctest -j4
+bash .github/scripts/nightly-findings.sh P      # active check + findings gate (exit 0 = clean)
+```
+
+- Duration: the suite (1449 tests, about 203 s natively in Debug, measured on an arm64 macOS host; the full valgrind ctest with -j4 took about 55 minutes on an arm64 ubuntu:24.04 container under colima, which is indicative only and not the x86_64 runner; ubuntu-24.04 x86_64 runner timings are not yet measured, so the 300-minute timeout is a budget, not a measurement) takes much longer under valgrind and tsan, hence `jobs: 4` in the test presets and `timeout-minutes: 300` in CI. Reports stay one file per process (pid in the name), so parallel ctest does not clash.
+- Report files: `build/<preset>/sanitizer.<exe>.<pid>` (created only on a report), `build/valgrind/valgrind.<pid>.log` (one per process, including death-test children; the logs of gtest discovery are written during the build and removed by the `--clean` step, so neither the findings gate nor the artifact holds them; a discovery error still fails the build through `--error-exitcode=99`), `build/<preset>/Testing/Temporary/LastTest.log`.
+- Rule: any `sanitizer.*` file, or any Valgrind log without `ERROR SUMMARY: 0 errors from 0 contexts`, is a FAIL even when ctest passes (WILL_FAIL and PASS_REGULAR_EXPRESSION tests and death-test children mask exit codes). Never add suppressions, `*_OPTIONS` that disable checks, or test filters; a finding is a bug (escalate).
+- Leak policy: LSan (Linux ASan) and Valgrind gate definite + indirect leaks; Valgrind shows possible leaks without gating.
+- The `valgrind` launcher passes `--soname-synonyms=somalloc=nouserintercepts`: by default memcheck also redirects `operator new/delete` defined in the main executable, which would bypass the replacement counter in `tests/unit/allocation_test.cpp` (the `*_NoAllocation` tests would pass vacuously and `Counter_DetectsStdVectorAllocation` would fail). The option keeps intercepting libc malloc/free (which the replacement calls), so memcheck is not weakened and no test is filtered.
+- The `valgrind` preset builds run gtest discovery under valgrind (build-time only; its logs are removed by `--clean`).
+
 ## Benchmarks
 
 `bench/` is always configured (so its sources stay in `clang-format_all`) and defines one executable, `mf_bench` (Google Benchmark, linked with `benchmark_main`), only when `MF_BUILD_BENCH` is ON; the sources are listed in `MF_BENCH_SOURCES` in `bench/CMakeLists.txt`. The `release` preset sets it; `debug` and `coverage` leave it OFF (any preset can opt in with `-DMF_BUILD_BENCH=ON`). `mf_bench` is not a CTest test, is not part of the coverage gate and is not checked by `clang-tidy_all`; `clang-format_all` does format `bench/`.
@@ -183,7 +204,7 @@ Return exactly this markdown. Omit sections that have nothing to report. Never l
 
 ```markdown
 ## Test report: PASS | FAIL | BLOCKED
-**Preset:** debug | release | coverage | build/pkt-<id> | **Scope:** all | unit | module | -R '<regex>'
+**Preset:** debug | release | coverage | asan | ubsan | tsan | valgrind | build/pkt-<id> | **Scope:** all | unit | module | -R '<regex>'
 **Counts:** <passed> passed, <failed> failed, <skipped> skipped / <total> total
 **Commands:** `<command 1>`; `<command 2>`
 
@@ -204,6 +225,9 @@ Return exactly this markdown. Omit sections that have nothing to report. Never l
 ### Coverage (see coverage skill)
 - Line: <x>% | Branch: <y>% (target 100/100)
 - `src/foo.cpp`: lines 12-15, 40; branches at 51, 77
+
+### Findings (sanitizers / Valgrind)
+- `build/<preset>/sanitizer.<exe>.<pid>`: <first `SUMMARY:` line> | `build/valgrind/valgrind.<pid>.log`: <`ERROR SUMMARY` line> | none
 
 ### Blocked
 - <tool / environment problem, verbatim error>
