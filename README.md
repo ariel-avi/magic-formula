@@ -295,7 +295,7 @@ Besides the four `evaluate` forms, every model has `evaluate_characteristics`, `
 
 ## Python bindings
 
-`python/` holds a pybind11 extension that statically embeds the library, plus a thin Python layer, so the tire models can be evaluated on NumPy arrays. The package is `magic-formula` (import `magic_formula`), Python >= 3.10.
+`python/` holds a pybind11 extension that statically embeds the library, plus a thin Python layer, so the tire models can be evaluated on NumPy arrays. The package is `magic-formula` (import `magic_formula`), Python >= 3.11.
 
 A walkthrough with rendered plots is in [`docs/examples/python.md`](docs/examples/python.md); every snippet runs in the test suite and its outputs are checked. Regenerate the figures with `.venv/bin/python python/examples/run_examples_page.py`.
 
@@ -335,3 +335,7 @@ An example notebook is in `python/examples/magic_formula_demo.ipynb` (committed 
 Development in this repository is driven by a team of Claude Code agents (`.claude/agents/`). Skills (`.claude/skills/`) hold the shared knowledge, and saved workflows (`.claude/workflows/`: `feature`, `review`) chain the agents together. The main session runs as the `orchestrator`. It dispatches architect -> planner -> developers -> test-runner -> reviewer and checks the result against the request. All changes land through pull requests; nothing is committed to `master` directly.
 
 See [`CLAUDE.md`](CLAUDE.md) for the agent roster, the workflow, the commands and the project rules.
+
+## License
+
+magic-formula is licensed under the [Apache License, Version 2.0](LICENSE); attribution notices are in [`NOTICE`](NOTICE). Dependencies fetched by Conan, pip and npm keep their own licenses. Third-party material committed in the tree keeps its own terms: the MFeval reference data is described in [`tests/data/reference/README.md`](tests/data/reference/README.md), and `web/src/components/ui/` is generated from shadcn/ui (MIT).

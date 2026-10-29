@@ -7,11 +7,11 @@ The package is a pybind11 extension, `magic_formula._core`, that statically embe
 ships one native file. A thin Python layer adds the Python-style API (keywords, broadcasting, exceptions, warnings).
 
 - Distribution name: `magic-formula`; import name: `magic_formula`.
-- Python >= 3.10, NumPy >= 1.24.
+- Python >= 3.11, NumPy >= 1.24.
 
 ## Requirements
 
-- Python >= 3.10 (3.12 or 3.13 recommended)
+- Python >= 3.11 (3.12 or 3.13 recommended)
 - CMake >= 4.0, Ninja, Conan 2
 - Linux: GCC 14 or Clang 19. macOS: Homebrew LLVM 21. Windows: untested (see below).
 
@@ -213,3 +213,7 @@ The executed examples page with rendered plots, run by the pytest suite, is [`..
 .venv/bin/python -m pip install "./python[notebook]"
 .venv/bin/jupyter lab python/examples/magic_formula_demo.ipynb
 ```
+
+## License
+
+Apache License, Version 2.0: [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). They are byte-identical copies of the repository-root files, and the wheel ships them in `.dist-info/licenses/`.

@@ -12,7 +12,7 @@ A C++ library and CLI that implement Pacejka Magic Formula tire models.
 
 ## Tech stack
 
-C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19; CI also builds with MSVC on Windows and Homebrew LLVM 21 on macOS) · CMake >= 4.0 · Conan 2 · Eigen (vectorised batch evaluation) · GoogleTest · Google Benchmark · CTest · gcovr (coverage) · clang-format / clang-tidy · Python bindings: Python >= 3.10, pybind11 3, scikit-build-core, NumPy, pytest / pytest-cov, Jupyter (nbclient) · Emscripten 5.0.7 (project-local emsdk in `.emsdk/`) for the WebAssembly module · web app: Node 24, npm, TypeScript (strict), React, Vite, Tailwind CSS v4, shadcn/ui, Recharts, three.js (lazy-loaded 3D convention view), Vitest, Playwright · CI security: CodeQL, OSV-Scanner (uv resolves the Python closure), dependency-review-action, Dependabot (Conan dependencies are not CVE-scanned).
+C++26 (`-std=c++26` / `c++2c`; GCC >= 14 or Clang >= 19; CI also builds with MSVC on Windows and Homebrew LLVM 21 on macOS) · CMake >= 4.0 · Conan 2 · Eigen (vectorised batch evaluation) · GoogleTest · Google Benchmark · CTest · gcovr (coverage) · clang-format / clang-tidy · Python bindings: Python >= 3.11, pybind11 3, scikit-build-core, NumPy, pytest / pytest-cov, Jupyter (nbclient) · Emscripten 5.0.7 (project-local emsdk in `.emsdk/`) for the WebAssembly module · web app: Node 24, npm, TypeScript (strict), React, Vite, Tailwind CSS v4, shadcn/ui, Recharts, three.js (lazy-loaded 3D convention view), Vitest, Playwright · CI security: CodeQL, OSV-Scanner (uv resolves the Python closure), dependency-review-action, Dependabot (Conan dependencies are not CVE-scanned).
 
 ## Layout (contract)
 
@@ -43,7 +43,9 @@ tests/data/              .tir files, input tables, reference outputs (with origi
 bench/                   Google Benchmark: mf_bench (sources listed in bench/CMakeLists.txt; always configured so they stay in
                          clang-format_all, built only with MF_BUILD_BENCH, ON in the release preset; not a CTest test, not coverage-gated)
 python/                  Python bindings, outside the gcovr gate by layout (like bench/), not an exclusion:
-                         pyproject.toml (scikit-build-core), CMakeLists.txt (target mf_python, sources listed explicitly,
+                         pyproject.toml (scikit-build-core), LICENSE and NOTICE (byte-identical copies of the root files:
+                         project.license-files cannot reach outside python/; tests/test_package.py guards them),
+                         CMakeLists.txt (target mf_python, sources listed explicitly,
                          always configured, built only with MF_BUILD_PYTHON),
                          bindings/mf_python.cpp (namespace mf::python adapter, one TU, no header),
                          src/magic_formula/ (Python layer), tests/ (pytest, 100% line+branch pytest-cov gate on
@@ -72,6 +74,8 @@ web/                     Vite + React app with its own package.json: src/domain/
                          default and to docs/images/web/ via MF_SCREENSHOT_DIR (`npm run docs:screenshots`)
 conan/profiles/wasm      Emscripten host profile (tests off) used by wasm/build.sh
 .emsdk/                  project-local Emscripten SDK (gitignored; created by wasm/setup-emsdk.sh)
+LICENSE, NOTICE          Apache License 2.0: LICENSE is the verbatim canonical text (never edited; its appendix stays a
+                         template), NOTICE holds the project name and the copyright line; no per-file license headers
 conanfile.py             dependencies (eigen; test: gtest, benchmark by default for Release only, override with -o with_benchmark=True|False; -o with_tests=False drops both; generators in build/conan/<build_type>, or build/conan/wasm for os=Emscripten)
 CMakePresets.json        configure/build/test presets: debug, release, coverage; configure/build only: wasm
 .github/workflows/ci.yml CI: quality (format/tidy), build-test matrix (linux gcc-14 + clang-19,

@@ -7,6 +7,7 @@ from conan.tools.cmake import CMakeDeps, CMakeToolchain
 class MagicFormulaConan(ConanFile):
     """Consumer recipe: dependencies and CMake integration files for magic-formula."""
 
+    license = "Apache-2.0"
     settings = "os", "arch", "compiler", "build_type"
 
     # "auto" = Google Benchmark for Release only; True/False force it on/off for any build type.
