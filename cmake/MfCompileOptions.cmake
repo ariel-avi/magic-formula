@@ -1,7 +1,11 @@
 include_guard(GLOBAL)
+include(MfSanitizers)
 
 # mf_configure_target(<target>): project warning set (-Werror / /WX with MF_WARNINGS_AS_ERRORS) and, with
-# MF_ENABLE_COVERAGE, gcov instrumentation via enable_coverage_for() (Coverage.cmake, included by the root CMakeLists).
+# MF_ENABLE_COVERAGE, gcov instrumentation via enable_coverage_for() (Coverage.cmake, included by the root CMakeLists)
+# plus atomic profile updates (-fprofile-update=atomic) on GCC/Clang, so multi-threaded tests cannot corrupt counters.
+# With MF_SANITIZER set (address, undefined, thread) every target is also instrumented via mf_enable_sanitizer()
+# (MfSanitizers.cmake).
 # cl.exe reads -W<x> as its own /W<level> option, so the MSVC front end (cl, clang-cl) gets its own set; GCC and Clang
 # keep the GNU-style flags unchanged.
 function(mf_configure_target TARGET_NAME)
@@ -27,5 +31,12 @@ function(mf_configure_target TARGET_NAME)
         "$<$<NOT:$<CONFIG:Release,RelWithDebInfo,MinSizeRel>>:EIGEN_RUNTIME_NO_MALLOC>")
     if (MF_ENABLE_COVERAGE)
         enable_coverage_for(${TARGET_NAME})
+        if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+            # Tests evaluate models from several threads; non-atomic gcov counters race and corrupt derived line counts.
+            target_compile_options(${TARGET_NAME} PRIVATE -fprofile-update=atomic)
+        endif ()
+    endif ()
+    if (MF_SANITIZER)
+        mf_enable_sanitizer(${TARGET_NAME})
     endif ()
 endfunction()

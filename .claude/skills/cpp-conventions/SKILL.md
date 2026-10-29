@@ -87,6 +87,7 @@ The 100% line + branch gate (`coverage` skill) runs with `--exclude-unreachable-
 - `std::mdspan` is **conditional**: libstdc++ 14 (the GCC 14 minimum) does not ship `<mdspan>` (it arrived in GCC 15). By default use `Eigen::Map` or `std::span` plus explicit strides for multi-dimensional views. Use `std::mdspan` only where the architect asks for it, behind the feature-test macro (`#include <version>`, then `#if defined(__cpp_lib_mdspan)`), with a fallback that compiles on GCC 14, and only if CI builds both paths.
 - Use `override` / `final` explicitly. No `virtual` without a reason.
 - Undefined behaviour is never allowed: no signed overflow, no uninitialised reads, no out-of-bounds access, no type-punning through `reinterpret_cast`.
+- The nightly workflow runs every test under ASan+LSan, UBSan, TSan and Valgrind (presets asan, ubsan, tsan, valgrind); a finding is a bug to fix, not to suppress.
 
 ## Units
 

@@ -93,6 +93,14 @@ cmake --preset coverage && cmake --build --preset coverage && cmake --build --pr
 
 The coverage target runs the tests and gcovr with a 100% line and branch gate on `src/` and `include/`; reports are written to `coverage/`.
 
+The nightly workflow `.github/workflows/nightly-sanitizers.yml` runs AddressSanitizer + LeakSanitizer, UndefinedBehaviorSanitizer, ThreadSanitizer and Valgrind memcheck on the solver (library, CLI and all unit and module tests) when a relevant file changed since the last successful run (always on a manual run or when there is no previous successful run). It uploads the full logs as artifacts and fails on any finding. The analyses run on ubuntu-24.04 only; the Valgrind preset passes `--soname-synonyms=somalloc=nouserintercepts` so that the replacement `operator new` in the allocation test is not redirected by memcheck, while libc malloc stays intercepted. To reproduce locally, use an Ubuntu 24.04 machine or an `ubuntu:24.04` container with the workflow's packages (clang-19, libclang-rt-19-dev, llvm-19, libstdc++-14-dev, jq, valgrind), Debug conan install first:
+
+```bash
+cmake --preset asan && cmake --build --preset asan
+bash .github/scripts/nightly-findings.sh --clean asan && ctest --preset asan   # likewise ubsan, tsan, valgrind (slow)
+bash .github/scripts/nightly-findings.sh asan                             # active check + findings gate (exit 0 = clean)
+```
+
 CI (`.github/workflows/ci.yml`) runs the format/tidy gates, builds and tests on Linux (GCC 14, Clang 19), Windows (MSVC, `windows-2025`) and macOS (`macos-15`, Homebrew LLVM 21), and runs the coverage gate with GCC 14 on Linux.
 
 ## Security checks

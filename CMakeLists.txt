@@ -29,6 +29,8 @@ option(MF_WARNINGS_AS_ERRORS "Treat compiler warnings as errors on project targe
 option(MF_BUILD_PYTHON "Build the pybind11 extension magic_formula._core from python/ (python/pyproject.toml sets it; not a CTest test, not coverage-gated)" OFF)
 option(MF_BUILD_BENCH "Build the Google Benchmark executable mf_bench from bench/ (not a CTest test, not coverage-gated)" OFF)
 option(MF_BUILD_WASM "Build the WebAssembly module mf_wasm from wasm/ (Emscripten toolchain, wasm preset)" OFF)
+set(MF_SANITIZER "" CACHE STRING "Instrument project targets with one sanitizer: address, undefined or thread (empty: none; presets asan, ubsan, tsan)")
+set_property(CACHE MF_SANITIZER PROPERTY STRINGS "" address undefined thread)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(Coverage)
