@@ -213,3 +213,7 @@ The executed examples page with rendered plots, run by the pytest suite, is [`..
 .venv/bin/python -m pip install "./python[notebook]"
 .venv/bin/jupyter lab python/examples/magic_formula_demo.ipynb
 ```
+
+## License
+
+Apache License, Version 2.0: [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). They are byte-identical copies of the repository-root files, and the wheel ships them in `.dist-info/licenses/`.
