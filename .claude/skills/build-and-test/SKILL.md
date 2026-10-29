@@ -206,7 +206,7 @@ test-runner reproduces locally:
 
 - `actionlint` (brew, or `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color`)
 - `uvx check-jsonschema --builtin-schema vendor.dependabot .github/dependabot.yml`
-- `shellcheck .github/scripts/resolve-python-deps.sh`
+- `shellcheck .github/scripts/*.sh`
 - the resolve script and osv-scanner, with the docker fallback:
 
 ```bash
