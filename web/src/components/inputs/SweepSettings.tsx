@@ -10,11 +10,14 @@ interface SweepSettingsProps {
   onRename: (name: string) => void;
   onNameBlur: () => void;
   onUncombined: (uncombined: boolean) => void;
+  supportsTurnSlip: boolean;
+  onTurnSlip: (enabled: boolean) => void;
 }
 
-export function SweepSettings({ sweep, index, onRename, onNameBlur, onUncombined }: SweepSettingsProps) {
+export function SweepSettings({ sweep, index, onRename, onNameBlur, onUncombined, supportsTurnSlip, onTurnSlip }: SweepSettingsProps) {
   const nameId = useId();
   const switchId = useId();
+  const turnSlipId = useId();
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2">
       <div className="flex min-w-0 grow basis-72 items-center gap-2">
@@ -33,6 +36,12 @@ export function SweepSettings({ sweep, index, onRename, onNameBlur, onUncombined
           className="h-7 min-w-0 flex-1 text-xs md:text-xs"
         />
       </div>
+      {supportsTurnSlip && (
+        <div className="flex items-center gap-2">
+          <Switch id={turnSlipId} data-testid="turn-slip-switch" checked={sweep.turnSlip ?? false} onCheckedChange={onTurnSlip} />
+          <Label htmlFor={turnSlipId} className="text-xs">Turn slip</Label>
+        </div>
+      )}
       <div className="flex items-center gap-2">
         <Switch
           id={switchId}

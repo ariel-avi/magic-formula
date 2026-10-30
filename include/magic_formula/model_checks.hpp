@@ -5,9 +5,15 @@
 #include <magic_formula/error.hpp>
 #include <magic_formula/evaluation_types.hpp>
 #include <magic_formula/model_layout.hpp>
+#include <vector>
 
 namespace mf {
   class tire_model;
+
+  /// Non-fatal operating-point diagnostics, including nonzero TS while turn slip is disabled.
+  /// Precondition: inputs has model.input_length() columns (the evaluation shape check already succeeded).
+  [[nodiscard]] std::vector<batch_warning> collect_input_warnings(const tire_model &model,
+                                                                  const Eigen::Ref<const Eigen::MatrixXd> &inputs);
 
   // The free check functions of the evaluation interface. A model built with `model_options::throw_if_model_failure`
   // runs them inside `evaluate` and throws `model_failure`; any caller can run them explicitly on a model built

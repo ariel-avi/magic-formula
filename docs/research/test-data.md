@@ -2,9 +2,9 @@
 
 ## 1. Data policy
 
-- Property files in `tests/data/` are synthetic, authored for magic-formula, each with an origin note. Expectations below are hand-derived.
+- MF 5.x property files in `tests/data/` are synthetic, authored for magic-formula, each with an origin note. Their expectations below are hand-derived. `mf61_solver.tir` is a separately identified, user-supplied source-regression fixture; see the MF 6.1 port-data section.
 - Reference outputs: `tests/data/reference/mf52_mfeval.csv` (190 rows, computed on fixture S52 by an independent MF 5.2 implementation), used by `tests/module/mfeval_reference_test.cpp`; origin and licence notice in `tests/data/reference/README.md` (policies.md section 6). The validation is summarised in validation.md.
-- No property file from outside the project and no other oracle output is committed.
+- The MF 6.1 source fixture is the documented exception to the synthetic-property-file policy. Source-regression outputs are distinguished from independent reference outputs.
 
 ## 2. Fixture S (synthetic PAC2002)
 
@@ -231,3 +231,9 @@ The rows of `tests/data/inputs_s_vectors.csv` (column order FZ,SA,SR,IA,VX; IA 0
 | S_ell combined | V13 (SA 0.05, SR 0.1) | -27161.23002 | 10599.59198 | -30596.45195 | 35316.04991 | 4000 | 4000 | 0.4281129082 | 0.1675533315 |
 | S_ell combined | V22 (Fz 0) | 0 | 0 | 0 | 0 | 0 | 0 | nan | nan |
 | S_ell combined | V22 (Fz -100) | 0 | 0 | 0 | 0 | 0 | 0 | nan | nan |
+
+## MF 6.1 port data
+
+MF 6.1 fixtures and reference vectors must identify their origin separately from the existing MF 5.x fixtures. The user-supplied movedot-tire-solver MF612 test property file and six stored operating-point cases are source-compatibility inputs, not independent literature oracles. Preserve their rounded-value tolerances and distinguish them from generated full-precision direct-call comparisons.
+
+Regression vectors must isolate the source dispatch corrections by choosing different SA and SR, cover pure/combined evaluation and both turn-slip modes, and exercise pressure/camber effects, RE/RL, no contact, clamping and radius failure. Matrix tests include empty batches and partial final blocks. Coordinate property tests cover each transform and their composition.

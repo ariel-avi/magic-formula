@@ -5,7 +5,7 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "magic-formula"
 dynamic = ["version"]
-description = "Pacejka Magic Formula tire models (PAC2002, MF 5.2) from the magic-formula C++ library, with NumPy batch evaluation"
+description = "Pacejka Magic Formula tire models (PAC2002, MF 5.2, MF 6.1) from the magic-formula C++ library, with NumPy batch evaluation"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"

@@ -14,7 +14,7 @@ function positiveOr(entries: Entries, key: string, fallback: number): number {
 /** Signed nominal load FNOMIN * LFZO (the sign is the loaded side); 4000 when FNOMIN is absent or zero. */
 function nominalLoad(entries: Entries): number {
   const fnomin = findNumber(entries, 'FNOMIN');
-  const lfzoRaw = findNumber(entries, 'LFZO');
+  const lfzoRaw = findNumber(entries, 'LFZ0') ?? findNumber(entries, 'LFZO');
   const lfzo = lfzoRaw !== null && lfzoRaw > 0 ? lfzoRaw : 1;
   return fnomin !== null && fnomin !== 0 ? fnomin * lfzo : 4000;
 }
@@ -22,6 +22,8 @@ function nominalLoad(entries: Entries): number {
 const FIXED_VALUES: Record<string, (entries: Entries) => number> = {
   FZ: nominalLoad,
   VX: (entries) => positiveOr(entries, 'LONGVL', 16.7),
+  P: (entries) => positiveOr(entries, 'NOMPRES', 220000),
+  TS: () => 0,
 };
 
 export function defaultFixedValue(channel: InputChannel, entries: Entries): number {
@@ -36,6 +38,8 @@ const SWEEPS: Record<string, (fz0: number) => Range> = {
   IA: () => ({ start: -6, end: 6, points: 25 }),
   FZ: (fz0) => ({ start: Math.min(0.2 * fz0, 2 * fz0), end: Math.max(0.2 * fz0, 2 * fz0), points: 37 }),
   VX: () => ({ start: 1, end: 40, points: 40 }),
+  P: () => ({ start: 100000, end: 300000, points: 21 }),
+  TS: () => ({ start: -0.1, end: 0.1, points: 41 }),
 };
 
 /** Presentation range for sweeping `channel`. */

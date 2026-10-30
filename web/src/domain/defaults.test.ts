@@ -28,7 +28,7 @@ describe('defaultFixedValue', () => {
     expect(defaultFixedValue(channel('VX'), [])).toBe(16.7);
   });
 
-  it.each(['SA', 'SR', 'IA', 'P'])('uses 0 for %s', (name) => {
+  it.each(['SA', 'SR', 'IA', 'TS'])('uses 0 for %s', (name) => {
     expect(defaultFixedValue(channel(name), [])).toBe(0);
   });
 });
@@ -60,7 +60,7 @@ describe('defaultSweptRange', () => {
   });
 
   it('falls back to 0..1 for other channels', () => {
-    expect(defaultSweptRange(channel('P'), entries)).toEqual({ variable: 'P', start: 0, end: 1, points: 11 });
+    expect(defaultSweptRange(channel('UNKNOWN'), entries)).toEqual({ variable: 'UNKNOWN', start: 0, end: 1, points: 11 });
   });
 });
 
@@ -139,5 +139,17 @@ describe('defaultChartSpec', () => {
     const chart = defaultChartSpec(other, [], 'c2');
     expect(chart.x).toEqual({ kind: 'input', name: 'P' });
     expect(chart.y).toEqual({ kind: 'output', name: 'Q' });
+  });
+});
+
+describe('MF6.1 defaults', () => {
+  it('uses canonical load scaling, nominal pressure and zero turn slip', () => {
+    const values = [entry('FNOMIN', '5000'), entry('LFZ0', '1.2'), entry('NOMPRES', '180000')];
+    expect(defaultFixedValue(channel('FZ'), values)).toBe(6000);
+    expect(defaultFixedValue(channel('P'), values)).toBe(180000);
+    expect(defaultFixedValue(channel('P'), [])).toBe(220000);
+    expect(defaultFixedValue(channel('TS'), values)).toBe(0);
+    expect(defaultSweptRange(channel('P'), values)).toEqual({ variable: 'P', start: 100000, end: 300000, points: 21 });
+    expect(defaultSweptRange(channel('TS'), values)).toEqual({ variable: 'TS', start: -0.1, end: 0.1, points: 41 });
   });
 });

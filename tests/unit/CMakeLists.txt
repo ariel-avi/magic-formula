@@ -19,6 +19,7 @@ set(MF_UNIT_TESTS
         mf5x_layout_test.cpp
         mf5x_pipeline_test.cpp
         mf5x_signs_test.cpp
+        mf61_model_test.cpp
         model_checks_test.cpp
         model_contract_test.cpp
         model_layout_test.cpp

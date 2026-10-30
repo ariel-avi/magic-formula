@@ -89,6 +89,8 @@ export function InputEditor({ model, entries, spec, onChange, initialSelectedId,
               index={i}
               onRename={(name) => onChange(renameSweep(spec, i, name))}
               onNameBlur={() => onChange(freezeBlankName(spec, i))}
+              supportsTurnSlip={model.inputs.some((channel) => channel.name === 'TS')}
+              onTurnSlip={(enabled) => onChange(replaceSweep(spec, i, { ...s, turnSlip: enabled }))}
               onUncombined={(u) => onChange(replaceSweep(spec, i, { ...s, uncombined: u }))}
             />
             <ScrollArea className="xl:min-h-0 xl:flex-1">

@@ -2,7 +2,7 @@
 
 A C++ library and CLI that implement Pacejka Magic Formula tire models.
 
-- **Library:** an abstract base tire-model formulation, with concrete specialisations **PAC2002** and **MF 5.2** to start. It can be extended to MF 6.x and other versions.
+- **Library:** an abstract base tire-model formulation, with concrete specialisations **PAC2002**, **MF 5.2**, and **MF 6.1**. MF 6.1 adds pressure, opt-in turn slip, and rolling radii; other MF 6.x versions remain unsupported.
 - **Executable:** takes two input files:
   1. a simulation input table, with one row per operating point: Fz, slip angle SA, slip ratio SR, inclination IA, Vx, and pressure where the model supports it;
   2. a tire property file (`.tir`).
@@ -51,7 +51,7 @@ python/                  Python bindings, outside the gcovr gate by layout (like
                          src/magic_formula/ (Python layer), tests/ (pytest, 100% line+branch pytest-cov gate on
                          magic_formula), examples/magic_formula_demo.ipynb (committed without outputs, run by the tests),
                          examples/run_examples_page.py (runs docs/examples/python.md, renders docs/images/python/)
-docs/architecture.md     architecture: layers, class hierarchy, pipeline, error model, "Extending to MF 6.x"
+docs/architecture.md     architecture: layers, class hierarchy, pipeline, error model, "MF 6.1 implementation" and "Extending to other formulations"
 docs/examples/           example pages linked from README.md: python.md (every python block runs, and its figures are
                          rendered, through python/examples/run_examples_page.py, which pytest runs), web.md (walkthrough
                          of the web app; its steps are the ones web/e2e/screenshots.spec.ts drives and asserts)

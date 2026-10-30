@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace mf {
   namespace {
@@ -111,6 +112,29 @@ namespace mf {
       return channels[static_cast<std::size_t>(i)];
     }
   } // namespace
+
+  std::vector<batch_warning> collect_input_warnings(const tire_model &model,
+                                                    const Eigen::Ref<const Eigen::MatrixXd> &inputs) {
+    if (model.options().turn_slip) {
+      return {};
+    }
+    const auto channel = find_channel(model.layout().inputs, "TS");
+    if (!channel.has_value()) {
+      return {};
+    }
+    const auto column = static_cast<Eigen::Index>(*channel);
+    for (Eigen::Index row = 0; row < inputs.rows(); ++row) {
+      if (inputs(row, column) != 0.0) {
+        std::vector<batch_warning> result(1);
+        batch_warning &item = result.front();
+        item.index = static_cast<std::size_t>(row);
+        item.cause.message = "nonzero TS is ignored because turn slip is disabled";
+        item.cause.where.key = "TS";
+        return std::vector<batch_warning>{std::move(result)};
+      }
+    }
+    return {};
+  }
 
   std::expected<void, error> validate_input(const tire_model &model, const Eigen::Ref<const Eigen::VectorXd> &input) {
     if (input.size() != model.input_length()) {

@@ -28,7 +28,7 @@ These are the project rules: behaviour that the equations alone do not fix (erro
 - **PAC2002 R* keys and FE_METHOD.** PAC2002 R*: all 20 present gives cosine; none gives friction ellipse plus a warning; a partial set gives MISSING_KEY listing the missing keys. A zero value counts as present. FE_METHOD gives a warning and is ignored (both models) (pac2002.md section 5.5). Tested by: loader, V23.
 - **MF 5.2 missing R* keys.** MF 5.2 missing R* keys default to 0 and appear in the defaulted warning. Missing coefficients are not estimated (open question, open-questions.md). Tested by: M9.
 - **[UNITS].** [UNITS] are SI only, with no aliases: LENGTH 'meter', FORCE 'newton', ANGLE 'radians', MASS 'kg' ([UNITS] only), TIME 'second', PRESSURE 'pascal', compared case-insensitively. Absent = SI. Any other value gives UNSUPPORTED_UNIT. Other [UNITS] keys are ignored. 'RAD' is not accepted, and a missing [UNITS] is not an error. Tested by: U1-U3.
-- **Routing order.** An unknown PROPERTY_FILE_FORMAT errors first; a non-integer FITTYP gives INVALID_VALUE; FITTYP 60/61/62/70 gives UNSUPPORTED_MODEL even with PFF 'PAC2002' (resolves the table overlap); then PAC2002; FITTYP 5 without PFF PAC2002, 21, 51 and 52 give UNSUPPORTED_MODEL (no opt-in). PFF 'USER' and 'MF-TYRE' (generic values that do not name a formulation) are accepted and route by FITTYP exactly like an absent PFF; the known PFF set is PAC2002, MF_05, USER, MF-TYRE (model-routing.md, open question in open-questions.md). Tested by: routing tests.
+- **Routing order.** An unknown PROPERTY_FILE_FORMAT errors first; a non-integer FITTYP gives INVALID_VALUE; FITTYP 61 selects MF 6.1; FITTYP 60/62/70 gives UNSUPPORTED_MODEL even with PFF 'PAC2002' (resolves the table overlap); then PAC2002; FITTYP 5 without PFF PAC2002, 21, 51 and 52 give UNSUPPORTED_MODEL (no opt-in). PFF 'USER' and 'MF-TYRE' (generic values that do not name a formulation) are accepted and route by FITTYP exactly like an absent PFF; the known PFF set is PAC2002, MF_05, USER, MF-TYRE (model-routing.md, open question in open-questions.md). Tested by: routing tests.
 - **Required keys and value checks.** Required keys: PAC2002 {FNOMIN, UNLOADED_RADIUS}; MF 5.2 adds {FITTYP, WIDTH, RIM_RADIUS}. Critical keys: {PCX1, PDX1, PKX1, PCY1, PDY1, PKY1, PKY2}. Value checks: FNOMIN non-zero (its sign is the loaded side), R0 > 0, LFZO > 0, plus PKY2 != 0, LMUY != 0, LONGVL > 0 (tir-format.md section 3). Tested by: loader, coefficients.
 - **LONGVL.** LONGVL is required iff QSY3 != 0 or QSY4 != 0; when absent and unused, an internal placeholder of 1 m/s (open question, open-questions.md). Tested by: loader.
 - **Defaults.** L* = 1 silently; other P/Q/R/S = 0 with one warning; VXLOW = 1 (tir-format.md section 3). Tested by: loader.
@@ -49,7 +49,7 @@ Refinements to tir-format.md section 2. Tested by: document tests.
 
 ## 5. CLI
 
-- **Pressure column.** Pressure has no library input. A CLI P column is parsed and ignored with one warning (README.md, Findings, Pressure row). Tested by: cli.
+- **Pressure column.** MF 6.1 uses and requires a P column in Pa. PAC2002 and MF 5.2 have no pressure input and ignore a supplied P column with one warning.
 - **Formats, exit codes, stdout.** CLI: table and CSV formats as documented in the repository README.md, section "CLI" and the `mf::cli` header; exit codes 0/1/2; stdout is all-or-nothing. Tested by: cli.
 
 ## 6. Test data
@@ -95,3 +95,16 @@ Rules for the eight characteristics (DFY_DSA, DFX_DSR, FY_OVER_SA, FX_OVER_SR, D
 - **Vx.** Fx and Fy do not depend on Vx in MF 5.x, but the Vx domain is still validated as for the outputs (section 1). Tested by: tire_model, model_contract.
 - **NaN, inf and printing.** NaN is a documented value only in SA_AT_PEAK_FY and SR_AT_PEAK_FX. Infinity is always a numerical failure (NUMERICAL naming the channel), including a secant at a subnormal slip with a non-zero force. The CLI prints NaN as `nan` (never `-nan`, also after a LATERAL conversion flips the sign bit of a NaN). Tested by: model_checks, result_writer, cli.
 - **Coordinate conversion.** The channels convert by the sign parity of characteristics.md section 6 (`--table-system`, `convert_characteristics`). The web app shows the characteristics of the converted model (it re-evaluates it) and applies no sign rule of its own. Tested by: coordinate_conversion, cli.
+
+## 10. MF 6.1
+
+MF 6.1 has its own coefficient set and pipeline, defined in mf61.md. The existing MF 5.x rules above remain unchanged unless this section explicitly extends them.
+
+- **Version and channels.** FITTYP 61 only. Inputs are FZ, SA, SR, IA, VX, P and TS (SI: N, rad, -, rad, m/s, Pa and 1/m). MF 6.1 requires VX > 0 and P > 0. Named CLI/Python calls require pressure and default omitted turn slip to zero; buffer/matrix calls supply the complete layout.
+- **Turn slip.** `model_options::turn_slip` is false by default. The CLI flag and Python/WebAssembly options enable the corrections explicitly. Nonzero TS with corrections disabled is diagnosed. Turn-slip enablement is not inferred from TS, USE_MODE, or coefficient presence.
+- **Pressure limits.** PRESMIN/PRESMAX form a clamped range like the existing validity ranges; P_CLAMPED reports clamping. The reference operating point uses NOMPRES. Browser defaults also use nominal pressure.
+- **Outputs and characteristics.** The model adds P_CLAMPED, RE and RL to its layout while keeping the established force/moment names and eight characteristics. RE and RL are metres. No-contact rows return zero physical outputs, including radii; the two peak-slip characteristics remain NaN.
+- **Radius convergence.** The coupled effective-radius calculation uses a 1e-6 m tolerance and at most 100 iterations. Nonconvergence produces nonfinite affected outputs, which checked evaluation reports as NUMERICAL.
+- **Coordinates.** MF 6.1 uses its own equation-derived coefficient transformations. Pressure is not sign-flipped. Conversion and round-trip tests establish the required equivalence; source solver conversion maps are not imported without verification.
+- **Source corrections.** Pure longitudinal force receives slip ratio, pure aligning moment receives slip angle, and effective radius receives slip ratio. The source moment-arm turn-slip argument and spin-stiffness grouping are corrected. Source defects are not preserved for parity. The complete departures and their evidence belong in mf61.md and validation.md.
+- **Coefficient defaults.** MF 6.1 defaults are declared per coefficient. Most scale factors default to one, but LMUV defaults to zero so an omitted speed-dependent friction effect stays disabled; the MF 5.x blanket L* rule is not applied to the MF 6.1 set.

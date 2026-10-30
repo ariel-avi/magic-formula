@@ -43,9 +43,9 @@ def test_load_tir_missing_file_raises_io(data_dir):
     assert 'does_not_exist.tir' in str(info.value)
 
 
-def test_load_tir_mf61_raises_unsupported_model(data_dir):
+def test_load_tir_mf62_raises_unsupported_model(data_dir):
     with pytest.raises(mf.MagicFormulaError) as info:
-        mf.load_tir(data_dir / 'mf61_unsupported.tir')
+        mf.load_tir(data_dir / 'mf62_unsupported.tir')
     assert info.value.code == 'UNSUPPORTED_MODEL'
 
 
@@ -89,7 +89,7 @@ def test_parse_tir_file_name_in_error_location():
 
 def test_parse_tir_unsupported_model_raises(data_dir):
     with pytest.raises(mf.MagicFormulaError) as info:
-        mf.parse_tir((data_dir / 'mf61_unsupported.tir').read_text())
+        mf.parse_tir((data_dir / 'mf62_unsupported.tir').read_text())
     assert info.value.code == 'UNSUPPORTED_MODEL'
 
 

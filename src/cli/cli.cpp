@@ -32,11 +32,13 @@ namespace mf::cli {
     /// The usage text. The results header line equals `io::results_header` of the MF 5.x models (tested).
     constexpr std::string_view USAGE_TEXT = R"usage(Usage: mf [options] <inputs-table> <file.tir>
 
-Evaluates the PAC2002 or MF 5.2 tire model of <file.tir> at every row of <inputs-table> and prints
-Fx, Fy, Mz, Mx and My, and the clamp and low-speed flags, for every row as CSV on stdout.
+Evaluates the PAC2002, MF 5.2 or MF 6.1 tire model of <file.tir> at every row of <inputs-table> and prints
+forces, moments, conditioning flags and tire characteristics as CSV on stdout. MF 6.1 also prints
+effective and loaded rolling radii.
 
 Options:
   --uncombined   print the pure-slip outputs (Fx0, Fy0, Mz0) instead of the combined-slip ones
+  --turn-slip    enable MF6.1 turn-slip corrections (TS defaults to zero when omitted)
   --verbose      print on stderr the model information, the ignored .tir keys, the coordinate-system
                  identification summary, every indicator reading, the conversion line and the
                  table-system line
@@ -60,13 +62,13 @@ Coordinate systems:
 Input table (plain text, one operating point per row):
   - A line whose first non-blank character is '#' is a comment; blank lines are ignored.
   - Fields are separated by any run of commas, blanks or tabs.
-  - The first content line is the header. Required columns: FZ SA SR IA VX. Optional column: P (pressure; it is
-    read but ignored with a warning, because PAC2002 and MF 5.2 have no pressure input).
+  - The first content line is the header. Required columns: FZ SA SR IA VX. Optional columns: P (pressure, required by MF6.1) and TS (turn slip, defaults to zero).
+    Unused columns are read and reported with a warning.
     Columns may be in any order and in any letter case.
   - The next non-comment line after the header is the mandatory unit line: one unit per column, in header order
     (column names only on the header line).
     Accepted units:
-      FZ: N  SA: rad|deg  SR: -  IA: rad|deg  VX: m/s  P: Pa
+      FZ: N  SA: rad|deg  SR: -  IA: rad|deg  VX: m/s  P: Pa  TS: 1/m
     A unit in brackets after a name (FZ[N]) is an error. Example header and unit line:
       FZ,SA,SR,IA,VX
       N,deg,-,deg,m/s
@@ -74,7 +76,9 @@ Input table (plain text, one operating point per row):
 
 Output (stdout):
   FZ[N],SA[rad],SR[-],IA[rad],VX[m/s],FX[N],FY[N],MZ[N*m],MX[N*m],MY[N*m],FZ_CLAMPED[-],SR_CLAMPED[-],SA_CLAMPED[-],IA_CLAMPED[-],BELOW_VXLOW[-],DFY_DSA[N/rad],DFX_DSR[N],FY_OVER_SA[N/rad],FX_OVER_SR[N],DY[N],DX[N],SA_AT_PEAK_FY[rad],SR_AT_PEAK_FX[-]
-  followed by one line per input row, in input order. The inputs are echoed unclamped in SI units
+  The header above is for MF 5.x. MF 6.1 echoes P[Pa] and TS[1/m] after VX, and adds
+  P_CLAMPED[-],RE[m],RL[m] after BELOW_VXLOW. Columns always follow the loaded model layout.
+  Results follow one line per input row, in input order. The inputs are echoed unclamped in SI units
   (angles in rad), followed by the five outputs, then five flags (1 = FZ/SR/SA/IA was clamped to the
   property-file range or VX is below VXLOW, 0 otherwise), then eight tire characteristics. The inputs, outputs and
   characteristics are printed in the table system (--table-system). Nothing is written to stdout when an error occurs.
@@ -158,7 +162,7 @@ Exit status:
 
     // clang-format off
     /// The flag warnings, keyed by output channel name; printed in the order of the model's output channels.
-    constexpr std::array<flag_wording, 5> FLAG_WORDINGS{
+    constexpr std::array<flag_wording, 6> FLAG_WORDINGS{
         flag_wording{.channel = "FZ_CLAMPED",
                      .key = "FZ",
                      .what = "outside the property-file range",
@@ -173,6 +177,10 @@ Exit status:
                      .consequence = "evaluated at the limit"},
         flag_wording{.channel = "IA_CLAMPED",
                      .key = "IA",
+                     .what = "outside the property-file range",
+                     .consequence = "evaluated at the limit"},
+        flag_wording{.channel = "P_CLAMPED",
+                     .key = "P",
                      .what = "outside the property-file range",
                      .consequence = "evaluated at the limit"},
         flag_wording{.channel = "BELOW_VXLOW",
@@ -345,12 +353,16 @@ Exit status:
       if (side.has_value()) {
         print_warning(err, side->cause.message, parsed.inputs_path, inputs.lines[side->index], side->cause.where.key);
       }
+      for (const batch_warning &item : collect_input_warnings(model, inputs.values)) {
+        print_warning(err, item.cause.message, parsed.inputs_path, inputs.lines[item.index], item.cause.where.key);
+      }
       print_flag_warnings(err, parsed.inputs_path, inputs.lines, model.layout(), outputs);
     }
 
     /// The `command::RUN` action: load, identify, convert, read, evaluate, report, write.
     int execute(const options &parsed, std::ostream &out, std::ostream &err) {
-      const model_options evaluation{.mode = parsed.mode, .throw_if_model_failure = false};
+      const model_options evaluation{
+          .mode = parsed.mode, .throw_if_model_failure = false, .turn_slip = parsed.turn_slip};
       const std::expected<io::loaded_model, error> loaded = io::load_tire_model_file(parsed.tir_path, evaluation);
       if (!loaded.has_value()) {
         return fail(err, loaded.error());
@@ -417,6 +429,10 @@ Exit status:
       }
       if (arg == "--uncombined") {
         parsed.mode = slip_mode::UNCOMBINED;
+        continue;
+      }
+      if (arg == "--turn-slip") {
+        parsed.turn_slip = true;
         continue;
       }
       if (arg == "--verbose") {

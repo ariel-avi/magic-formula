@@ -13,6 +13,8 @@ namespace mf::io {
     PAC2002,
     /// MF-Tyre 5.2, FITTYP 6 (`mf52_model`).
     MF52,
+    /// MF-Tyre 6.1, FITTYP 61 (`mf61_model`).
+    MF61,
   };
 
   /// Decides which formulation a .tir file is written for (docs/research/model-routing.md). Reads PROPERTY_FILE_FORMAT
@@ -24,7 +26,8 @@ namespace mf::io {
   ///     key, so rules 5 to 7 route them by FITTYP.
   ///  2. FITTYP present but not an integer (5.5, a quoted string, junk): the error of `tir_reader::integer`
   ///     (INVALID_VALUE or INVALID_NUMBER), unchanged.
-  ///  3. FITTYP 60, 61, 62 or 70 (MF-Tyre 6.x): UNSUPPORTED_MODEL "not implemented", even with 'PAC2002'.
+  ///  3. FITTYP 60, 62 or 70 (MF-Tyre 6.x): UNSUPPORTED_MODEL "not implemented", even with 'PAC2002'.
+  ///     FITTYP 61 selects MF 6.1, including files declaring PAC2002.
   ///  4. PROPERTY_FILE_FORMAT 'PAC2002': PAC2002. A FITTYP other than 5 adds the warning
   ///     "FITTYP <n> ignored for PAC2002".
   ///  5. FITTYP 6: MF 5.2 (PROPERTY_FILE_FORMAT absent, 'MF_05', 'USER' or 'MF-TYRE').

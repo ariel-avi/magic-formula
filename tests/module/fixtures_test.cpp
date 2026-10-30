@@ -50,16 +50,17 @@ namespace {
 
   // clang-format off
   /// All .tir files of tests/data and their documented outcome (tests/data/README.md).
-  constexpr std::array<expected_file, 10> EXPECTED_FILES{
+  constexpr std::array<expected_file, 11> EXPECTED_FILES{
       expected_file{.name = "pac2002_S.tir", .failure = std::nullopt},
       expected_file{.name = "pac2002_S_iso.tir", .failure = std::nullopt},
       expected_file{.name = "pac2002_S_sae.tir", .failure = std::nullopt},
+      expected_file{.name = "mf61_solver.tir", .failure = std::nullopt},
       expected_file{.name = "mf52_S52.tir", .failure = std::nullopt},
       expected_file{.name = "mf52_user_pff.tir", .failure = std::nullopt},
       expected_file{.name = "pac2002_S_rng.tir", .failure = std::nullopt},
       expected_file{.name = "pac2002_S_ell.tir", .failure = std::nullopt},
       expected_file{.name = "pac2002_S_part.tir", .failure = error_code::MISSING_KEY},
-      expected_file{.name = "mf61_unsupported.tir", .failure = error_code::UNSUPPORTED_MODEL},
+      expected_file{.name = "mf62_unsupported.tir", .failure = error_code::UNSUPPORTED_MODEL},
       expected_file{.name = "lexical_mix.tir", .failure = std::nullopt},
   };
 
@@ -76,7 +77,8 @@ namespace {
   };
 
   /// All inputs_* files of tests/data and their documented outcome (tests/data/README.md).
-  constexpr std::array<expected_table, 16> EXPECTED_TABLES{
+  constexpr std::array<expected_table, 17> EXPECTED_TABLES{
+      expected_table{.name = "inputs_mf61.csv", .rows = 2, .failure = std::nullopt, .line = 0},
       expected_table{.name = "inputs_s_vectors.csv", .rows = 6, .failure = std::nullopt, .line = 0},
       expected_table{.name = "inputs_degrees.txt", .rows = 6, .failure = std::nullopt, .line = 0},
       expected_table{.name = "inputs_sae.csv", .rows = 4, .failure = std::nullopt, .line = 0},
@@ -349,14 +351,14 @@ TEST(data_fixtures, PacSPart_FailsNamingRhx1) {
   EXPECT_TRUE(loaded.error().message.contains("RHX1")) << loaded.error().message;
 }
 
-TEST(data_fixtures, Mf61Unsupported_Fails) {
-  const load_result loaded = load_fixture("mf61_unsupported.tir");
+TEST(data_fixtures, Mf62Unsupported_Fails) {
+  const load_result loaded = load_fixture("mf62_unsupported.tir");
   ASSERT_FALSE(loaded.has_value());
   EXPECT_EQ(loaded.error().code, error_code::UNSUPPORTED_MODEL);
   EXPECT_EQ(loaded.error().where.key, "FITTYP");
-  EXPECT_EQ(loaded.error().where.file, data_file("mf61_unsupported.tir").string());
+  EXPECT_EQ(loaded.error().where.file, data_file("mf62_unsupported.tir").string());
   EXPECT_EQ(loaded.error().where.line, 8U);
-  EXPECT_TRUE(loaded.error().message.contains("FITTYP 61")) << loaded.error().message;
+  EXPECT_TRUE(loaded.error().message.contains("FITTYP 62")) << loaded.error().message;
 }
 
 TEST(data_fixtures, LexicalMix_EqualsFixtureS) {
@@ -419,7 +421,9 @@ TEST(data_fixtures, EveryLoadableTirFile_IdentifiesAsDocumented) {
     const mf::coordinate_identification id = loaded->model->find_coordinate_system();
     EXPECT_EQ(id.vertical.basis, mf::decision_basis::DECIDED);
     EXPECT_EQ(id.lateral.basis, mf::decision_basis::DECIDED);
-    if (file.name == "pac2002_S_iso.tir") {
+    if (file.name == "mf61_solver.tir") {
+      EXPECT_EQ(id.reference_input.size(), 7);
+    } else if (file.name == "pac2002_S_iso.tir") {
       EXPECT_EQ(id.classification, mf::system_classification::ISO);
       EXPECT_TRUE(id.warnings.empty());
     } else if (file.name == "pac2002_S_sae.tir") {
@@ -432,5 +436,5 @@ TEST(data_fixtures, EveryLoadableTirFile_IdentifiesAsDocumented) {
     }
     ++checked;
   }
-  EXPECT_EQ(checked, 8U);
+  EXPECT_EQ(checked, 9U);
 }
