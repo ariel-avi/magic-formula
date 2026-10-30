@@ -24,16 +24,18 @@ namespace mf::detail {
     // NOLINTBEGIN(readability-identifier-naming): mirrors the Eigen factory names the kernels call
     /// (x, 0) for `n` elements.
     [[nodiscard]] static dual_lane Constant(Eigen::Index n, double x) noexcept {
-      const Lane_T v = Lane_T::Constant(n, x);
-      const Lane_T d = Lane_T::Zero(n);
-      return dual_lane{.value = v, .derivative = d};
+      dual_lane result;
+      result.value = Lane_T::Constant(n, x);
+      result.derivative = Lane_T::Zero(n);
+      return result;
     }
 
     /// (0, 0) for `n` elements.
     [[nodiscard]] static dual_lane Zero(Eigen::Index n) noexcept {
-      const Lane_T v = Lane_T::Zero(n);
-      const Lane_T d = Lane_T::Zero(n);
-      return dual_lane{.value = v, .derivative = d};
+      dual_lane result;
+      result.value = Lane_T::Zero(n);
+      result.derivative = Lane_T::Zero(n);
+      return result;
     }
     // NOLINTEND(readability-identifier-naming)
 
@@ -90,6 +92,13 @@ namespace mf::detail {
       const mask_of<Lane_T> below = value < bound;
       const Lane_T zero = Lane_T::Zero(value.size());
       const Lane_T d = below.select(derivative, zero);
+      return dual_lane{.value = v, .derivative = d};
+    }
+
+    /// -a, with the value and derivative both negated.
+    [[nodiscard]] friend dual_lane operator-(const dual_lane &a) noexcept {
+      const Lane_T v = -a.value;
+      const Lane_T d = -a.derivative;
       return dual_lane{.value = v, .derivative = d};
     }
 

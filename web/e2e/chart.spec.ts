@@ -44,7 +44,7 @@ test('plots the chosen Y channel', async ({ page }) => {
 
 test('labels the X axis with round tick values including zero', async ({ page }) => {
   await openExample(page);
-  const ticks = page.getByTestId('sweep-chart').locator('.recharts-xAxis .recharts-cartesian-axis-tick-value');
+  const ticks = page.getByTestId('sweep-chart').locator('.recharts-xAxis-tick-labels text');
   await expect(ticks.first()).toBeVisible();
   const labels = (await ticks.allTextContents()).map((text) => text.replace('−', '-'));
   expect(labels).toEqual(expect.arrayContaining(['-10', '0', '10']));

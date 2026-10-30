@@ -214,13 +214,14 @@ namespace mf::wasm {
     /// Returns the job, or the {ok:false,error,row:null} object to return (parse, load, or INVALID_ARGUMENT shape
     /// error).
     [[nodiscard]] std::expected<batch_job, val> prepare_batch(const std::string &text, const val &inputs,
-                                                              bool uncombined) {
+                                                              bool uncombined, bool turn_slip) {
       const auto document = io::tir_document::parse(text);
       if (!document) {
         return std::unexpected(evaluation_failure(document.error(), val::null()));
       }
       model_options options;
       options.mode = uncombined ? slip_mode::UNCOMBINED : slip_mode::COMBINED;
+      options.turn_slip = turn_slip;
       auto loaded = io::load_tire_model(*document, options);
       if (!loaded) {
         return std::unexpected(evaluation_failure(loaded.error(), val::null()));
@@ -247,6 +248,13 @@ namespace mf::wasm {
         entry.set("message", side_warning->cause.message);
         entry.set("key", side_warning->cause.where.key);
         entry.set("row", static_cast<double>(side_warning->index));
+        warnings.call<void>("push", entry);
+      }
+      for (const batch_warning &item : collect_input_warnings(model, inputs)) {
+        val entry = val::object();
+        entry.set("message", item.cause.message);
+        entry.set("key", item.cause.where.key);
+        entry.set("row", static_cast<double>(item.index));
         warnings.call<void>("push", entry);
       }
       val result = val::object();
@@ -325,8 +333,8 @@ namespace mf::wasm {
   /// (SI units). `{ok:true,rows,outputs,warnings}` (outputs: Float64Array, column-major rows x output_length;
   /// warnings: `[{message,key,row}]`, at most the load-side warning for FZ on the unloaded side) or
   /// `{ok:false,error,row}`.
-  [[nodiscard]] val evaluate(const std::string &text, const val &inputs, bool uncombined) {
-    const auto job = prepare_batch(text, inputs, uncombined);
+  [[nodiscard]] val evaluate_turn_slip(const std::string &text, const val &inputs, bool uncombined, bool turn_slip) {
+    const auto job = prepare_batch(text, inputs, uncombined, turn_slip);
     if (!job) {
       return job.error();
     }
@@ -342,8 +350,9 @@ namespace mf::wasm {
   /// evaluate plus the characteristics of every row (checked_evaluate_batch_with_characteristics: outputs checked
   /// first). `{ok:true,rows,outputs,characteristics,warnings}`: characteristics is a Float64Array, column-major
   /// rows x characteristics_length(), with NaN only in SA_AT_PEAK_FY and SR_AT_PEAK_FX; or `{ok:false,error,row}`.
-  [[nodiscard]] val evaluate_with_characteristics(const std::string &text, const val &inputs, bool uncombined) {
-    const auto job = prepare_batch(text, inputs, uncombined);
+  [[nodiscard]] val evaluate_with_characteristics_turn_slip(const std::string &text, const val &inputs, bool uncombined,
+                                                            bool turn_slip) {
+    const auto job = prepare_batch(text, inputs, uncombined, turn_slip);
     if (!job) {
       return job.error();
     }
@@ -357,6 +366,16 @@ namespace mf::wasm {
     result.set("characteristics", to_float64_array(solved->characteristics.data(),
                                                    static_cast<std::size_t>(solved->characteristics.size())));
     return result;
+  }
+
+  /// Backward-compatible evaluation without turn slip.
+  [[nodiscard]] val evaluate(const std::string &text, const val &inputs, bool uncombined) {
+    return evaluate_turn_slip(text, inputs, uncombined, false);
+  }
+
+  /// Backward-compatible characteristics without turn slip.
+  [[nodiscard]] val evaluate_with_characteristics(const std::string &text, const val &inputs, bool uncombined) {
+    return evaluate_with_characteristics_turn_slip(text, inputs, uncombined, false);
   }
 
   /// `io::convert_tir`: converts the model text to `target` ("ISO" or "SAE") by coefficient sign flips.
@@ -388,6 +407,8 @@ EMSCRIPTEN_BINDINGS(mf_wasm) {
   emscripten::function("version", &mf::wasm::library_version);
   emscripten::function("inspect", &mf::wasm::inspect);
   emscripten::function("replaceValue", &mf::wasm::replace_value);
+  emscripten::function("evaluateTurnSlip", &mf::wasm::evaluate_turn_slip);
+  emscripten::function("evaluateWithCharacteristicsTurnSlip", &mf::wasm::evaluate_with_characteristics_turn_slip);
   emscripten::function("evaluate", &mf::wasm::evaluate);
   emscripten::function("evaluateWithCharacteristics", &mf::wasm::evaluate_with_characteristics);
   emscripten::function("convertModel", &mf::wasm::convert_model);

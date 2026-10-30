@@ -11,6 +11,7 @@
 #include <magic_formula/io/tir_conversion.hpp>
 #include <magic_formula/io/tir_document.hpp>
 #include <magic_formula/mf5x_signs.hpp>
+#include <magic_formula/mf6x_signs.hpp>
 #include <magic_formula/model_layout.hpp>
 #include <magic_formula/sign_transform.hpp>
 #include <magic_formula/tire_model.hpp>
@@ -51,9 +52,10 @@ namespace mf::io {
 
     /// Edits for every present, non-zero coefficient of the sign table whose transform is planned. Today both MF 5.x
     /// kinds use the same table; MF 6.x will select its table by model kind.
-    void collect_coefficient_edits(const tir_document &document, const sign_transforms &plan,
-                                   std::vector<edit> &edits) {
-      for (const mf5x::coefficient_sign &row : mf5x::COEFFICIENT_SIGNS) {
+    template <typename Rows_T>
+    void collect_coefficient_edits(const tir_document &document, const sign_transforms &plan, std::vector<edit> &edits,
+                                   const Rows_T &rows) {
+      for (const auto &row : rows) {
         if (!contains(plan, row.negated_by)) {
           continue;
         }
@@ -131,7 +133,11 @@ namespace mf::io {
     const sign_transforms plan = plan_conversion(effective, target);
 
     std::vector<edit> edits;
-    collect_coefficient_edits(*document, plan, edits);
+    if (model.metadata().fittyp == 61) {
+      collect_coefficient_edits(*document, plan, edits, mf6x::COEFFICIENT_SIGNS);
+    } else {
+      collect_coefficient_edits(*document, plan, edits, mf5x::COEFFICIENT_SIGNS);
+    }
     collect_limit_edits(*document, model.layout().limits, plan, edits);
     tir_conversion result;
     result.text = splice_edits(text, edits);

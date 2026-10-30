@@ -10,12 +10,15 @@ set(MF_PUBLIC_HEADERS
         magic_formula/detail/lanes.hpp
         magic_formula/detail/mf5x_characteristics.hpp
         magic_formula/detail/mf5x_kernels.hpp
+        magic_formula/detail/mf61_equations.hpp
+        magic_formula/detail/mf61_kernels.hpp
         magic_formula/detail/stationary_point.hpp
         magic_formula/detail/text.hpp
         magic_formula/error.hpp
         magic_formula/evaluation_types.hpp
         magic_formula/io/input_table.hpp
         magic_formula/io/mf5x_bindings.hpp
+        magic_formula/io/mf61_loader.hpp
         magic_formula/io/model_loader.hpp
         magic_formula/io/model_routing.hpp
         magic_formula/io/number.hpp
@@ -32,12 +35,17 @@ set(MF_PUBLIC_HEADERS
         magic_formula/mf5x_layout.hpp
         magic_formula/mf5x_model.hpp
         magic_formula/mf5x_signs.hpp
+        magic_formula/mf61_coefficients.hpp
+        magic_formula/mf61_model.hpp
+        magic_formula/mf6x_layout.hpp
+        magic_formula/mf6x_signs.hpp
         magic_formula/model_checks.hpp
         magic_formula/model_layout.hpp
         magic_formula/pac2002_model.hpp
         magic_formula/sign_transform.hpp
         magic_formula/tire_model.hpp
-        magic_formula/version.hpp)
+        magic_formula/version.hpp
+)
 
 add_library(mf_headers INTERFACE)
 add_library(mf::headers ALIAS mf_headers)

@@ -23,7 +23,7 @@ namespace {
   constexpr std::array<int, 3> UNSUPPORTED_FAMILIES{21, 51, 52};
 
   /// FITTYP values of MF-Tyre 6.x (rule 3).
-  constexpr std::array<int, 4> MF6X_CODES{60, 61, 62, 70};
+  constexpr std::array<int, 3> MF6X_CODES{60, 62, 70};
 
   class model_routing_unsupported_family : public ::testing::TestWithParam<int> {};
 
@@ -211,9 +211,9 @@ TEST(model_routing, Route_MfTyrePffFittyp6_Mf52NoWarning) {
   }
 }
 
-TEST(model_routing, Route_UserPffFittyp61_Mf6xNotImplemented) {
+TEST(model_routing, Route_UserPffFittyp62_Mf6xNotImplemented) {
   std::vector<mf::warning> warnings;
-  const auto result = route("[MODEL]\nPROPERTY_FILE_FORMAT = 'USER'\nFITTYP = 61\n", warnings);
+  const auto result = route("[MODEL]\nPROPERTY_FILE_FORMAT = 'USER'\nFITTYP = 62\n", warnings);
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error().code, error_code::UNSUPPORTED_MODEL);
   EXPECT_EQ(result.error().where.key, "FITTYP");
@@ -282,15 +282,15 @@ TEST(model_routing, Route_EmptyPff_UnsupportedModel) {
   EXPECT_EQ(result.error().where.key, "PROPERTY_FILE_FORMAT");
 }
 
-TEST(model_routing, Route_Pac2002Fittyp61_UnsupportedModel) {
+TEST(model_routing, Route_Pac2002Fittyp62_UnsupportedModel) {
   // Precedence: MF-Tyre 6.x is rejected even when the file declares PAC2002.
   std::vector<mf::warning> warnings;
-  const auto result = route("[MODEL]\nPROPERTY_FILE_FORMAT = 'PAC2002'\nFITTYP = 61\n", warnings);
+  const auto result = route("[MODEL]\nPROPERTY_FILE_FORMAT = 'PAC2002'\nFITTYP = 62\n", warnings);
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error().code, error_code::UNSUPPORTED_MODEL);
   EXPECT_EQ(result.error().where.key, "FITTYP");
   EXPECT_EQ(result.error().where.line, 3U);
-  EXPECT_EQ(result.error().message, "FITTYP 61: MF-Tyre 6.x is not implemented");
+  EXPECT_EQ(result.error().message, "FITTYP 62: MF-Tyre 6.x is not implemented");
   EXPECT_TRUE(warnings.empty());
 }
 
@@ -376,4 +376,11 @@ TEST(model_routing, Route_ConsumesPffAndFittypOnly) {
   ASSERT_TRUE(result.has_value());
   const std::vector<std::string> expected{"USE_MODE"};
   EXPECT_EQ(reader.unconsumed_keys(), expected);
+}
+
+TEST(model_routing, Route_Fittyp61_UsesMf61ForKnownFormats) {
+  for (const std::string_view format : {"", "PROPERTY_FILE_FORMAT = 'USER'\n", "PROPERTY_FILE_FORMAT = 'PAC2002'\n",
+                                        "PROPERTY_FILE_FORMAT = 'MF-TYRE'\n", "PROPERTY_FILE_FORMAT = 'MF_05'\n"}) {
+    EXPECT_EQ(route_clean(std::format("[MODEL]\n{}FITTYP = 61\n", format)), model_kind::MF61);
+  }
 }

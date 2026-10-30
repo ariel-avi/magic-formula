@@ -40,6 +40,8 @@ namespace mf::cli {
     /// `--verbose` prints on stderr the model information, the ignored .tir keys, the coordinate-system
     /// identification summary, every indicator reading, the conversion line and the table-system line.
     bool verbose = false;
+    /// Enable MF6.1 turn slip (`--turn-slip`).
+    bool turn_slip = false;
     /// `--system=iso|sae`: the model is converted to this system before evaluation (coefficient sign flips, applied
     /// only when its identified system differs); empty (default): the model as identified, no conversion.
     std::optional<coordinate_system> target_system;
@@ -49,11 +51,11 @@ namespace mf::cli {
   };
 
   /// Parses the command line (without the program name). The arguments are scanned left to right:
-  /// `--uncombined` and `--verbose` set their option, `--system=<v>` and `--table-system=<v>` set theirs (<v> is iso
-  /// or sae in any letter case; the last occurrence wins; the forms without '=' are unknown options), `-h` / `--help`
-  /// return `command::HELP` and `--version` returns `command::VERSION` immediately (whatever else is on the line),
-  /// any other argument that starts with '-' (including a lone "-") is an error, and everything else is a positional
-  /// argument. A `command::RUN` needs exactly two positional arguments: the input table and the .tir file.
+  /// `--uncombined`, `--turn-slip` and `--verbose` set their option, `--system=<v>` and `--table-system=<v>` set theirs
+  /// (<v> is iso or sae in any letter case; the last occurrence wins; the forms without '=' are unknown options), `-h`
+  /// / `--help` return `command::HELP` and `--version` returns `command::VERSION` immediately (whatever else is on the
+  /// line), any other argument that starts with '-' (including a lone "-") is an error, and everything else is a
+  /// positional argument. A `command::RUN` needs exactly two positional arguments: the input table and the .tir file.
   /// @param args command-line arguments, `argv[0]` excluded
   /// @return the options, or the usage-error message ("unknown option '<arg>'",
   ///         "invalid value '<v>' for --system (expected iso or sae)",
@@ -71,14 +73,15 @@ namespace mf::cli {
   /// (`--table-system`, default the evaluated model's `loaded_side()`, so no conversion) to the model's side
   /// (`convert_inputs`), evaluates them with `checked_evaluate_batch` and `checked_evaluate_characteristics_batch`,
   /// converts the outputs and the characteristics back to the table system (`convert_outputs`,
-  /// `convert_characteristics`) and writes the results as CSV (`io::write_results`) to `out`: 23 columns, the five
-  /// inputs (echoed as read, in the table system), the five outputs, the five 0/1 flag columns (FZ_CLAMPED,
-  /// SR_CLAMPED, SA_CLAMPED, IA_CLAMPED, BELOW_VXLOW) and the eight characteristics (DFY_DSA, DFX_DSR, FY_OVER_SA,
-  /// FX_OVER_SR, DY, DX, SA_AT_PEAK_FY, SR_AT_PEAK_FX). A NaN prints as "nan"; it appears only in SA_AT_PEAK_FY and
-  /// SR_AT_PEAK_FX (no stationary point, or no contact). Diagnostics go to `err`, in this order: load warnings, the
-  /// identification warnings of the evaluated model, optional `--verbose` information (model information, ignored keys,
-  /// the identification of the model as loaded with every indicator reading, the conversion, the table system), one
-  /// warning per table column that the model has no input for (for example P), the load-side warning
+  /// `convert_characteristics`) and writes the results as CSV (`io::write_results`) to `out`: columns follow the model
+  /// layout. MF6.1 has seven inputs, thirteen outputs and eight characteristics. MF5.x has 23 columns: the five inputs
+  /// (echoed as read, in the table system), the five outputs, the five 0/1 flag columns (FZ_CLAMPED, SR_CLAMPED,
+  /// SA_CLAMPED, IA_CLAMPED, BELOW_VXLOW) and the eight characteristics (DFY_DSA, DFX_DSR, FY_OVER_SA, FX_OVER_SR, DY,
+  /// DX, SA_AT_PEAK_FY, SR_AT_PEAK_FX). A NaN prints as "nan"; it appears only in SA_AT_PEAK_FY and SR_AT_PEAK_FX (no
+  /// stationary point, or no contact). Diagnostics go to `err`, in this order: load warnings, the identification
+  /// warnings of the evaluated model, optional `--verbose` information (model information, ignored keys, the
+  /// identification of the model as loaded with every indicator reading, the conversion, the table system), one warning
+  /// per table column that the model has no input for (for example P), the load-side warning
   /// (`load_side_warning` in the table system) naming the first offending table line, and one clamp / VXLOW warning per
   /// flag naming the first table line and the number of rows.
   /// Nothing is written to `out` for a usage, file, model,

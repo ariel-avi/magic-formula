@@ -1,6 +1,6 @@
 # docs/research: index and findings
 
-These notes define the PAC2002 and MF 5.2 tire models as this project implements them: equations, conventions, the `.tir` format, model routing, project rules, test data and validation. They are self-contained; apart from characteristics.md and coordinate-systems.md, which carry an external source list in their Sources section, they refer only to files in this repository. The evaluation orders in pac2002.md section 2 and mf52.md section 4 are authoritative. MF 5.2 shares the PAC2002 forms except the differences listed in pac2002-vs-mf52.md. Where a note and policies.md differ, policies.md is what the code implements.
+These notes define the PAC2002, MF 5.2 and MF 6.1 tire models as this project implements them: equations, conventions, the `.tir` format, model routing, project rules, test data and validation. They are self-contained; apart from characteristics.md, coordinate-systems.md and mf61.md, which carry external source provenance, they refer only to files in this repository. The evaluation orders in pac2002.md section 2 and mf52.md section 4 are authoritative. MF 5.2 shares the PAC2002 forms except the differences listed in pac2002-vs-mf52.md. Where a note and policies.md differ, policies.md is what the code implements.
 
 ## Findings
 
@@ -9,7 +9,7 @@ Each row summarises a rule; Details names the note that defines it.
 | Item | Rule | Details |
 |---|---|---|
 | FITTYP meanings | 5 = MF 5.0/5.1; 6 = MF 5.2; 21 = MF-Swift 1.x (based on MF 5.2); 51/52 = MF-MCTyre 1.0/1.1; 60/61/62 = MF 6.0/6.1/6.2; 70 = MF 6.2 with the temperature and velocity extension | model-routing.md |
-| Routing | see model-routing.md | model-routing.md; policies.md section 3 |
+| Routing | FITTYP 61 selects MF 6.1; 60, 62 and 70 remain unsupported | model-routing.md; policies.md section 3 |
 | Range clamp | Fz, kappa, alpha and gamma are limited to [*_RANGE] before evaluation, including raising Fz to FZMIN; one warning per variable; clamp only when both limits of a pair exist | conventions.md section 8; policies.md section 1 |
 | Unloaded (Fz*sgn(FNOMIN) <= 0) | all outputs 0, no evaluation | policies.md section 1 |
 | alpha_eq | alpha_x,eq = atan(sqrt(tan^2 a + (Kx/Ky)^2 kappa^2)) * sgn+(a), for a = alpha_t, alpha_r; Kx from the pure Fx0 block, Ky from the pure Fy0 block (with the camber reduction); eps-guarded | pac2002.md sections 3 and 5.2 |
@@ -32,7 +32,7 @@ Each row summarises a rule; Details names the note that defines it.
 | Axes | ISO (z up, y left) or SAE (z down, y right), origin at the contact point; the equations never convert | conventions.md section 1; coordinate-systems.md |
 | Trail normaliser | PAC2002: R0/FNOMIN. MF 5.2: R0/F'z0 with t multiplied by LFZO, which equals R0/FNOMIN | pac2002.md section 5.6 |
 | Reuse in combined Mz | Et (from the pure alpha_t), Bt, Ct, Dt, Br, Cr and Dr are reused unchanged; the combined Mz equations redefine none of them | pac2002.md section 3 |
-| Pressure | ignored for both models, with one warning | conventions.md section 11; policies.md section 5 |
+| Pressure | used by MF 6.1; ignored by PAC2002 and MF 5.2 with one warning | mf61.md; policies.md sections 5 and 10 |
 | Uncombined mode | Fx = Fx0, Fy = Fy0, Mz = Mz0 | conventions.md section 10; policies.md section 1 |
 | Vx | Vx < 0 rejected; PAC2002 accepts Vx = 0; MF 5.2 requires Vx > 0 | conventions.md section 5; policies.md section 1 |
 | Characteristics (tangent and secant stiffness, DY, DX, peak slips) | eight channels per point in a separate vector; the cited meaning of BCD, K and D, and the project definitions of the tangent and the secant | characteristics.md section 1; policies.md section 9 |
@@ -52,6 +52,7 @@ Each row summarises a rule; Details names the note that defines it.
 | coordinate-systems.md | the user's ISO and SAE definitions, TNO ISO-W context, conversion by coefficient sign flips (transforms A and B, flip tables, code generalisations, gauge symmetries), robust multi-indicator identification, expected results per fixture, numerical verification |
 | characteristics.md | the eight characteristics: definitions, closed-form derivatives (pure, cosine, friction ellipse with kinks and 0/0 points), evaluation method, peak condition and existence, peak search, sign parity, edge cases, sources |
 | pac2002.md | PAC2002 evaluation order and equations (authoritative), equation choices, rule details |
+| mf61.md | MF 6.1 equations, pressure and turn-slip corrections, radii, coefficients, numerical policies and source-port corrections |
 | mf52.md | MF 5.2 status and settings, parameter set, evaluation order and equations (authoritative), behaviours not adopted |
 | pac2002-vs-mf52.md | difference table |
 | model-routing.md | FITTYP / PROPERTY_FILE_FORMAT routing |

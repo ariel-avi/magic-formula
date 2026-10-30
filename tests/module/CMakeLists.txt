@@ -4,6 +4,7 @@ set(MF_MODULE_TESTS
         cli_test.cpp
         concurrent_evaluation_test.cpp
         fixtures_test.cpp
+        mf61_integration_test.cpp
         mfeval_reference_test.cpp
         tir_edit_test.cpp)
 

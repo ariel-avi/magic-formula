@@ -68,6 +68,13 @@ describe('solveSweep', () => {
     expect(outcome.warnings).toEqual([]);
   });
 
+  it('forwards explicit turn-slip opt-in', () => {
+    const solve = vi.fn<BatchSolver>(() => ok({ outputs: new Float64Array(3), characteristics: null, warnings: [] }));
+    const enabled = { ...sweep, turnSlip: true };
+    solveSweep(enabled, inputs, solve, false);
+    expect(solve).toHaveBeenCalledWith(buildBatch(enabled, inputs), false, false, true);
+  });
+
   it('forwards the characteristics flag and keeps the matrix', () => {
     const outputs = new Float64Array([1, 2, 3]);
     const characteristics = new Float64Array([4, 5, 6]);

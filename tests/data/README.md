@@ -2,9 +2,12 @@
 
 ## Origin
 
-Every file in this directory (except `reference/`) is **synthetic**: authored for magic-formula from
-`docs/research/test-data.md`.
-Nothing is copied from, or derived from, any vendor, third-party or reference-implementation file.
+The MF 5.x and lexical/input-error fixtures in this directory are **synthetic**: authored for magic-formula from
+`docs/research/test-data.md`. Those fixtures are not copied from, or derived from, vendor or reference-implementation files.
+`mf61_solver.tir` is a separate source-regression fixture: 187 supported numeric coefficient values from the
+user-supplied movedot-tire-solver MF612 test file. Unsupported metadata and validity ranges are deliberately
+omitted so the stored source operating points, including pressure 180000 Pa, remain unclamped. It is not an
+independent accuracy oracle.
 `reference/` holds numbers computed by MFeval 4.0 on our synthetic fixture, with their origin and
 licence notice in `reference/README.md`. The coefficient values are the hand-derivable fixture "S" of the
 research notes; the operating ranges of `pac2002_S_rng.tir` are synthetic values.
@@ -26,7 +29,8 @@ C++ tests (string literals with `"\r\n"`), not with a file, because git may norm
 | `pac2002_S_rng.tir` | Operating ranges and clamping | S + `[LONG_SLIP_RANGE]` KPU -1.0..1.0, `[SLIP_ANGLE_RANGE]` ALP -1.5..1.5, `[INCLINATION_ANGLE_RANGE]` CAM -0.2..0.2, `[VERTICAL_FORCE_RANGE]` FZ 200..10000 (141 lines) | V19, P6 | PAC2002 with the four ranges, no warnings |
 | `pac2002_S_ell.tir` | Friction-ellipse selection | S without the 20 R* keys (RBX1 RBX2 RCX1 REX1 REX2 RHX1 RBY1 RBY2 RBY3 RCY1 REY1 REY2 RHY1 RHY2 RVY1 RVY2 RVY3 RVY4 RVY5 RVY6; 113 lines) | P1, P16 | PAC2002, friction-ellipse method, one warning |
 | `pac2002_S_part.tir` | Partial R* set | S without `RHX1` only (132 lines) | V23 | Load error MISSING_KEY naming RHX1 |
-| `mf61_unsupported.tir` | MF-Tyre 6.x is not implemented | `[MDI_HEADER]` + `[MODEL] FITTYP = 61` only | R7 | Load error UNSUPPORTED_MODEL |
+| `mf62_unsupported.tir` | MF-Tyre 6.2 is not implemented | `[MDI_HEADER]` + `[MODEL] FITTYP = 62` only | R7 | Load error UNSUPPORTED_MODEL |
+| `mf61_solver.tir` | Native MF 6.1 source regression | 187 supported coefficient values from the supplied MF612 fixture; unsupported metadata and ranges omitted | MF 6.1 model and integration tests | MF 6.1; source-regression evidence only |
 | `lexical_mix.tir` | Every lexical variant, same values as S | Same key/value set as `pac2002_S.tir` (plus an unknown quoted `TIRE_DESCRIPTION` and `[INERTIA] MASS`) | L1-L4, L6, L7, L10, L11 | Coefficients and metadata identical to `pac2002_S.tir`, no warnings |
 
 Identification of the other fixtures: the S family (`pac2002_S.tir`, `pac2002_S_rng.tir`, `pac2002_S_ell.tir`,
@@ -50,6 +54,7 @@ Format: a header line of column names, then the mandatory unit line, then data r
 | `inputs_s_vectors.csv` | Rows V2, V3, V12, V13, V22 (Fz 0), V22 (Fz -100); header and unit line | V2, V3, V12, V13, V22, M1, M2, M5 | S, S52 | Header line 3, unit line 4, data lines 5-10 |
 | `inputs_degrees.txt` | The same six points, angles in degrees, columns reordered (`fz sr sa ia vx` header, a comment, unit line `N - deg DEG m/s`), blank/tab separated, comments and blank lines between rows | as above | S | Results equal the CSV run within 1e-9 |
 | `inputs_sae.csv` | Rows V2, V3, V12, V13 of `inputs_s_vectors.csv` with FZ negated (SAE z-down; SA, SR and IA have the same definition in ISO and SAE) | as the four rows | `pac2002_S_sae.tir` | 4 rows, all FZ < 0; used by cli_test and fixtures_test; header line 2, unit line 3, data lines 4-7 |
+| `inputs_mf61.csv` | MF 6.1 operating points with pressure and turn slip | MF 6.1 integration | `mf61_solver.tir` | Hand-selected operating points for pressure and turn-slip integration |
 | `inputs_pressure.csv` | A `P` column with unit `Pa` on the unit line | pressure column ignored | S, S52 | One pressure warning |
 | `inputs_pressure_mixed_fz.csv` | A `P` column and one loaded row plus one row with FZ = -100 | the ignored-column warning comes before the load-side warning | S | Data lines 4-5; the load-side warning names line 5 |
 | `inputs_ranges.csv` | One row inside and one row beyond each S-rng limit | V19 | `pac2002_S_rng.tir` | See line numbers below |
@@ -66,10 +71,10 @@ Format: a header line of column names, then the mandatory unit line, then data r
 
 `tests/module/fixtures_test.cpp` (`EveryInputTable_HasExpectedOutcome`) loads every `inputs_*` file and checks its documented outcome (rows, or error code and line); `cli_test` `Run_BadInputTable_Exit1AtLine` runs the six error tables through the CLI.
 
-CLI outputs carry 23 columns: the five inputs, the five outputs (FX, FY, MZ, MX, MY), five 0/1 flag columns
+PAC2002 and MF 5.2 CLI outputs carry 23 columns: the five inputs, the five outputs (FX, FY, MZ, MX, MY), five 0/1 flag columns
 (FZ_CLAMPED, SR_CLAMPED, SA_CLAMPED, IA_CLAMPED, BELOW_VXLOW) and eight characteristics (DFY_DSA, DFX_DSR,
 FY_OVER_SA, FX_OVER_SR, DY, DX, SA_AT_PEAK_FY, SR_AT_PEAK_FX). `nan` appears only in SA_AT_PEAK_FY and
-SR_AT_PEAK_FX; the secants FY_OVER_SA and FX_OVER_SR at zero slip equal the slopes DFY_DSA and DFX_DSR.
+SR_AT_PEAK_FX; MF 6.1 uses its own seven-input/thirteen-output layout plus the same eight characteristics. The secants FY_OVER_SA and FX_OVER_SR at zero slip equal the slopes DFY_DSA and DFX_DSR.
 
 ### Documented line numbers (1-based, comments, header and unit line included)
 

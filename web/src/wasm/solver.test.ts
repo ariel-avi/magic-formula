@@ -205,3 +205,22 @@ describe('convertModel', () => {
     expect(convertModel(mf, 'old', 'x.tir', 'ISO')).toEqual({ ok: false, error });
   });
 });
+
+describe('MF6.1 turn-slip evaluation', () => {
+  const batch = { inputs: new Float64Array(7) } as SweepBatch;
+  it('uses the turn-slip endpoint for force outputs', () => {
+    const outputs = new Float64Array(13);
+    const evaluateTurnSlip = vi.fn(() => ({ ok: true, outputs, warnings: [] }));
+    const mf = { evaluateTurnSlip } as unknown as MfWasmModule;
+    expect(solveBatch(mf, 'mf61', batch, false, false, true)).toEqual({ ok: true, value: { outputs, characteristics: null, warnings: [] } });
+    expect(evaluateTurnSlip).toHaveBeenCalledWith('mf61', batch.inputs, false, true);
+  });
+  it('uses the turn-slip endpoint for characteristics', () => {
+    const outputs = new Float64Array(13);
+    const characteristics = new Float64Array(8);
+    const evaluateWithCharacteristicsTurnSlip = vi.fn(() => ({ ok: true, outputs, characteristics, warnings: [] }));
+    const mf = { evaluateWithCharacteristicsTurnSlip } as unknown as MfWasmModule;
+    expect(solveBatch(mf, 'mf61', batch, true, true, true)).toEqual({ ok: true, value: { outputs, characteristics, warnings: [] } });
+    expect(evaluateWithCharacteristicsTurnSlip).toHaveBeenCalledWith('mf61', batch.inputs, true, true);
+  });
+});

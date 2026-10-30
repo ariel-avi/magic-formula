@@ -121,7 +121,7 @@ TEST(tir_edit, ReplaceValue_EditedFile_SweepFiniteAndChanged) {
 
 TEST(tir_edit, ReplaceValue_FittypToUnsupported_LoadReturnsUnsupportedModel) {
   const std::string text = read_fixture("mf52_S52.tir");
-  const auto edited = mf::io::replace_value(text, "MODEL", "FITTYP", "61");
+  const auto edited = mf::io::replace_value(text, "MODEL", "FITTYP", "62");
   ASSERT_TRUE(edited.has_value()) << mf::to_string(edited.error());
   const auto loaded = load_text(*edited);
   ASSERT_FALSE(loaded.has_value());

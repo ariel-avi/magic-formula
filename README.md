@@ -4,7 +4,7 @@
 
 A C++26 library and command-line tool for **Pacejka Magic Formula tire models**.
 
-- An abstract base tire-model formulation, with concrete models **PAC2002** and **MF 5.2**. It is designed to be extended (e.g. MF 6.x).
+- An abstract base tire-model formulation, with concrete models **PAC2002**, **MF 5.2**, and **MF 6.1**.
 - Index-mapped, vectorised batch evaluation with Eigen. Checks are opt-in (`throw_if_model_failure`).
 - A CLI that reads a simulation input table (Fz, slip angle, slip ratio, inclination, Vx, …) and a `.tir` tire property file, then prints the tire forces and moments (Fx, Fy, Mz, Mx, My, …) for every input row.
 - Python bindings (pybind11, NumPy) with an example Jupyter notebook.
@@ -59,7 +59,7 @@ A step-by-step walkthrough with screenshots: [`docs/examples/web.md`](docs/examp
 
 The app is a full-width three-pane workbench on one page: Inputs | Plot | Tire model. The model summary and the parameter panel (grouped by section, filterable) sit next to the chart.
 
-- **Inputs:** sweep tabs at the top of the Inputs pane with New, Duplicate, Remove and a name field (up to 6 sweeps per chart, default names "Sweep n"). Each sweep has its own swept input and range, up to 2 stepped inputs, held values and a pure-slip (uncombined) switch. Below the tabs, one row per model input (FZ, SA, SR, IA, VX, and P when the model has it), each with a Sweep / Step / Value switch; the roles apply per sweep. Exactly one input is swept; choosing Sweep on another input turns the old one into a held value.
+- **Inputs:** sweep tabs at the top of the Inputs pane with New, Duplicate, Remove and a name field (up to 6 sweeps per chart, default names "Sweep n"). Each sweep has its own swept input and range, up to 2 stepped inputs, held values and a pure-slip (uncombined) switch. Below the tabs, one row per model input (FZ, SA, SR, IA, VX, and P / TS when the model has them), each with a Sweep / Step / Value switch; the roles apply per sweep. Exactly one input is swept; choosing Sweep on another input turns the old one into a held value.
 - **Step values** are chips: add with Enter or the + button, remove with x, and "Range..." fills evenly spaced values. A step takes up to 8 values. Every combination is one line, coloured by Hue or Saturation per step.
 - **Plot:** Plot and Table views. The X and Y axis selectors list Inputs, Outputs and Characteristics (the eight channels DFY_DSA, DFX_DSR, FY_OVER_SA, FX_OVER_SR, DY, DX, SA_AT_PEAK_FY, SR_AT_PEAK_FX), so any of them can be plotted (for example FY vs FX, MZ vs FY, or DFY_DSA vs SA). Lines follow the sweep order, so curves that are not monotonic in X plot correctly. Sweeps are told apart by a dash pattern per sweep and a legend grouped by sweep name; problems and solver errors are reported per sweep.
 - **Characteristics:** computed by the C++ library through the WebAssembly module (no finite differences in the browser), and only while an axis shows one, because they cost much more than the forces: large characteristic charts can take seconds and block the page. The stiffnesses DFY_DSA and FY_OVER_SA are shown in N/deg (the CLI and Python report N/rad), SA_AT_PEAK_FY in deg, SR_AT_PEAK_FX without a unit, and the others in N. An undefined peak slip (no peak in the search range, or no contact) is a gap in the curve and '—' in the table and tooltip, never 0; an axis with no value at any point gets a note under the chart. After the ISO / SAE toggle the chart shows the characteristics of the converted model: results are re-evaluated, never sign-flipped in the browser. Definitions: [`docs/research/characteristics.md`](docs/research/characteristics.md).
@@ -232,7 +232,9 @@ The model is chosen from the `.tir` file:
 - **PAC2002**: `PROPERTY_FILE_FORMAT = 'PAC2002'`.
 - **MF 5.2**: `FITTYP = 6`, with `PROPERTY_FILE_FORMAT` absent or one of `'MF_05'`, `'USER'` (TNO MF-Tyre ADAMS user-tire form) or `'MF-TYRE'`.
 
-MF 6.x and every other model give an error (see `docs/research/model-routing.md`). The rules behind the loader and the models (defaults, required keys, units, clamping, low speed, ...) are listed in [`docs/research/policies.md`](docs/research/policies.md).
+- **MF 6.1**: `FITTYP = 61`. Pressure, pure/combined forces and moments, opt-in turn slip, effective/loaded radii, and the eight characteristics are supported.
+
+MF 6.0, MF 6.2, the temperature/velocity extension, and other unsupported models give an error (see `docs/research/model-routing.md`). The rules behind the loader and the models (defaults, required keys, units, clamping, low speed, ...) are listed in [`docs/research/policies.md`](docs/research/policies.md).
 
 ### Input table
 
@@ -240,9 +242,10 @@ Plain text, one operating point per row:
 
 - A line whose first non-blank character is `#` is a comment; blank lines are ignored.
 - Fields are separated by any run of commas, blanks or tabs. The rule is the same on every line (header, unit line and rows), and the separators may be mixed.
-- The first content line is the header: the column names only. The required columns are `FZ SA SR IA VX`; the optional column is `P` (pressure). Columns may be in any order and in any letter case, each at most once.
-- The next content line is the unit line, which is mandatory: exactly one unit per header column, in header order, compared case-insensitively. Accepted units: `FZ` N; `SA` rad or deg; `SR` -; `IA` rad or deg; `VX` m/s; `P` Pa. Degrees are converted to radians once, when the table is read.
-- `P` is read but ignored with a warning (`column P is ignored: <model> has no P input`), because PAC2002 and MF 5.2 have no pressure input.
+- The first content line is the header: the column names only. The required columns are `FZ SA SR IA VX`; the optional columns are `P` (pressure) and `TS` (turn slip). MF 6.1 requires `P`; an omitted `TS` defaults to zero. Columns may be in any order and in any letter case, each at most once.
+- The next content line is the unit line, which is mandatory: exactly one unit per header column, in header order, compared case-insensitively. Accepted units: `FZ` N; `SA` rad or deg; `SR` -; `IA` rad or deg; `VX` m/s; `P` Pa; `TS` 1/m. Degrees are converted to radians once, when the table is read.
+- `P` is used by MF 6.1. PAC2002 and MF 5.2 still ignore it with a warning (`column P is ignored: <model> has no P input`).
+- Turn-slip corrections are disabled by default. Use `--turn-slip` for MF 6.1; nonzero `TS` with the option disabled is diagnosed. Pressure must be positive, and MF 6.1 requires `VX > 0`.
 - Every further line is a data row with exactly as many numbers as the header has columns.
 
 Errors (reported as `mf: error: <file>:<line>: <message>`, exit code 1, nothing on stdout):
@@ -275,7 +278,7 @@ FZ[N],SA[rad],SR[-],IA[rad],VX[m/s],FX[N],FY[N],MZ[N*m],MX[N*m],MY[N*m],FZ_CLAMP
 
 The results header keeps the `NAME[unit]` form (the units of the echoed inputs, of the outputs and of the characteristics); the input table has its units on the unit line instead.
 
-23 columns, followed by one line per input row, in input order. The inputs are echoed unclamped in SI units (angles in rad), followed by the five outputs, five 0/1 flag columns and the eight characteristics. The characteristics are `DFY_DSA` and `DFX_DSR` (the instantaneous cornering and longitudinal stiffness, the slopes of the evaluated forces), `FY_OVER_SA` and `FX_OVER_SR` (the secant stiffnesses, evaluated force over the raw slip; at zero slip they equal the slopes), `DY` and `DX` (the pure-slip peak forces) and `SA_AT_PEAK_FY` and `SR_AT_PEAK_FX` (the first slip, from 0 on the side of the row's slip, where the force peaks). `nan` appears only in `SA_AT_PEAK_FY` and `SR_AT_PEAK_FX` (no peak in the search range, or no contact); it is a value, not an error. The echoed inputs, the outputs and the characteristics are in the table system (default: the evaluated model's loaded side; in ISO My is negative when the wheel rolls forward; see "Coordinate systems"); the flags are unchanged. The flag columns are `FZ_CLAMPED`, `SR_CLAMPED`, `SA_CLAMPED` and `IA_CLAMPED` are 1 when that input was clamped to the `.tir` range, and `BELOW_VXLOW` is 1 when Vx is below `VXLOW`. Warnings about the flags are still printed on stderr. Nothing is written to stdout unless every row evaluated successfully.
+For PAC2002 and MF 5.2 there are 23 columns, followed by one line per input row, in input order. MF 6.1 uses its own layout: the echoed inputs include pressure and turn slip, and outputs also include `P_CLAMPED`, `RE` and `RL`. The inputs are echoed unclamped in SI units (angles in rad), followed by the five outputs, five 0/1 flag columns and the eight characteristics. The characteristics are `DFY_DSA` and `DFX_DSR` (the instantaneous cornering and longitudinal stiffness, the slopes of the evaluated forces), `FY_OVER_SA` and `FX_OVER_SR` (the secant stiffnesses, evaluated force over the raw slip; at zero slip they equal the slopes), `DY` and `DX` (the pure-slip peak forces) and `SA_AT_PEAK_FY` and `SR_AT_PEAK_FX` (the first slip, from 0 on the side of the row's slip, where the force peaks). `nan` appears only in `SA_AT_PEAK_FY` and `SR_AT_PEAK_FX` (no peak in the search range, or no contact); it is a value, not an error. The echoed inputs, the outputs and the characteristics are in the table system (default: the evaluated model's loaded side; in ISO My is negative when the wheel rolls forward; see "Coordinate systems"); the flags are unchanged. `RE` and `RL` are the effective and loaded radii in metres. MF 6.1 radius nonconvergence is a numerical failure, not an accepted result. The flag columns are `FZ_CLAMPED`, `SR_CLAMPED`, `SA_CLAMPED` and `IA_CLAMPED` are 1 when that input was clamped to the `.tir` range, and `BELOW_VXLOW` is 1 when Vx is below `VXLOW`. Warnings about the flags are still printed on stderr. Nothing is written to stdout unless every row evaluated successfully.
 
 ### Diagnostics and exit codes
 

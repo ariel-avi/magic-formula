@@ -16,7 +16,7 @@ namespace mf::io {
   struct input_table {
     /// File name used in errors.
     std::string file;
-    /// Upper-case header names in header order (each of FZ SA SR IA VX P).
+    /// Upper-case header names in header order (each of FZ SA SR IA VX P TS).
     std::vector<std::string> columns;
     /// rows x columns, SI units (after the unit-line conversion), unclamped, exactly as read.
     Eigen::MatrixXd values;
@@ -46,10 +46,10 @@ namespace mf::io {
   ///   line and the rows may each use any mix of them. Leading and trailing separators are ignored, so "1,,2" has two
   ///   fields.
   /// - The first content line is the mandatory header: column names only, each one of FZ, SA, SR, IA, VX (all
-  ///   required) and P (optional), case-insensitive, in any order, each at most once. A field that contains '[' or ']'
-  ///   is the legacy NAME[unit] form and is rejected.
+  ///   required) and P and TS (optional), case-insensitive, in any order, each at most once. A field that contains '['
+  ///   or ']' is the legacy NAME[unit] form and is rejected.
   /// - The next content line is the mandatory unit line: exactly one unit per header column, in header order, compared
-  ///   ASCII case-insensitively: FZ N; SA rad|deg; SR -; IA rad|deg; VX m/s; P Pa. Degrees are converted as
+  ///   ASCII case-insensitively: FZ N; SA rad|deg; SR -; IA rad|deg; VX m/s; P Pa; TS 1/m. Degrees are converted as
   ///   `value * (pi / 180)`, every other unit has the factor 1.
   /// - Every further content line is a data row with exactly as many fields as the header. Each field must be a finite
   ///   number (`mf::io::parse_number`).
@@ -71,6 +71,7 @@ namespace mf::io {
 
   /// Arranges `table` for a model: column k of the result is the table column named like `channels[k]`; the table
   /// columns that no channel uses are listed in `ignored_columns`.
+  /// A missing TS channel is filled with zero. Pressure remains required when the model exposes P.
   /// @return the arranged inputs, or MISSING_KEY (file, header line, channel name; message "missing required column
   ///         <NAME>") for the first channel without a column
   [[nodiscard]] std::expected<model_inputs, error> map_inputs(const input_table &table,

@@ -83,10 +83,13 @@ class CoordinateIdentification(NamedTuple):
 class TireModel:
     """A loaded tire model.
 
-    Units are SI (N, m, rad, m/s). The equations never convert axis systems:
+    Units are SI (N, m, rad, m/s, Pa, 1/m). The equations never convert axis systems:
     inputs are used as given and outputs are in the model's own system (see
-    ``find_coordinate_system`` and ``convert_coordinate_system``). Inputs are the columns
-    ``FZ, SA, SR, IA, VX`` (see ``inputs``); outputs are listed in ``outputs``.
+    ``find_coordinate_system`` and ``convert_coordinate_system``). Input names and
+    column order come from ``inputs``: MF 5.x uses ``FZ, SA, SR, IA, VX``;
+    MF 6.1 appends ``P`` [Pa] and ``TS`` [1/m]. Named evaluation requires pressure
+    for MF 6.1 and defaults omitted turn slip to zero. Batch matrices must supply
+    every input column in layout order. Outputs are listed in ``outputs``.
     A model is immutable after loading and the GIL is released during
     evaluation, so threads may share one instance. Do not mutate an input array
     from another thread while a call is using it.
@@ -115,6 +118,11 @@ class TireModel:
     def combined(self) -> bool:
         """Whether combined-slip coefficients are used."""
         return self._core.combined
+
+    @property
+    def turn_slip(self) -> bool:
+        """Whether MF6.1 turn-slip corrections are enabled."""
+        return self._core.turn_slip
 
     @property
     def inputs(self) -> tuple[Channel, ...]:
@@ -249,8 +257,10 @@ class TireModel:
         """Evaluate rows of operating points in the model's own coordinate system.
 
         Args:
-            inputs: array-like of shape ``(N, n_inputs)``, columns in ``inputs``
-                order (FZ N, SA rad, SR -, IA rad, VX m/s).
+            inputs: array-like of shape ``(N, n_inputs)``, with every column in
+                the model's ``inputs`` order. MF 5.x uses FZ [N], SA [rad], SR [-],
+                IA [rad], VX [m/s]; MF 6.1 appends P [Pa] and TS [1/m]. Matrix
+                calls require all columns, including TS even when it is zero.
             check: when true, validate every row and raise MagicFormulaError on
                 the first invalid or non-finite one; when false, skip validation.
                 The shape is always checked.
@@ -280,6 +290,8 @@ class TireModel:
                 f'{method}() got unexpected input(s) for {self.name}: '
                 f'{", ".join(unknown)}; expected {", ".join(names)}'
             )
+        if 'ts' in names:
+            inputs = {'ts': 0.0, **inputs}
         missing = [n for n in names if n not in inputs]
         if missing:
             raise TypeError(
@@ -304,8 +316,10 @@ class TireModel:
 
         Args:
             check: see ``evaluate_batch``.
-            **inputs: one array-like per input channel, keyed by lower-case name
-                (fz, sa, sr, ia, vx); SI units, rad.
+            **inputs: array-likes keyed by the lower-case channel names in
+                ``self.inputs``; SI units and radians. MF 5.x requires fz, sa,
+                sr, ia and vx. MF 6.1 also requires p [Pa]; omitted ts [1/m]
+                defaults to zero. Values are broadcast to a common shape.
 
         Returns:
             A dict of float64 arrays keyed by lower-case output name, each with
@@ -376,28 +390,30 @@ def _wrap(result) -> TireModel:
     return model
 
 
-def load_tir(path: str | os.PathLike[str], *, combined: bool = True) -> TireModel:
+def load_tir(path: str | os.PathLike[str], *, combined: bool = True, turn_slip: bool = False) -> TireModel:
     """Load a tire model from a ``.tir`` file.
 
     Args:
         path: file path.
         combined: use the combined-slip coefficients.
+        turn_slip: enable MF6.1 turn-slip corrections (default false).
 
     Raises:
         MagicFormulaError: the file is unreadable, invalid or an unsupported model.
     """
-    return _wrap(_core.load_tir(os.fspath(path), combined))
+    return _wrap(_core.load_tir(os.fspath(path), combined, turn_slip))
 
 
-def parse_tir(text: str, *, file_name: str = '', combined: bool = True) -> TireModel:
+def parse_tir(text: str, *, file_name: str = '', combined: bool = True, turn_slip: bool = False) -> TireModel:
     """Parse a tire model from ``.tir`` text.
 
     Args:
         text: the file content.
         file_name: name used in error locations.
         combined: use the combined-slip coefficients.
+        turn_slip: enable MF6.1 turn-slip corrections (default false).
 
     Raises:
         MagicFormulaError: the text is invalid or an unsupported model.
     """
-    return _wrap(_core.parse_tir(text, file_name, combined))
+    return _wrap(_core.parse_tir(text, file_name, combined, turn_slip))
