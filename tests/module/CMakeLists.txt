@@ -2,6 +2,7 @@
 # MF_MODULE_TESTS (one path per line, LC_ALL=C sorted); the list also feeds clang-format_all.
 set(MF_MODULE_TESTS
         cli_test.cpp
+        concurrent_evaluation_test.cpp
         fixtures_test.cpp
         mfeval_reference_test.cpp
         tir_edit_test.cpp)
@@ -21,19 +22,20 @@ endforeach ()
 #  - mf_cli_usage_error: 'mf' without arguments is a usage error (exit code 2, non-zero), hence WILL_FAIL.
 #  - mf_cli_end_to_end: 'mf <S vectors table> <PAC2002 fixture S>' prints the results header line and no error.
 # (PASS_REGULAR_EXPRESSION ignores the exit code.)
+# COMMAND uses the target name, not $<TARGET_FILE:mf>, so a TEST_LAUNCHER (valgrind preset) is applied.
 string(REPLACE "." "\\." _mf_version_regex "${PROJECT_VERSION}")
-add_test(NAME mf_cli_prints_version COMMAND $<TARGET_FILE:mf> --version)
+add_test(NAME mf_cli_prints_version COMMAND mf --version)
 set_tests_properties(mf_cli_prints_version PROPERTIES
         LABELS module
         PASS_REGULAR_EXPRESSION "^mf ${_mf_version_regex}\n$")
 
-add_test(NAME mf_cli_usage_error COMMAND $<TARGET_FILE:mf>)
+add_test(NAME mf_cli_usage_error COMMAND mf)
 set_tests_properties(mf_cli_usage_error PROPERTIES
         LABELS module
         WILL_FAIL TRUE)
 
 add_test(NAME mf_cli_end_to_end
-        COMMAND $<TARGET_FILE:mf>
+        COMMAND mf
         "${PROJECT_SOURCE_DIR}/tests/data/inputs_s_vectors.csv"
         "${PROJECT_SOURCE_DIR}/tests/data/pac2002_S.tir")
 set_tests_properties(mf_cli_end_to_end PROPERTIES

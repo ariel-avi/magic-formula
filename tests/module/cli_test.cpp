@@ -553,6 +553,12 @@ namespace {
     std::string message;
   };
 
+  /// Prints the member values (GoogleTest would otherwise print the raw bytes, uninitialised padding included).
+  // NOLINTNEXTLINE(readability-identifier-naming): GoogleTest finds the printer by the name PrintTo
+  void PrintTo(const bad_table_case &param, std::ostream *os) {
+    *os << param.file << ":" << param.line << ": " << param.message;
+  }
+
   class cli_bad_input_table : public ::testing::TestWithParam<bad_table_case> {};
 
   /// The unit hint of the parser messages for the columns FZ SA SR IA VX.

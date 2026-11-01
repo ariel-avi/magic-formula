@@ -35,13 +35,57 @@
       "inherits": "base",
       "toolchainFile": "${sourceDir}/build/conan/wasm/conan_toolchain.cmake",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "MF_BUILD_TESTS": "OFF", "MF_BUILD_WASM": "ON" }
+    },
+    {
+      "name": "dynamic-analysis",
+      "hidden": true,
+      "inherits": "base",
+      "toolchainFile": "${sourceDir}/build/conan/debug/conan_toolchain.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MF_BUILD_TESTS": "ON",
+        "MF_BUILD_BENCH": "OFF",
+        "MF_BUILD_PYTHON": "OFF",
+        "MF_BUILD_WASM": "OFF",
+        "MF_ENABLE_COVERAGE": "OFF"
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "AddressSanitizer + LeakSanitizer (Debug, Ubuntu 24.04 only)",
+      "inherits": "dynamic-analysis",
+      "cacheVariables": { "MF_SANITIZER": "address" }
+    },
+    {
+      "name": "ubsan",
+      "displayName": "UndefinedBehaviorSanitizer (Debug, Ubuntu 24.04 only)",
+      "inherits": "dynamic-analysis",
+      "cacheVariables": { "MF_SANITIZER": "undefined" }
+    },
+    {
+      "name": "tsan",
+      "displayName": "ThreadSanitizer (Debug, Ubuntu 24.04 only)",
+      "inherits": "dynamic-analysis",
+      "cacheVariables": { "MF_SANITIZER": "thread" }
+    },
+    {
+      "name": "valgrind",
+      "displayName": "Valgrind memcheck (Debug, Ubuntu 24.04 only)",
+      "inherits": "dynamic-analysis",
+      "cacheVariables": {
+        "CMAKE_TEST_LAUNCHER": "valgrind;--tool=memcheck;--leak-check=full;--show-leak-kinds=definite,indirect,possible;--errors-for-leak-kinds=definite,indirect;--track-origins=yes;--num-callers=50;--error-exitcode=99;--soname-synonyms=somalloc=nouserintercepts;--log-file=${sourceDir}/build/${presetName}/valgrind.%p.log"
+      }
     }
   ],
   "buildPresets": [
     { "name": "debug", "configurePreset": "debug" },
     { "name": "release", "configurePreset": "release" },
     { "name": "coverage", "configurePreset": "coverage" },
-    { "name": "wasm", "configurePreset": "wasm", "targets": ["mf_wasm"] }
+    { "name": "wasm", "configurePreset": "wasm", "targets": ["mf_wasm"] },
+    { "name": "asan", "configurePreset": "asan" },
+    { "name": "ubsan", "configurePreset": "ubsan" },
+    { "name": "tsan", "configurePreset": "tsan" },
+    { "name": "valgrind", "configurePreset": "valgrind" }
   ],
   "testPresets": [
     {
@@ -52,6 +96,34 @@
     },
     { "name": "debug", "inherits": "base", "configurePreset": "debug" },
     { "name": "release", "inherits": "base", "configurePreset": "release" },
-    { "name": "coverage", "inherits": "base", "configurePreset": "coverage" }
+    { "name": "coverage", "inherits": "base", "configurePreset": "coverage" },
+    {
+      "name": "asan",
+      "inherits": "base",
+      "configurePreset": "asan",
+      "execution": { "noTestsAction": "error", "jobs": 4 },
+      "environment": {
+        "ASAN_OPTIONS": "log_path=${sourceDir}/build/${presetName}/sanitizer:log_exe_name=1:detect_stack_use_after_return=1:check_initialization_order=1:strict_init_order=1"
+      }
+    },
+    {
+      "name": "ubsan",
+      "inherits": "base",
+      "configurePreset": "ubsan",
+      "execution": { "noTestsAction": "error", "jobs": 4 },
+      "environment": {
+        "UBSAN_OPTIONS": "log_path=${sourceDir}/build/${presetName}/sanitizer:log_exe_name=1:print_stacktrace=1:halt_on_error=1"
+      }
+    },
+    {
+      "name": "tsan",
+      "inherits": "base",
+      "configurePreset": "tsan",
+      "execution": { "noTestsAction": "error", "jobs": 4 },
+      "environment": {
+        "TSAN_OPTIONS": "log_path=${sourceDir}/build/${presetName}/sanitizer:log_exe_name=1:halt_on_error=1:second_deadlock_stack=1"
+      }
+    },
+    { "name": "valgrind", "inherits": "base", "configurePreset": "valgrind", "execution": { "noTestsAction": "error", "jobs": 4 } }
   ]
 }

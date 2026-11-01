@@ -21,6 +21,7 @@
 #include <magic_formula/sign_transform.hpp>
 #include <magic_formula/tire_model.hpp>
 #include <memory>
+#include <ostream>
 #include <span>
 #include <string>
 #include <string_view>
@@ -80,6 +81,13 @@ namespace {
     std::size_t start_index = 0;
     std::size_t plan_index = 0;
   };
+
+  /// Prints the member values (GoogleTest would otherwise print the raw bytes, uninitialised padding included).
+  // NOLINTNEXTLINE(readability-identifier-naming): GoogleTest finds the printer by the name PrintTo
+  void PrintTo(const configuration &cfg, std::ostream *os) {
+    *os << std::format("{{variant {}, mode {}, ranges {}, start {}, plan {}}}", cfg.variant_index, cfg.mode_index,
+                       cfg.ranges, cfg.start_index, cfg.plan_index);
+  }
 
   variant variant_of(const configuration &cfg) {
     return std::span<const variant>{ALL_VARIANTS}[cfg.variant_index];
