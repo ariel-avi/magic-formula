@@ -1,0 +1,5 @@
+# Hand-selected operating points for pressure and turn-slip integration.
+FZ,SA,SR,IA,VX,P,TS
+N,rad,-,rad,m/s,Pa,1/m
+5000,0.02,0.1,0.01,27,180000,0.05
+5000,-0.03,-0.05,0,27,200000,0

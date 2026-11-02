@@ -82,9 +82,10 @@ namespace mf::python {
 
   namespace {
     /// Options of every model the adapter builds: the requested slip mode, never throwing.
-    [[nodiscard]] model_options options_for(bool combined) {
+    [[nodiscard]] model_options options_for(bool combined, bool turn_slip) {
       return model_options{.mode = combined ? slip_mode::COMBINED : slip_mode::UNCOMBINED,
-                           .throw_if_model_failure = false};
+                           .throw_if_model_failure = false,
+                           .turn_slip = turn_slip};
     }
 
     /// "FZ, SA, SR, IA, VX": the input channel names of `model`, in layout order.
@@ -213,6 +214,11 @@ namespace mf::python {
     /// `model().name()`: "PAC2002" or "MF 5.2".
     [[nodiscard]] std::string name() const {
       return std::string(model().name());
+    }
+
+    /// Whether MF6.1 turn-slip corrections are enabled.
+    [[nodiscard]] bool turn_slip() const noexcept {
+      return model().options().turn_slip;
     }
 
     /// (name, unit) of every input channel, in input_index order.
@@ -439,6 +445,9 @@ namespace mf::python {
       if (side.has_value()) {
         record.warnings.push_back(std::format("row {}: {}", side->index, to_string(side->cause)));
       }
+      for (const batch_warning &item : collect_input_warnings(model(), map)) {
+        record.warnings.push_back(std::format("row {}: {}", item.index, to_string(item.cause)));
+      }
       record.outputs = to_array(std::move(*result));
       return record;
     }
@@ -448,8 +457,9 @@ namespace mf::python {
 
   /// `io::load_tire_model_file(path, options)` with options = {mode = combined ? COMBINED : UNCOMBINED,
   /// throw_if_model_failure = false}.
-  [[nodiscard]] std::variant<model_handle, error_record> load_tir(const std::filesystem::path &path, bool combined) {
-    auto loaded = io::load_tire_model_file(path, options_for(combined));
+  [[nodiscard]] std::variant<model_handle, error_record> load_tir(const std::filesystem::path &path, bool combined,
+                                                                  bool turn_slip) {
+    auto loaded = io::load_tire_model_file(path, options_for(combined, turn_slip));
     if (!loaded.has_value()) {
       return to_record(loaded.error());
     }
@@ -457,13 +467,13 @@ namespace mf::python {
   }
 
   /// `io::tir_document::parse(text, file_name)`, then `io::load_tire_model(document, options)` (same options).
-  [[nodiscard]] std::variant<model_handle, error_record> parse_tir(const std::string &text,
-                                                                   const std::string &file_name, bool combined) {
+  [[nodiscard]] std::variant<model_handle, error_record>
+  parse_tir(const std::string &text, const std::string &file_name, bool combined, bool turn_slip) {
     const auto document = io::tir_document::parse(text, file_name);
     if (!document.has_value()) {
       return to_record(document.error());
     }
-    auto loaded = io::load_tire_model(*document, options_for(combined));
+    auto loaded = io::load_tire_model(*document, options_for(combined, turn_slip));
     if (!loaded.has_value()) {
       return to_record(loaded.error());
     }
@@ -544,6 +554,7 @@ PYBIND11_MODULE(_core, m) {
       .def_property_readonly("use_mode", &model_handle::use_mode, "[MODEL] USE_MODE or None")
       .def_property_readonly("tyre_side", &model_handle::tyre_side, "'LEFT' or 'RIGHT'")
       .def_property_readonly("combined", &model_handle::combined, "True when combined slip is evaluated")
+      .def_property_readonly("turn_slip", &model_handle::turn_slip, "True when turn-slip corrections are enabled")
       .def_property_readonly("warnings", &model_handle::warnings, "load warnings, in load order")
       .def_property_readonly("ignored_keys", &model_handle::ignored_keys, "keys present in the file but unused")
       .def("find_coordinate_system", &model_handle::find_coordinate_system,
@@ -568,8 +579,8 @@ PYBIND11_MODULE(_core, m) {
            "rows without contact.");
 
   m.def("version", [] { return std::string(mf::version()); }, "Library version string.");
-  m.def("load_tir", &mf::python::load_tir, py::arg("path"), py::arg("combined") = true,
+  m.def("load_tir", &mf::python::load_tir, py::arg("path"), py::arg("combined") = true, py::arg("turn_slip") = false,
         "Load a .tir file (str or os.PathLike). Returns a Model or an Error.");
   m.def("parse_tir", &mf::python::parse_tir, py::arg("text"), py::arg("file_name") = "", py::arg("combined") = true,
-        "Parse .tir text. Returns a Model or an Error.");
+        py::arg("turn_slip") = false, "Parse .tir text. Returns a Model or an Error.");
 }

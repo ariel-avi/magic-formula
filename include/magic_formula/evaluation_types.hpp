@@ -18,6 +18,8 @@ namespace mf {
     /// true: the evaluate functions run the free checks (`mf::validate_input` and friends) and throw
     /// `mf::model_failure`; false: no check at all on the evaluation path.
     bool throw_if_model_failure = false;
+    /// Enable MF6.1 turn-slip corrections; unsupported formulations reject this option.
+    bool turn_slip = false;
   };
 
   /// Tire mounting side (TYRESIDE). Mirroring is not implemented.

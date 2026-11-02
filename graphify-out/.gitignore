@@ -1,0 +1,3 @@
+# Local extraction caches and regeneration sidecars; the graph and reports are shared.
+/cache/
+/.graphify_*

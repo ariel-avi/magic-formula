@@ -23,6 +23,7 @@ export type BatchSolver = (
   batch: SweepBatch,
   uncombined: boolean,
   characteristics: boolean,
+  turnSlip?: boolean,
 ) => Result<SolvedBatch, EvaluationError>;
 
 /** Validates and solves one sweep. Invalid specs never reach the solver; a solver error names the failing row. */
@@ -37,7 +38,9 @@ export function solveSweep(
     return { problems, error: null, solution: null, warnings: [] };
   }
   const batch = buildBatch(sweep, inputs);
-  const result = solve(batch, sweep.uncombined, characteristics);
+  const result = sweep.turnSlip
+    ? solve(batch, sweep.uncombined, characteristics, true)
+    : solve(batch, sweep.uncombined, characteristics);
   if (!result.ok) {
     const row = result.error.row;
     const error = result.error.message + (typeof row === 'number' ? ` (${describeBatchRow(sweep, batch, row)})` : '');

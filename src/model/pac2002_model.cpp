@@ -33,6 +33,9 @@ namespace mf {
 
   std::expected<pac2002_model, error> pac2002_model::create(const mf5x_parameters &parameters, combined_method method,
                                                             const model_options &options) {
+    if (options.turn_slip) {
+      return make_error(error_code::NOT_IMPLEMENTED, "turn slip is implemented only for MF 6.1");
+    }
     if (const std::expected<void, error> valid = validate_parameters(parameters); !valid.has_value()) {
       return std::unexpected<error>(valid.error());
     }

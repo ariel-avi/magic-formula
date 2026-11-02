@@ -28,9 +28,9 @@ namespace mf::io {
     };
 
     /// All columns. The first `REQUIRED_COLUMNS` are required, the rest are optional.
-    constexpr std::array<column_def, 6> COLUMNS{
-        column_def{.name = "FZ"}, column_def{.name = "SA"}, column_def{.name = "SR"},
-        column_def{.name = "IA"}, column_def{.name = "VX"}, column_def{.name = "P"},
+    constexpr std::array<column_def, 7> COLUMNS{
+        column_def{.name = "FZ"}, column_def{.name = "SA"}, column_def{.name = "SR"}, column_def{.name = "IA"},
+        column_def{.name = "VX"}, column_def{.name = "P"},  column_def{.name = "TS"},
     };
 
     /// Number of leading `COLUMNS` entries that every table must have (FZ, SA, SR, IA, VX).
@@ -47,7 +47,7 @@ namespace mf::io {
     };
 
     /// Every accepted (column, unit) pair and its factor to SI; the first entry of a column is its SI unit.
-    constexpr std::array<unit_entry, 8> UNITS{
+    constexpr std::array<unit_entry, 9> UNITS{
         unit_entry{.column = "FZ", .unit = "N", .factor = 1.0},
         unit_entry{.column = "SA", .unit = "rad", .factor = 1.0},
         unit_entry{.column = "SA", .unit = "deg", .factor = DEG_TO_RAD},
@@ -56,6 +56,7 @@ namespace mf::io {
         unit_entry{.column = "IA", .unit = "deg", .factor = DEG_TO_RAD},
         unit_entry{.column = "VX", .unit = "m/s", .factor = 1.0},
         unit_entry{.column = "P", .unit = "Pa", .factor = 1.0},
+        unit_entry{.column = "TS", .unit = "1/m", .factor = 1.0},
     };
 
     /// A header column: which column it is and the factor that converts its values to SI.
@@ -171,7 +172,7 @@ namespace mf::io {
       const std::span<const column_def> known_columns(COLUMNS);
       const auto column = std::ranges::find_if(known_columns, is_named);
       if (column == known_columns.end()) {
-        std::string message = std::format("unknown column {} (expected FZ, SA, SR, IA, VX, P)", token);
+        std::string message = std::format("unknown column {} (expected FZ, SA, SR, IA, VX, P, TS)", token);
         return table_error(error_code::SYNTAX, std::move(message), file, line, detail::to_upper_ascii(token));
       }
       return &*column;
@@ -343,6 +344,10 @@ namespace mf::io {
       const auto is_named = [name](const std::string &column) { return column == name; };
       const auto column = std::ranges::find_if(table.columns, is_named);
       if (column == table.columns.end()) {
+        if (name == "TS") {
+          result.values.col(static_cast<Eigen::Index>(k)).setZero();
+          continue;
+        }
         std::string message = std::format("missing required column {}", name);
         return table_error(error_code::MISSING_KEY, std::move(message), table.file, table.header_line, name);
       }

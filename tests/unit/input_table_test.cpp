@@ -293,7 +293,7 @@ TEST(input_table, Parse_UnknownColumn_ReturnsSyntax) {
   EXPECT_EQ(failure.code, mf::error_code::SYNTAX);
   EXPECT_EQ(failure.where.line, 3U);
   EXPECT_EQ(failure.where.key, "FOO");
-  EXPECT_TRUE(failure.message.contains("unknown column foo (expected FZ, SA, SR, IA, VX, P)")) << failure.message;
+  EXPECT_TRUE(failure.message.contains("unknown column foo (expected FZ, SA, SR, IA, VX, P, TS)")) << failure.message;
 }
 
 TEST_P(input_table_legacy_header, Parse_LegacyBracketField_ReturnsSyntaxWithHint) {
@@ -570,7 +570,7 @@ TEST(input_table, Parse_NoPressureColumn_PressureEmpty) {
                                    "N rad - rad m/s\n"
                                    "1 2 3 4 5\n");
   EXPECT_EQ(table.columns.size(), 5U);
-  EXPECT_EQ(std::ranges::count(table.columns, "P"), 0);
+  EXPECT_EQ(std::ranges::count(table.columns, std::string{"P"}), 0);
   ASSERT_EQ(table.values.rows(), 1);
   EXPECT_EQ(table.values.cols(), 5);
 }

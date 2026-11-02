@@ -313,3 +313,29 @@ describe('wasm solver smoke', () => {
     });
   });
 });
+
+describe('MF6.1 full model', () => {
+  it('loads pressure and turn-slip channels and evaluates radii and characteristics', async () => {
+    const mf = await createMfModule();
+    const text = readData('mf61_solver.tir');
+    const inspected = mf.inspect(text, 'mf61_solver.tir');
+    expect(inspected.ok).toBe(true);
+    if (!inspected.ok) throw new Error(inspected.error.message);
+    expect(inspected.model?.name).toBe('MF 6.1');
+    expect(inspected.model?.inputs.map((channel) => channel.name)).toEqual(['FZ', 'SA', 'SR', 'IA', 'VX', 'P', 'TS']);
+    const point = new Float64Array([5000, 0.02, 0.1, 0.01, 27, 180000, 0.05]);
+    const disabled = mf.evaluate(text, point, false);
+    expect(disabled.ok).toBe(true);
+    if (!disabled.ok) throw new Error(disabled.error.message);
+    expect(disabled.warnings.some((item) => item.key === 'TS')).toBe(true);
+    const enabled = mf.evaluateWithCharacteristicsTurnSlip(text, point, false, true);
+    expect(enabled.ok).toBe(true);
+    if (!enabled.ok) throw new Error(enabled.error.message);
+    expect(enabled.outputs).toHaveLength(13);
+    expect(enabled.characteristics).toHaveLength(8);
+    expect(enabled.outputs.every(Number.isFinite)).toBe(true);
+    expect(enabled.outputs[11]).toBeGreaterThan(0);
+    expect(enabled.outputs[12]).toBeGreaterThan(0);
+    expect(enabled.warnings.some((item) => item.key === 'TS')).toBe(false);
+  });
+});

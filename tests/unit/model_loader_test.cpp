@@ -1046,7 +1046,7 @@ TEST(model_loader, Load_UnitsError_Propagated) {
 }
 
 TEST(model_loader, Load_RoutingError_Propagated) {
-  const std::string text = insert_after(s_text(), "[MODEL]", "FITTYP = 61");
+  const std::string text = insert_after(s_text(), "[MODEL]", "FITTYP = 62");
   const load_result result = load_text(text);
   ASSERT_FALSE(result.has_value());
   expect_error(result, error_code::UNSUPPORTED_MODEL, "FITTYP", line_of(text, "FITTYP"));

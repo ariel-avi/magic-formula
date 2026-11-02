@@ -8,6 +8,7 @@
 #include <magic_formula/error.hpp>
 #include <magic_formula/evaluation_types.hpp>
 #include <magic_formula/io/mf5x_bindings.hpp>
+#include <magic_formula/io/mf61_loader.hpp>
 #include <magic_formula/io/model_loader.hpp>
 #include <magic_formula/io/model_routing.hpp>
 #include <magic_formula/io/tir_document.hpp>
@@ -394,6 +395,9 @@ namespace mf::io {
       return std::unexpected<error>(kind.error());
     }
     state.kind = *kind;
+    if (state.kind == model_kind::MF61) {
+      return load_mf61(state.reader, std::move(state.warnings), options);
+    }
     for (const load_step apply : STEPS) {
       if (const status result = apply(state); !result.has_value()) {
         return std::unexpected<error>(result.error());

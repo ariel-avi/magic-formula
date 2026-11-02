@@ -26,6 +26,8 @@ export interface SweepSpec {
   fixed: Record<string, number>;
   /** Pure slip: the solver evaluates without combined-slip coupling. */
   uncombined: boolean;
+  /** Enable MF6.1 turn-slip corrections; absent means false. */
+  turnSlip?: boolean;
 }
 
 export type ChannelKind = 'input' | 'output' | 'characteristic';

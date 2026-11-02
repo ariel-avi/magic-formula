@@ -1,8 +1,8 @@
 $ synthetic, authored for magic-formula from docs/research/model-routing.md; not derived from any vendor file
-$ purpose: minimal MF-Tyre 6.x file (FITTYP 61); expected UNSUPPORTED_MODEL
+$ purpose: minimal MF-Tyre 6.x file (FITTYP 62); expected UNSUPPORTED_MODEL
 [MDI_HEADER]
 FILE_TYPE = 'tir'
 FILE_VERSION = 3.0
 FILE_FORMAT = 'ASCII'
 [MODEL]
-FITTYP = 61
+FITTYP = 62

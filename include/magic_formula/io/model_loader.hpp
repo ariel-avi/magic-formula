@@ -13,7 +13,7 @@
 namespace mf::io {
   /// The result of loading a .tir file: the validated model plus everything the caller should tell the user.
   struct loaded_model {
-    /// The concrete formulation chosen by the routing rules (`pac2002_model` or `mf52_model`), immutable.
+    /// The concrete formulation chosen by the routing rules (`pac2002_model`, `mf52_model` or `mf61_model`), immutable.
     std::unique_ptr<const tire_model> model;
     /// Non-fatal diagnostics in the order they were found: parse warnings, routing, MF 5.2 foreign keys, ranges,
     /// USE_MODE, TYRESIDE, FE_METHOD, then defaulted coefficients, friction ellipse and rolling resistance. The library
@@ -47,6 +47,8 @@ namespace mf::io {
   ///  9. `pac2002_model::create` / `mf52_model::create`. A core error gets the file and line of its key attached.
   /// 10. Warnings for defaulted coefficients, the friction-ellipse selection and the FITTYP 5 rolling-resistance form.
   ///
+  /// MF6.1 uses its own coefficient table, pressure ranges and metadata loader. Required dimensions and
+  /// divisor coefficients are checked before construction; absent scale factors keep their defaults.
   /// The document is only read; the result does not refer to it.
   /// @param document parsed .tir file
   /// @param options slip mode and the throw-on-failure flag of the created model
