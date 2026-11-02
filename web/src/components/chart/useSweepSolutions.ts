@@ -15,8 +15,8 @@ export function useSweepSolutions(
 ): SweepOutcome[] {
   const caches = useMemo(createSolveCaches, [mf, text, model]);
   return useMemo(() => {
-    const solve: BatchSolver = (batch, uncombined, withCharacteristics) =>
-      solveBatch(mf, text, batch, uncombined, withCharacteristics);
+    const solve: BatchSolver = (batch, uncombined, withCharacteristics, turnSlip = false) =>
+      solveBatch(mf, text, batch, uncombined, withCharacteristics, turnSlip);
     return solveSweeps(sweeps, model.inputs, caches, solve, characteristics);
   }, [caches, mf, text, model, sweeps, characteristics]);
 }

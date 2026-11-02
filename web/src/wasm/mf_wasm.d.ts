@@ -47,6 +47,8 @@ export interface MfWasmModule {
   replaceValue(text: string, section: string, key: string, value: string): RawTextResult;
   evaluate(text: string, inputs: Float64Array, uncombined: boolean): RawEvaluation;
   evaluateWithCharacteristics(text: string, inputs: Float64Array, uncombined: boolean): RawCharacteristicsEvaluation;
+  evaluateTurnSlip(text: string, inputs: Float64Array, uncombined: boolean, turnSlip: boolean): RawEvaluation;
+  evaluateWithCharacteristicsTurnSlip(text: string, inputs: Float64Array, uncombined: boolean, turnSlip: boolean): RawCharacteristicsEvaluation;
   convertModel(text: string, fileName: string, target: RawCoordinateSystem): RawConversion;
 }
 declare function createMfModule(moduleOverrides?: Record<string, unknown>): Promise<MfWasmModule>;

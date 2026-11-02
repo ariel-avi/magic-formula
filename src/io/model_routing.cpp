@@ -38,7 +38,7 @@ namespace mf::io {
     constexpr int MF52_FITTYP = 6;
 
     /// FITTYP values of MF-Tyre 6.x: 6.0, 6.1, 6.2 and 6.2 with the temperature and velocity model.
-    constexpr std::array<int, 4> MF6X_FITTYP{60, 61, 62, 70};
+    constexpr std::array<int, 3> MF6X_FITTYP{60, 62, 70};
 
     /// A FITTYP of an unsupported family and the error message that names it.
     struct unsupported_fittyp {
@@ -97,6 +97,10 @@ namespace mf::io {
     // Rule 3: MF-Tyre 6.x, even in a file that declares PAC2002.
     if (std::ranges::contains(MF6X_FITTYP, code)) {
       return make_error(error_code::UNSUPPORTED_MODEL, std::format(MF6X_MESSAGE, code), reader.locate("FITTYP"));
+    }
+
+    if (code == 61) {
+      return model_kind::MF61;
     }
 
     // Rule 4: PAC2002 takes precedence over every other FITTYP.

@@ -66,14 +66,19 @@ export function solveBatch(
   batch: SweepBatch,
   uncombined: boolean,
   characteristics: boolean,
+  turnSlip = false,
 ): Result<SolvedBatch, EvaluationError> {
   if (characteristics) {
-    const raw = mf.evaluateWithCharacteristics(text, batch.inputs, uncombined);
+    const raw = turnSlip
+      ? mf.evaluateWithCharacteristicsTurnSlip(text, batch.inputs, uncombined, true)
+      : mf.evaluateWithCharacteristics(text, batch.inputs, uncombined);
     return raw.ok
       ? ok({ outputs: raw.outputs, characteristics: raw.characteristics, warnings: raw.warnings })
       : err({ ...raw.error, row: raw.row });
   }
-  const raw = mf.evaluate(text, batch.inputs, uncombined);
+  const raw = turnSlip
+    ? mf.evaluateTurnSlip(text, batch.inputs, uncombined, true)
+    : mf.evaluate(text, batch.inputs, uncombined);
   return raw.ok
     ? ok({ outputs: raw.outputs, characteristics: null, warnings: raw.warnings })
     : err({ ...raw.error, row: raw.row });

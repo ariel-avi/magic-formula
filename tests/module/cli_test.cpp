@@ -609,9 +609,9 @@ TEST(cli_run, Run_PartialCombined_MissingKeyRhx1) {
 }
 
 TEST(cli_run, Run_Mf61_Exit1) {
-  const run_result result = run_files("inputs_s_vectors.csv", "mf61_unsupported.tir");
+  const run_result result = run_files("inputs_s_vectors.csv", "mf62_unsupported.tir");
   expect_failed_run(result);
-  EXPECT_TRUE(result.err.contains("FITTYP 61")) << result.err;
+  EXPECT_TRUE(result.err.contains("FITTYP 62")) << result.err;
 }
 
 TEST(cli_run, Run_NonexistentTir_Exit1) {

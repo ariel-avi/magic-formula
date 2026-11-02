@@ -25,6 +25,9 @@ namespace mf {
     parameters.coefficients.LGAX = 1.0;
     parameters.coefficients.LGAY = 1.0;
     parameters.coefficients.LGAZ = 1.0;
+    if (options.turn_slip) {
+      return make_error(error_code::NOT_IMPLEMENTED, "turn slip is implemented only for MF 6.1");
+    }
     if (const std::expected<void, error> valid = validate_parameters(parameters); !valid.has_value()) {
       return std::unexpected<error>(valid.error());
     }

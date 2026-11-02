@@ -345,6 +345,48 @@ namespace {
     state.SetBytesProcessed(state.iterations() * static_cast<std::int64_t>(text.size()));
   }
 
+  /// Native MF 6.1 point evaluation, including effective and loaded radii.
+  void BM_Mf61_EvaluatePoint(benchmark::State &state) {
+    auto loaded = load_model("mf61_solver.tir", false);
+    if (!loaded.has_value()) {
+      state.SkipWithError(mf::to_string(loaded.error()));
+      return;
+    }
+    const auto &model = *loaded->model;
+    Eigen::VectorXd input = model.reference_input();
+    input(1) = 0.05;
+    input(2) = 0.1;
+    Eigen::VectorXd output(model.output_length());
+    for (auto _ : state) {
+      model.evaluate(input.data(), model.input_length(), output.data(), model.output_length());
+      benchmark::DoNotOptimize(output);
+      benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations());
+  }
+  /// Native MF 6.1 vectorized batches over the existing block-boundary sizes.
+  void BM_Mf61_EvaluateBatch(benchmark::State &state) {
+    auto loaded = load_model("mf61_solver.tir", false);
+    if (!loaded.has_value()) {
+      state.SkipWithError(mf::to_string(loaded.error()));
+      return;
+    }
+    const auto &model = *loaded->model;
+    Eigen::MatrixXd inputs(state.range(0), model.input_length());
+    for (Eigen::Index row = 0; row < inputs.rows(); ++row)
+      inputs.row(row) = model.reference_input().transpose();
+    inputs.col(1).setConstant(0.05);
+    inputs.col(2).setConstant(0.1);
+    Eigen::MatrixXd outputs(inputs.rows(), model.output_length());
+    for (auto _ : state) {
+      model.evaluate_batch(inputs.data(), static_cast<int>(inputs.rows()), outputs.data(),
+                           static_cast<int>(outputs.size()));
+      benchmark::DoNotOptimize(outputs);
+      benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+  }
+
 } // namespace
 
 BENCHMARK(BM_EvaluateBatch_IsoTable)->ArgName("rows")->Arg(64)->Arg(4096)->Arg(65536);
@@ -365,3 +407,6 @@ BENCHMARK(BM_Pac2002Ellipse_EvaluateBatchEigen)->ArgName("points")->Arg(1)->Arg(
 BENCHMARK(BM_Pac2002_CharacteristicsBatch)->ArgName("rows")->Range(1, 4096);
 BENCHMARK(BM_Mf52_CharacteristicsBatch)->ArgName("rows")->Range(1, 4096);
 BENCHMARK(BM_Pac2002Ellipse_CharacteristicsBatch)->ArgName("rows")->Range(1, 4096);
+
+BENCHMARK(BM_Mf61_EvaluatePoint);
+BENCHMARK(BM_Mf61_EvaluateBatch)->ArgName("rows")->Arg(1)->Arg(32)->Arg(33)->Arg(4096);
