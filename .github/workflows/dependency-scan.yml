@@ -44,9 +44,13 @@ jobs:
           echo "::endgroup::"
       # Explicit --lockfile paths turn a missing or renamed lockfile into exit 127 (the job fails).
       # No config file and no ignore entry: nothing is silenced.
+      # The Python closure is already fully pinned by resolve-python-deps.sh, so --no-resolve turns off
+      # OSV's transitive re-resolution, which queries deps.dev and fails with exit 127 whenever deps.dev
+      # lags a freshly published PyPI release. Every pin is still matched against OSV.
       - name: Scan (fails on any known vulnerability)
         uses: google/osv-scanner-action/osv-scanner-action@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
         with:
           scan-args: |-
+            --no-resolve
             --lockfile=web/package-lock.json
             --lockfile=requirements.txt:build/osv/python-requirements.txt

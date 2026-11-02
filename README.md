@@ -108,7 +108,7 @@ CI (`.github/workflows/ci.yml`) runs the format/tidy gates, builds and tests on 
 The checks run on pull requests into `master`, on pushes to `master`, weekly (Monday) and on manual dispatch. Dependency review runs on pull requests only. Security checks are described in detail here; the CI sentence above covers build, format and coverage.
 
 - **CodeQL** (`.github/workflows/codeql.yml`): languages `actions`, `c-cpp`, `javascript-typescript` and `python`, with the `security-extended` suite. C++ is analysed from a traced manual build (Conan installs Eigen, `cmake --preset debug -DMF_BUILD_TESTS=OFF`, GCC 14) of the library `mflib` and the CLI `mf`; tests, bench, `python/bindings` and wasm are not compiled by the C++ leg. The other languages use build mode none. Results appear in the Security tab (Code scanning) and in the PR's CodeQL check.
-- **Dependency scan** (`.github/workflows/dependency-scan.yml`): OSV-Scanner checks `web/package-lock.json` and the Python dependency closure of `python/pyproject.toml` (runtime, all extras, build-system requires). `.github/scripts/resolve-python-deps.sh` resolves that closure with uv, universally from the `requires-python` floor, so every supported Python version is covered. Any known vulnerability fails the check.
+- **Dependency scan** (`.github/workflows/dependency-scan.yml`): OSV-Scanner checks `web/package-lock.json` and the Python dependency closure of `python/pyproject.toml` (runtime, all extras, build-system requires). `.github/scripts/resolve-python-deps.sh` resolves that closure with uv, universally from the `requires-python` floor, so every supported Python version is covered. The pinned closure is scanned as-is (`--no-resolve`): OSV's own deps.dev re-resolution is disabled because it lags PyPI. Any known vulnerability fails the check.
 - **Conan dependencies are not CVE-scanned** (Eigen, GoogleTest, Google Benchmark): OSV has no ConanCenter data, Dependabot has no Conan ecosystem, and `conan audit` (which needs a registered token) was declined. They are updated by hand in `conanfile.py`.
 - **Dependency review** (`.github/workflows/dependency-review.yml`): blocks a PR that adds a dependency with a known vulnerability of any severity in runtime, development or unknown scope. It needs the dependency graph enabled.
 - **Dependabot** (`.github/dependabot.yml`): weekly (Monday) version-update PRs for npm (`web/`), pip (`python/`) and GitHub Actions. Minor and patch updates are grouped per ecosystem (npm, pip and GitHub Actions), and version updates have a 7-day cooldown (security updates are not delayed).
@@ -130,10 +130,10 @@ The maintainer enables these by hand:
 ```bash
 actionlint                                                    # all .github/workflows/*.yml (+ shellcheck on run: blocks)
 bash .github/scripts/resolve-python-deps.sh build/osv/python-requirements.txt
-osv-scanner scan source --lockfile=web/package-lock.json --lockfile=requirements.txt:build/osv/python-requirements.txt
+osv-scanner scan source --no-resolve --lockfile=web/package-lock.json --lockfile=requirements.txt:build/osv/python-requirements.txt
 # without a local osv-scanner: the same image the action uses (tar instead of a bind mount)
 tar -cf - web/package-lock.json build/osv/python-requirements.txt | docker run -i --rm --entrypoint bash \
-  ghcr.io/google/osv-scanner-action:v2.7.0 -c 'mkdir /src && tar -xf - -C /src && cd /src && osv-scanner scan source \
+  ghcr.io/google/osv-scanner-action:v2.7.0 -c 'mkdir /src && tar -xf - -C /src && cd /src && osv-scanner scan source --no-resolve \
   --lockfile=web/package-lock.json --lockfile=requirements.txt:build/osv/python-requirements.txt'
 ```
 
