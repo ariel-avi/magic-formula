@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Resolve the Python dependency closure of python/pyproject.toml into a pinned requirements file
-# that OSV-Scanner can scan (OSV does not resolve version ranges for PyPI).
+# that OSV-Scanner scans as-is (--no-resolve): the closure is resolved here, not by OSV.
 #
 # Usage: bash .github/scripts/resolve-python-deps.sh <output-requirements.txt> [<pyproject.toml>]
 #   <pyproject.toml> defaults to <repo>/python/pyproject.toml (repo root = two directories above the script)

@@ -212,10 +212,10 @@ test-runner reproduces locally:
 ```bash
 actionlint                                                    # all .github/workflows/*.yml (+ shellcheck on run: blocks)
 bash .github/scripts/resolve-python-deps.sh build/osv/python-requirements.txt
-osv-scanner scan source --lockfile=web/package-lock.json --lockfile=requirements.txt:build/osv/python-requirements.txt
+osv-scanner scan source --no-resolve --lockfile=web/package-lock.json --lockfile=requirements.txt:build/osv/python-requirements.txt
 # without a local osv-scanner: the same image the action uses (tar instead of a bind mount)
 tar -cf - web/package-lock.json build/osv/python-requirements.txt | docker run -i --rm --entrypoint bash \
-  ghcr.io/google/osv-scanner-action:v2.7.0 -c 'mkdir /src && tar -xf - -C /src && cd /src && osv-scanner scan source \
+  ghcr.io/google/osv-scanner-action:v2.7.0 -c 'mkdir /src && tar -xf - -C /src && cd /src && osv-scanner scan source --no-resolve \
   --lockfile=web/package-lock.json --lockfile=requirements.txt:build/osv/python-requirements.txt'
 ```
 
